@@ -295,7 +295,7 @@ const upload = multer({
 });
 
 app.get("/s/:slug/missions", requireServerAccess({ upload: true }), (req, res) => {
-  res.send(views.missionsPage({ server: req.dcsServer }));
+  res.send(views.missionsPage({ admin: req.admin, server: req.dcsServer }));
 });
 
 app.post(
@@ -303,16 +303,16 @@ app.post(
   requireServerAccess({ upload: true }),
   (req, res, next) => {
     upload.single("mission")(req, res, (err) => {
-      if (err) return res.status(400).send(views.missionsPage({ server: req.dcsServer, error: err.message }));
+      if (err) return res.status(400).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: err.message }));
       next();
     });
   },
   async (req, res) => {
     if (!req.file) {
-      return res.status(400).send(views.missionsPage({ server: req.dcsServer, error: "No .miz file provided." }));
+      return res.status(400).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: "No .miz file provided." }));
     }
     if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
-      return res.status(500).send(views.missionsPage({ server: req.dcsServer, error: "Mission agent is not configured." }));
+      return res.status(500).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: "Mission agent is not configured." }));
     }
     try {
       const form = new FormData();
@@ -329,12 +329,12 @@ app.post(
       });
       if (!agentRes.ok) {
         const detail = await agentRes.text().catch(() => "");
-        return res.status(502).send(views.missionsPage({ server: req.dcsServer, error: `Mission agent rejected the upload: ${detail || agentRes.status}` }));
+        return res.status(502).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: `Mission agent rejected the upload: ${detail || agentRes.status}` }));
       }
     } catch (err) {
-      return res.status(502).send(views.missionsPage({ server: req.dcsServer, error: `Could not reach the mission agent: ${err.message}` }));
+      return res.status(502).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: `Could not reach the mission agent: ${err.message}` }));
     }
-    res.send(views.missionsPage({ server: req.dcsServer, notice: `Uploaded ${req.file.originalname}.` }));
+    res.send(views.missionsPage({ admin: req.admin, server: req.dcsServer, notice: `Uploaded ${req.file.originalname}.` }));
   }
 );
 

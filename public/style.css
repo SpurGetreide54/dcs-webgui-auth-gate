@@ -27,17 +27,24 @@
   --accent-red: #dc3545;
   --accent-red-hover: #c22636;
   --accent-cyan: #17a2b8;
+  --accent-blue: #0d79e5;
+  /* colors below match the real DCS webgui's own navbar/sidebar exactly,
+     not the generic dark palette above, so the handoff into it is seamless */
+  --navbar-bg: #1e2124;
+  --sidebar-bg: #1a1d20;
 }
 
 * { box-sizing: border-box; }
 
+html, body { height: 100%; }
 body {
   font-family: OpenSansRegular, "Helvetica Neue", Helvetica, Arial, sans-serif;
   background: var(--bg-shell);
   color: var(--text);
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 0 1rem 3rem;
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 h1, h2 {
@@ -47,23 +54,86 @@ h1, h2 {
 
 a { color: var(--accent-cyan); }
 
-.brand {
+/* ---- top navbar: same 50px height and #1e2124 background as the real app's .navbar ---- */
+.navbar {
+  height: 50px;
+  min-height: 50px;
+  background-color: var(--navbar-bg);
+  display: flex;
+  align-items: center;
+}
+.navbar-brand {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 1.25rem 0 0.75rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1.5rem;
+  padding: 0 12px;
 }
-.brand img { width: 36px; height: 36px; border-radius: 50%; }
-.brand span {
-  font-family: OpenSansBold, "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 1.1rem;
-  letter-spacing: 0.02em;
+.navbar-brand img { width: 32px; height: 32px; border-radius: 50%; }
+.navbar-brand .brand-name {
+  font-family: OpenSansRegular;
+  font-size: 1.1em;
+  line-height: 1.1;
+}
+.navbar-brand .brand-tagline {
+  display: block;
+  color: #c3c3c3;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+.navbar-right {
+  margin-left: auto;
+  padding: 0 1.2rem;
+  color: var(--text-muted);
+  font-size: 0.85em;
 }
 
-.nav { margin-bottom: 1.5rem; color: var(--text-muted); }
-.nav a { margin-right: 1rem; }
+/* ---- shell: left icon sidebar + main content, only present once signed in ---- */
+.shell { display: flex; flex: 1; min-height: 0; }
+
+.left-sidebar {
+  width: 60px;
+  min-width: 60px;
+  background-color: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.left-sidebar .menu-items { list-style: none; margin: 0; padding: 0; }
+.left-sidebar .menu-items li a {
+  display: flex;
+  justify-content: center;
+  padding: 13px 18px 13px 15px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.left-sidebar .menu-items li a:hover { opacity: 1; }
+.left-sidebar .menu-items li a.active {
+  opacity: 1;
+  border-left: 3px solid var(--accent-blue);
+  box-shadow: inset 8px 0 6px -6px var(--accent-blue);
+}
+.left-sidebar .menu-items li a img { width: 22px; height: 22px; object-fit: contain; }
+
+.content {
+  flex: 1;
+  padding: 1.5rem 2rem 3rem;
+  min-width: 0;
+  overflow-x: auto;
+}
+.content-header {
+  border-bottom: 1px solid #272b2f;
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+}
+.content-header h1 { margin: 0; color: #e9e9e9; font-size: 1.3em; }
+
+.login-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
 form {
   display: flex;

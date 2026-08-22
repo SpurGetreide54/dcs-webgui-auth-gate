@@ -8,7 +8,45 @@ function escapeHtml(str) {
   }[c]));
 }
 
-function layout(title, body) {
+// Mirrors the real DCS webgui's own left-sidebar: icon-only nav, active item
+// gets a blue left border, sign-out pinned to the bottom via a second <ul>.
+function sidebarNav(admin, active) {
+  const navItem = (key, href, icon, label) =>
+    `<li><a href="${href}" class="${key === active ? "active" : ""}" title="${escapeHtml(label)}">
+      <img src="/assets/icons/${icon}" alt="${escapeHtml(label)}">
+    </a></li>`;
+
+  const items = [navItem("dashboard", "/", "icon-dashboard.png", "Dashboard")];
+  if (admin.can_manage_accounts) {
+    items.push(navItem("accounts", "/admin/accounts", "icon-user.png", "Manage accounts"));
+    items.push(navItem("servers", "/admin/servers", "icon-server.png", "Manage servers"));
+  }
+
+  return `<nav class="left-sidebar">
+    <ul class="menu-items">${items.join("")}</ul>
+    <ul class="menu-items">${navItem("logout", "/logout", "icon-close.png", "Sign out")}</ul>
+  </nav>`;
+}
+
+function layout(title, body, { admin, active, pageTitle } = {}) {
+  const navbar = `<div class="navbar">
+    <div class="navbar-brand">
+      <img src="/assets/logo.png" alt="">
+      <span class="brand-name">DCS Deutschland<span class="brand-tagline">Control Panel</span></span>
+    </div>
+    ${admin ? `<div class="navbar-right">Signed in as ${escapeHtml(admin.username)}</div>` : ""}
+  </div>`;
+
+  const main = admin
+    ? `<div class="shell">
+        ${sidebarNav(admin, active)}
+        <main class="content">
+          ${pageTitle ? `<div class="content-header"><h1>${escapeHtml(pageTitle)}</h1></div>` : ""}
+          ${body}
+        </main>
+      </div>`
+    : `<div class="login-shell"><div>${body}</div></div>`;
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -19,8 +57,8 @@ function layout(title, body) {
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
-<div class="brand"><img src="/assets/logo.png" alt=""><span>DCS Deutschland</span></div>
-${body}
+${navbar}
+${main}
 </body>
 </html>`;
 }
@@ -53,11 +91,6 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 }
 
 function dashboardPage({ admin, servers }) {
-  const nav = `<div class="nav">
-    <span>Signed in as ${escapeHtml(admin.username)}</span> —
-    ${admin.can_manage_accounts ? `<a href="/admin/accounts">Manage accounts</a> <a href="/admin/servers">Manage servers</a>` : ""}
-    <a href="/logout">Sign out</a>
-  </div>`;
   const list = servers.length
     ? `<ul class="server-list">${servers
         .map(
@@ -69,11 +102,10 @@ function dashboardPage({ admin, servers }) {
         )
         .join("")}</ul>`
     : `<p>You don't have access to any servers yet. Ask a site admin to grant access.</p>`;
-  return layout("Dashboard — DCS Control Panel", `${nav}<h1>Your servers</h1>${list}`);
+  return layout("Dashboard — DCS Control Panel", list, { admin, active: "dashboard", pageTitle: "Your servers" });
 }
 
 function accountsPage({ admin, accounts, servers, error, notice }) {
-  const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/admin/servers">Manage servers</a> <a href="/logout">Sign out</a></div>`;
   // A <form> can't legally wrap a <tr>/<td> — browsers silently relocate or
   // drop it during HTML parsing, so checkboxes "inside" it never actually
   // belong to it and don't get submitted. Fix: one empty <form id="...">
@@ -111,9 +143,7 @@ function accountsPage({ admin, accounts, servers, error, notice }) {
 
   return layout(
     "Manage accounts — DCS Control Panel",
-    `${nav}
-<h1>Admin accounts</h1>
-${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+    `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 ${forms}
 <table>
@@ -135,12 +165,12 @@ ${forms}
     )
     .join("")}
   <button type="submit">Create account</button>
-</form>`
+</form>`,
+    { admin, active: "accounts", pageTitle: "Admin accounts" }
   );
 }
 
 function serversPage({ admin, servers, error, notice }) {
-  const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/admin/accounts">Manage accounts</a> <a href="/logout">Sign out</a></div>`;
   // Same fix as accountsPage: a <form> can't legally wrap a <tr>, so each
   // row gets an out-of-band empty <form> plus `form="..."` on its inputs.
   const forms = servers.map((s) => `<form id="srv-${s.id}" method="post" action="/admin/servers/${s.id}"></form>`).join("");
@@ -162,9 +192,7 @@ function serversPage({ admin, servers, error, notice }) {
 
   return layout(
     "Manage servers — DCS Control Panel",
-    `${nav}
-<h1>DCS servers</h1>
-${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+    `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 ${forms}
 <table>
@@ -179,22 +207,21 @@ ${forms}
   <label>Upstream URL <input type="text" name="upstream_url" placeholder="http://10.0.1.10:8088" required></label>
   <label>Mission folder key <input type="text" name="mission_folder_key" pattern="[a-z0-9-]+" required></label>
   <button type="submit">Create server</button>
-</form>`
+</form>`,
+    { admin, active: "servers", pageTitle: "DCS servers" }
   );
 }
 
-function missionsPage({ server, error, notice }) {
-  const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/logout">Sign out</a></div>`;
+function missionsPage({ admin, server, error, notice }) {
   return layout(
     `Upload mission — ${server.name}`,
-    `${nav}
-<h1>Upload mission — ${escapeHtml(server.name)}</h1>
-${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+    `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 <form method="post" action="/s/${encodeURIComponent(server.slug)}/missions/upload" enctype="multipart/form-data">
   <label>Mission file (.miz) <input type="file" name="mission" accept=".miz" required></label>
   <button type="submit">Upload</button>
-</form>`
+</form>`,
+    { admin, active: "dashboard", pageTitle: `Upload mission — ${server.name}` }
   );
 }
 
