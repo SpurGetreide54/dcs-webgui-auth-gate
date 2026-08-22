@@ -15,22 +15,11 @@ function layout(title, body) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
-  h1 { font-size: 1.4rem; }
-  form { display: flex; flex-direction: column; gap: 0.75rem; max-width: 320px; }
-  label { font-size: 0.9rem; }
-  input[type=text], input[type=password], input[type=file] { padding: 0.5rem; font-size: 1rem; }
-  button { padding: 0.6rem; font-size: 1rem; cursor: pointer; }
-  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; }
-  .error { color: #b00020; }
-  .nav a { margin-right: 1rem; }
-  ul.server-list { list-style: none; padding: 0; }
-  ul.server-list li { padding: 0.5rem 0; border-bottom: 1px solid #eee; }
-</style>
+<link rel="icon" href="/assets/logo.png">
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
+<div class="brand"><img src="/assets/logo.png" alt=""><span>DCS Deutschland</span></div>
 ${body}
 </body>
 </html>`;

@@ -19,6 +19,7 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", true); // sits behind nginx
 app.use(cookieParser());
+app.use("/assets", express.static(path.join(__dirname, "..", "public")));
 
 function adminCount() {
   return db.prepare("SELECT COUNT(*) AS n FROM admins").get().n;
