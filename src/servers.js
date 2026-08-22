@@ -11,7 +11,13 @@ function getAllServers() {
 function getAccessibleServers(adminId) {
   return db
     .prepare(
-      `SELECT servers.*, admin_server_access.can_upload_missions
+      // servers.* alone would give a bare `id` (the server's own id) with
+      // no way to tell it apart from an admin_server_access row's id, so
+      // callers checking "does this admin have access to server X" via
+      // `.server_id` always got `undefined` and never matched — that's
+      // what made the accounts page render every checkbox as unchecked
+      // regardless of the real grant, no matter what was just saved.
+      `SELECT servers.*, admin_server_access.server_id, admin_server_access.can_upload_missions
        FROM servers
        JOIN admin_server_access ON admin_server_access.server_id = servers.id
        WHERE admin_server_access.admin_id = ?

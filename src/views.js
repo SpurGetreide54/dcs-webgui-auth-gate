@@ -85,29 +85,36 @@ function dashboardPage({ admin, servers }) {
 
 function accountsPage({ admin, accounts, servers, error, notice }) {
   const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/admin/servers">Manage servers</a> <a href="/logout">Sign out</a></div>`;
+  // A <form> can't legally wrap a <tr>/<td> — browsers silently relocate or
+  // drop it during HTML parsing, so checkboxes "inside" it never actually
+  // belong to it and don't get submitted. Fix: one empty <form id="...">
+  // per row, placed outside the table, with every input/button in that row
+  // linked to it via the `form="..."` attribute instead of nesting.
+  const forms = accounts
+    .map((a) => `<form id="acct-${a.id}" method="post" action="/admin/accounts/${a.id}"></form>`)
+    .join("");
   const rows = accounts
     .map((a) => {
+      const formId = `acct-${a.id}`;
       const cells = servers
         .map((s) => {
           const access = a.access.find((x) => x.server_id === s.id);
           const checked = access ? "checked" : "";
           const uploadChecked = access && access.can_upload_missions ? "checked" : "";
           return `<td>
-          <label><input type="checkbox" name="access_${s.id}" ${checked}> access</label><br>
-          <label><input type="checkbox" name="upload_${s.id}" ${uploadChecked}> upload</label>
+          <label><input type="checkbox" form="${formId}" name="access_${s.id}" ${checked}> access</label><br>
+          <label><input type="checkbox" form="${formId}" name="upload_${s.id}" ${uploadChecked}> upload</label>
         </td>`;
         })
         .join("");
       return `<tr>
-        <form method="post" action="/admin/accounts/${a.id}">
         <td>${escapeHtml(a.username)}</td>
-        <td><input type="checkbox" name="can_manage_accounts" ${a.can_manage_accounts ? "checked" : ""}></td>
+        <td><input type="checkbox" form="${formId}" name="can_manage_accounts" ${a.can_manage_accounts ? "checked" : ""}></td>
         ${cells}
         <td>
-          <button type="submit">Save</button>
-          ${accounts.length > 1 ? `<button formaction="/admin/accounts/${a.id}/delete">Delete</button>` : ""}
+          <button type="submit" form="${formId}">Save</button>
+          ${accounts.length > 1 ? `<button form="${formId}" formaction="/admin/accounts/${a.id}/delete">Delete</button>` : ""}
         </td>
-        </form>
       </tr>`;
     })
     .join("");
@@ -119,6 +126,7 @@ function accountsPage({ admin, accounts, servers, error, notice }) {
 <h1>Admin accounts</h1>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+${forms}
 <table>
   <thead><tr><th>Username</th><th>Site admin</th>${header}<th></th></tr></thead>
   <tbody>${rows}</tbody>
@@ -144,21 +152,23 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 
 function serversPage({ admin, servers, error, notice }) {
   const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/admin/accounts">Manage accounts</a> <a href="/logout">Sign out</a></div>`;
+  // Same fix as accountsPage: a <form> can't legally wrap a <tr>, so each
+  // row gets an out-of-band empty <form> plus `form="..."` on its inputs.
+  const forms = servers.map((s) => `<form id="srv-${s.id}" method="post" action="/admin/servers/${s.id}"></form>`).join("");
   const rows = servers
-    .map(
-      (s) => `<tr>
-        <form method="post" action="/admin/servers/${s.id}">
+    .map((s) => {
+      const formId = `srv-${s.id}`;
+      return `<tr>
         <td>${escapeHtml(s.slug)}</td>
-        <td><input type="text" name="name" value="${escapeHtml(s.name)}" required></td>
-        <td><input type="text" name="upstream_url" value="${escapeHtml(s.upstream_url)}" required></td>
-        <td><input type="text" name="mission_folder_key" value="${escapeHtml(s.mission_folder_key)}" required></td>
+        <td><input type="text" form="${formId}" name="name" value="${escapeHtml(s.name)}" required></td>
+        <td><input type="text" form="${formId}" name="upstream_url" value="${escapeHtml(s.upstream_url)}" required></td>
+        <td><input type="text" form="${formId}" name="mission_folder_key" value="${escapeHtml(s.mission_folder_key)}" required></td>
         <td>
-          <button type="submit">Save</button>
-          <button formaction="/admin/servers/${s.id}/delete">Delete</button>
+          <button type="submit" form="${formId}">Save</button>
+          <button form="${formId}" formaction="/admin/servers/${s.id}/delete">Delete</button>
         </td>
-        </form>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join("");
 
   return layout(
@@ -167,6 +177,7 @@ function serversPage({ admin, servers, error, notice }) {
 <h1>DCS servers</h1>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+${forms}
 <table>
   <thead><tr><th>Slug</th><th>Name</th><th>Upstream URL</th><th>Mission folder key</th><th></th></tr></thead>
   <tbody>${rows}</tbody>

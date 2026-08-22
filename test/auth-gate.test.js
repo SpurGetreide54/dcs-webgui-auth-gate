@@ -13,6 +13,21 @@ function startDummyHttpServer(handler) {
   });
 }
 
+// A <form> can't legally wrap a <tr>/<td> — browsers silently relocate or
+// drop it during HTML parsing, so inputs "inside" it are never actually
+// part of it and don't get submitted (a real bug this caught: per-server
+// checkboxes on the accounts page silently reset on every save). Functional
+// tests that POST hand-built bodies via fetch() can't catch this at all,
+// since they skip browser HTML parsing entirely — this has to check the
+// actual served markup.
+function assertNoBrokenTableForms(html, context) {
+  assert.doesNotMatch(html, /<tr>\s*<form/i, `${context}: a <form> must not be nested directly inside a <tr>`);
+  const formIds = new Set([...html.matchAll(/<form[^>]*\bid="([^"]+)"/g)].map((m) => m[1]));
+  for (const match of html.matchAll(/\bform="([^"]+)"/g)) {
+    assert.ok(formIds.has(match[1]), `${context}: an input references form="${match[1]}" but no <form id="${match[1]}"> exists`);
+  }
+}
+
 function extractCookie(res) {
   const setCookie = res.headers.get("set-cookie");
   if (!setCookie) return null;
@@ -120,6 +135,30 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const serverAdminRow = db.prepare("SELECT * FROM admins WHERE username = ?").get("serveradmin");
     assert.equal(serverAdminRow.can_manage_accounts, 0, "new account must not default to site-admin");
 
+    // --- the accounts page must render checkbox state that matches what was
+    // actually granted, not just accept the grant server-side. Regression
+    // check for a bug where getAccessibleServers()'s rows exposed the
+    // server's own `id` but not `server_id`, so the page's `x.server_id`
+    // lookup always missed and every checkbox rendered unchecked no matter
+    // what had just been saved. ---
+    const accountsHtmlAfterCreate = await (
+      await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })
+    ).text();
+    const serveradminRowHtml = accountsHtmlAfterCreate.slice(
+      accountsHtmlAfterCreate.indexOf(">serveradmin<"),
+      accountsHtmlAfterCreate.indexOf("</tr>", accountsHtmlAfterCreate.indexOf(">serveradmin<"))
+    );
+    assert.match(
+      serveradminRowHtml,
+      new RegExp(`name="access_${trainingServerId}"[^>]*checked`),
+      "granted access must render as a checked checkbox, not reset on page load"
+    );
+    assert.doesNotMatch(
+      serveradminRowHtml,
+      new RegExp(`name="upload_${trainingServerId}"[^>]*checked`),
+      "upload was never granted, so that checkbox must render unchecked"
+    );
+
     const loginRes = await fetch(`${base}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -182,6 +221,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(badUploadRes.status, 400);
     assert.equal(dummyAgentReceived, null, "rejected file must never be forwarded to the mission agent");
+
+    // --- served markup for both admin tables must have valid, submittable forms ---
+    const accountsHtml = await (await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })).text();
+    assertNoBrokenTableForms(accountsHtml, "/admin/accounts");
+    const serversHtml = await (await fetch(`${base}/admin/servers`, { headers: { Cookie: siteAdminCookie } })).text();
+    assertNoBrokenTableForms(serversHtml, "/admin/servers");
 
     // --- server management: restricted account can't manage servers ---
     const forbiddenServers = await fetch(`${base}/admin/servers`, { headers: { Cookie: serverAdminCookie } });
