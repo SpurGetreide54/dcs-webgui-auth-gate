@@ -27,7 +27,7 @@ function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
-let app, db;
+let app, db, serversDb;
 let dummyUpstream, dummyUpstreamPort;
 let dummyAgent, dummyAgentPort;
 let dummyAgentReceived;
@@ -63,6 +63,7 @@ test.before(async () => {
 
   app = require("../src/server");
   db = require("../src/db");
+  serversDb = require("../src/servers");
 });
 
 test.after(async () => {
@@ -181,6 +182,67 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(badUploadRes.status, 400);
     assert.equal(dummyAgentReceived, null, "rejected file must never be forwarded to the mission agent");
+
+    // --- server management: restricted account can't manage servers ---
+    const forbiddenServers = await fetch(`${base}/admin/servers`, { headers: { Cookie: serverAdminCookie } });
+    assert.equal(forbiddenServers.status, 403);
+
+    // --- site admin creates a new server ---
+    const createServerRes = await fetch(`${base}/admin/servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `slug=community2&name=${encodeURIComponent("DCS Deutschland - Community 2")}&upstream_url=${encodeURIComponent(`http://127.0.0.1:${dummyUpstreamPort}`)}&mission_folder_key=community2`,
+    });
+    assert.equal(createServerRes.status, 200);
+    const newServerRow = db.prepare("SELECT * FROM servers WHERE slug = ?").get("community2");
+    assert.ok(newServerRow, "new server must exist in the DB");
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM admin_server_access WHERE server_id = ?").get(newServerRow.id).n,
+      0,
+      "creating a server must not implicitly grant anyone access to it"
+    );
+
+    // rejects a bad slug instead of silently accepting it
+    const badSlugRes = await fetch(`${base}/admin/servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `slug=${encodeURIComponent("not a slug!")}&name=X&upstream_url=http://127.0.0.1:1&mission_folder_key=x`,
+    });
+    assert.equal(badSlugRes.status, 400);
+
+    // rejects a duplicate slug
+    const dupSlugRes = await fetch(`${base}/admin/servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `slug=community2&name=X&upstream_url=http://127.0.0.1:1&mission_folder_key=x`,
+    });
+    assert.equal(dupSlugRes.status, 400);
+
+    // edit the server
+    const editServerRes = await fetch(`${base}/admin/servers/${newServerRow.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `name=${encodeURIComponent("Renamed Community 2")}&upstream_url=${encodeURIComponent(`http://127.0.0.1:${dummyUpstreamPort}`)}&mission_folder_key=community2`,
+      redirect: "manual",
+    });
+    assert.equal(editServerRes.status, 302);
+    assert.equal(db.prepare("SELECT name FROM servers WHERE id = ?").get(newServerRow.id).name, "Renamed Community 2");
+
+    // grant the restricted admin access, then delete the server, and confirm the grant cascades away
+    serversDb.setAccess(serverAdminRow.id, newServerRow.id, { canUploadMissions: false });
+    assert.equal(serversDb.hasServerAccess(serverAdminRow.id, newServerRow.id), true);
+    const deleteServerRes = await fetch(`${base}/admin/servers/${newServerRow.id}/delete`, {
+      method: "POST",
+      headers: { Cookie: siteAdminCookie },
+      redirect: "manual",
+    });
+    assert.equal(deleteServerRes.status, 302);
+    assert.equal(db.prepare("SELECT * FROM servers WHERE id = ?").get(newServerRow.id), undefined);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM admin_server_access WHERE server_id = ?").get(newServerRow.id).n,
+      0,
+      "deleting a server must cascade-delete its access grants"
+    );
 
     // --- last-site-admin delete guard ---
     const soleSiteAdminId = db.prepare("SELECT id FROM admins WHERE username = 'siteadmin'").get().id;

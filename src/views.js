@@ -66,7 +66,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 function dashboardPage({ admin, servers }) {
   const nav = `<div class="nav">
     <span>Signed in as ${escapeHtml(admin.username)}</span> —
-    ${admin.can_manage_accounts ? `<a href="/admin/accounts">Manage accounts</a>` : ""}
+    ${admin.can_manage_accounts ? `<a href="/admin/accounts">Manage accounts</a> <a href="/admin/servers">Manage servers</a>` : ""}
     <a href="/logout">Sign out</a>
   </div>`;
   const list = servers.length
@@ -84,7 +84,7 @@ function dashboardPage({ admin, servers }) {
 }
 
 function accountsPage({ admin, accounts, servers, error, notice }) {
-  const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/logout">Sign out</a></div>`;
+  const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/admin/servers">Manage servers</a> <a href="/logout">Sign out</a></div>`;
   const rows = accounts
     .map((a) => {
       const cells = servers
@@ -142,6 +142,47 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
   );
 }
 
+function serversPage({ admin, servers, error, notice }) {
+  const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/admin/accounts">Manage accounts</a> <a href="/logout">Sign out</a></div>`;
+  const rows = servers
+    .map(
+      (s) => `<tr>
+        <form method="post" action="/admin/servers/${s.id}">
+        <td>${escapeHtml(s.slug)}</td>
+        <td><input type="text" name="name" value="${escapeHtml(s.name)}" required></td>
+        <td><input type="text" name="upstream_url" value="${escapeHtml(s.upstream_url)}" required></td>
+        <td><input type="text" name="mission_folder_key" value="${escapeHtml(s.mission_folder_key)}" required></td>
+        <td>
+          <button type="submit">Save</button>
+          <button formaction="/admin/servers/${s.id}/delete">Delete</button>
+        </td>
+        </form>
+      </tr>`
+    )
+    .join("");
+
+  return layout(
+    "Manage servers — DCS Control Panel",
+    `${nav}
+<h1>DCS servers</h1>
+${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+<table>
+  <thead><tr><th>Slug</th><th>Name</th><th>Upstream URL</th><th>Mission folder key</th><th></th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<p>Nobody has access to a server until you grant it from <a href="/admin/accounts">Manage accounts</a>. The mission folder key must match a <code>MISSION_FOLDER_&lt;KEY&gt;</code> env var configured on the physical host's mission-agent, or uploads to that server will fail.</p>
+<h2>Add server</h2>
+<form method="post" action="/admin/servers">
+  <label>Slug (used in the URL, e.g. /s/training/) <input type="text" name="slug" pattern="[a-z0-9-]+" required></label>
+  <label>Name <input type="text" name="name" required></label>
+  <label>Upstream URL <input type="text" name="upstream_url" placeholder="http://10.0.1.10:8088" required></label>
+  <label>Mission folder key <input type="text" name="mission_folder_key" pattern="[a-z0-9-]+" required></label>
+  <button type="submit">Create server</button>
+</form>`
+  );
+}
+
 function missionsPage({ server, error, notice }) {
   const nav = `<div class="nav"><a href="/">Dashboard</a> <a href="/logout">Sign out</a></div>`;
   return layout(
@@ -157,4 +198,4 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
   );
 }
 
-module.exports = { escapeHtml, loginPage, setupPage, dashboardPage, accountsPage, missionsPage };
+module.exports = { escapeHtml, loginPage, setupPage, dashboardPage, accountsPage, serversPage, missionsPage };

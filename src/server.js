@@ -181,6 +181,95 @@ accountsRouter.post("/:id/delete", (req, res) => {
 
 app.use("/admin/accounts", accountsRouter);
 
+// ---- server management (site admins only) ----
+
+const SLUG_RE = /^[a-z0-9-]+$/;
+const FOLDER_KEY_RE = /^[a-z0-9-]+$/;
+
+const serversRouter = express.Router();
+serversRouter.use(auth.requireAccountManager);
+
+function loadServersPageData(req, { error, notice } = {}) {
+  return views.serversPage({ admin: req.admin, servers: serversDb.getAllServers(), error, notice });
+}
+
+serversRouter.get("/", (req, res) => {
+  res.send(loadServersPageData(req));
+});
+
+serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
+  const { slug, name, upstream_url, mission_folder_key } = req.body;
+  if (!slug || !name || !upstream_url || !mission_folder_key) {
+    return res.status(400).send(loadServersPageData(req, { error: "All fields are required." }));
+  }
+  if (!SLUG_RE.test(slug)) {
+    return res.status(400).send(loadServersPageData(req, { error: "Slug must be lowercase letters, numbers, and hyphens only (it becomes part of the URL: /s/<slug>/)." }));
+  }
+  if (!FOLDER_KEY_RE.test(mission_folder_key)) {
+    return res.status(400).send(loadServersPageData(req, { error: "Mission folder key must be lowercase letters, numbers, and hyphens only." }));
+  }
+  let parsedUpstream;
+  try {
+    parsedUpstream = new URL(upstream_url);
+  } catch {
+    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL is not a valid URL." }));
+  }
+  if (!["http:", "https:"].includes(parsedUpstream.protocol)) {
+    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL must be http:// or https://." }));
+  }
+
+  try {
+    db.prepare(
+      "INSERT INTO servers (slug, name, upstream_url, mission_folder_key) VALUES (?, ?, ?, ?)"
+    ).run(slug, name, upstream_url, mission_folder_key);
+  } catch (err) {
+    return res.status(400).send(loadServersPageData(req, { error: "That slug is already in use." }));
+  }
+  res.send(
+    loadServersPageData(req, {
+      notice: `Created "${name}". No admin has access to it yet — grant access from Manage accounts. The mission-agent on the physical host must also have a matching MISSION_FOLDER_${mission_folder_key.toUpperCase()} configured before uploads to it will work.`,
+    })
+  );
+});
+
+serversRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) => {
+  const targetId = Number(req.params.id);
+  const { name, upstream_url, mission_folder_key } = req.body;
+  if (!name || !upstream_url || !mission_folder_key) {
+    return res.status(400).send(loadServersPageData(req, { error: "All fields are required." }));
+  }
+  if (!FOLDER_KEY_RE.test(mission_folder_key)) {
+    return res.status(400).send(loadServersPageData(req, { error: "Mission folder key must be lowercase letters, numbers, and hyphens only." }));
+  }
+  let parsedUpstream;
+  try {
+    parsedUpstream = new URL(upstream_url);
+  } catch {
+    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL is not a valid URL." }));
+  }
+  if (!["http:", "https:"].includes(parsedUpstream.protocol)) {
+    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL must be http:// or https://." }));
+  }
+
+  db.prepare("UPDATE servers SET name = ?, upstream_url = ?, mission_folder_key = ? WHERE id = ?").run(
+    name,
+    upstream_url,
+    mission_folder_key,
+    targetId
+  );
+  res.redirect("/admin/servers");
+});
+
+serversRouter.post("/:id/delete", (req, res) => {
+  const targetId = Number(req.params.id);
+  // admin_server_access rows for this server cascade-delete automatically
+  // (ON DELETE CASCADE in the schema); no separate cleanup needed here.
+  db.prepare("DELETE FROM servers WHERE id = ?").run(targetId);
+  res.redirect("/admin/servers");
+});
+
+app.use("/admin/servers", serversRouter);
+
 // ---- per-server: access check, mission upload, then generic proxy ----
 
 function requireServerAccess({ upload }) {
