@@ -1,0 +1,21 @@
+{
+  "name": "dcs-webgui-auth-gate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Per-admin, per-server login gate and reverse proxy in front of the DCS webgui control panel, plus a mission-upload agent for the game server host.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "agent": "node src/agent.js",
+    "seed-servers": "node scripts/seed-servers.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.21.0",
+    "http-proxy-middleware": "^3.0.0",
+    "multer": "^2.2.0"
+  }
+}
