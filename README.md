@@ -33,16 +33,27 @@ Full infrastructure/design context is in the plan this was built from:
 
 ## Local setup
 
+Anything that doesn't get committed (env file, SQLite data, dev scripts)
+lives under `local-only/`, gitignored as a single unit.
+
 ```
 npm install
-cp .env.example .env    # edit values
-npm run seed-servers     # writes the three DCS Deutschland servers into SQLite
-npm start                 # http://localhost:3000, redirects to /setup on first run
+mkdir -p local-only
+cp .env.example local-only/.env    # edit values
+npm run seed-servers                 # writes the three DCS Deutschland servers into SQLite
 ```
 
-In a separate terminal, for local testing of the mission-agent piece:
+Easiest path: `local-only/scripts/devenv.sh {start|stop|status}` runs both
+`src/server.js` and `src/agent.js` together, with local-dev defaults for
+everything (scratch mission folders, a fixed test token, `COOKIE_SECURE=false`)
+so it starts clean with no `local-only/.env` at all — that file only
+overrides what you actually want to change. Registered with the `devenv`
+skill.
+
+To run either piece by hand instead:
 
 ```
+npm start                                                                  # auth-gate, :3000
 AGENT_PORT=4000 MISSION_AGENT_TOKEN=... MISSION_FOLDER_TRAINING=/tmp/training ... npm run agent
 ```
 

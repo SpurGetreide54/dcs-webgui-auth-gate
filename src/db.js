@@ -2,7 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const Database = require("better-sqlite3");
 
-const SQLITE_PATH = process.env.SQLITE_PATH || path.join(__dirname, "..", "data", "auth-gate.sqlite");
+const SQLITE_PATH = process.env.SQLITE_PATH || path.join(__dirname, "..", "local-only", "data", "auth-gate.sqlite");
 
 fs.mkdirSync(path.dirname(SQLITE_PATH), { recursive: true });
 
