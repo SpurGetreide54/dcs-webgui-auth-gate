@@ -24,15 +24,15 @@ function rateLimitKey(req, username) {
   return `${req.ip}:${username.toLowerCase()}`;
 }
 
-// All expiry/window arithmetic happens inside SQLite via datetime('now', ...)
-// rather than JS Date/toISOString(): comparing a JS ISO string ("...T...Z")
-// against SQLite's own datetime('now') format ("YYYY-MM-DD HH:MM:SS") is a
-// plain string comparison, and the two formats sort inconsistently at the
-// same instant — it happened to look fine for 12h session expiry (the date
-// part alone usually differs) but silently broke the 15-minute rate-limit
-// window, where same-day comparisons actually depend on the mismatched
-// 'T'/space byte. Keeping every timestamp in SQLite's own format sidesteps
-// the mismatch entirely.
+// All expiry/window arithmetic happens inside SQLite via
+// datetime('now', ...), not JS Date/toISOString(). Comparing a JS ISO
+// string ("...T...Z") against SQLite's own datetime('now') format
+// ("YYYY-MM-DD HH:MM:SS") is a plain string comparison, and the two
+// formats sort inconsistently at the same instant. This looks fine for
+// 12h session expiry, since the date part alone usually differs, but
+// silently breaks the 15-minute rate-limit window, where same-day
+// comparisons depend on the mismatched 'T'/space byte. Keeping every
+// timestamp in SQLite's own format sidesteps the mismatch entirely.
 
 function isRateLimited(req, username) {
   const key = rateLimitKey(req, username);
@@ -49,7 +49,7 @@ function recordLoginAttempt(req, username) {
   db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(rateLimitKey(req, username));
 }
 
-// Attempts accumulate forever otherwise; called opportunistically on login.
+// Attempts accumulate forever otherwise. Called opportunistically on login.
 function pruneOldLoginAttempts() {
   db.prepare(
     `DELETE FROM login_attempts WHERE attempted_at <= datetime('now', '-' || ? || ' seconds')`
@@ -76,7 +76,7 @@ function getSessionAdmin(token) {
     .get(hashToken(token));
   if (!row) return null;
 
-  // Sliding expiry: touch the session on every authenticated request.
+  // Sliding expiry. Touch the session on every authenticated request.
   db.prepare(
     `UPDATE sessions SET expires_at = datetime('now', '+' || ? || ' seconds') WHERE token_hash = ?`
   ).run(SESSION_TTL_SECONDS, hashToken(token));
@@ -93,11 +93,12 @@ function requireAuth(req, res, next) {
   const token = req.cookies[SESSION_COOKIE];
   const admin = getSessionAdmin(token);
   if (!admin) {
-    // Sec-Fetch-Dest is set by the browser itself (app.js can't override it),
-    // so it reliably tells apart a real page load from the SPA's own fetch()
-    // calls to the control-port API — both hit /s/<slug>/... paths.
-    // Missing header (curl, very old browsers) defaults to "document": a
-    // human hitting the URL directly should see the login page, not raw JSON.
+    // Sec-Fetch-Dest is set by the browser itself -- app.js can't override
+    // it -- so it reliably tells apart a real page load from the SPA's own
+    // fetch() calls to the control-port API. Both hit /s/<slug>/... paths.
+    // A missing header (curl, very old browsers) defaults to "document": a
+    // human hitting the URL directly should see the login page, not raw
+    // JSON.
     const isPageLoad = (req.get("sec-fetch-dest") || "document") === "document";
     if (!isPageLoad) {
       return res.status(401).json({ error: "not authenticated" });

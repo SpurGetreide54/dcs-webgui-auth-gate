@@ -13,13 +13,13 @@ function startDummyHttpServer(handler) {
   });
 }
 
-// A <form> can't legally wrap a <tr>/<td> — browsers silently relocate or
+// A <form> can't legally wrap a <tr>/<td>. Browsers silently relocate or
 // drop it during HTML parsing, so inputs "inside" it are never actually
-// part of it and don't get submitted (a real bug this caught: per-server
-// checkboxes on the accounts page silently reset on every save). Functional
-// tests that POST hand-built bodies via fetch() can't catch this at all,
-// since they skip browser HTML parsing entirely — this has to check the
-// actual served markup.
+// part of it and don't get submitted. This test caught a real bug from
+// exactly that: per-server checkboxes on the accounts page silently reset
+// on every save. Functional tests that POST hand-built bodies via fetch()
+// can't catch this at all, since they skip browser HTML parsing entirely.
+// This has to check the actual served markup.
 function assertNoBrokenTableForms(html, context) {
   assert.doesNotMatch(html, /<tr>\s*<form/i, `${context}: a <form> must not be nested directly inside a <tr>`);
   const formIds = new Set([...html.matchAll(/<form[^>]*\bid="([^"]+)"/g)].map((m) => m[1]));
@@ -43,19 +43,12 @@ function cleanupSqlite(sqlitePath) {
 }
 
 let app, db, serversDb;
-let dummyUpstream, dummyUpstreamPort;
 let dummyAgent, dummyAgentPort;
 let dummyAgentReceived;
 let sqlitePath;
 const AGENT_TOKEN = "test-agent-token";
 
 test.before(async () => {
-  dummyUpstream = await startDummyHttpServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ path: req.url, method: req.method }));
-  });
-  dummyUpstreamPort = dummyUpstream.address().port;
-
   dummyAgent = await startDummyHttpServer((req, res) => {
     const chunks = [];
     req.on("data", (c) => chunks.push(c));
@@ -82,7 +75,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-  await new Promise((resolve) => dummyUpstream.close(resolve));
   await new Promise((resolve) => dummyAgent.close(resolve));
   db.close();
   cleanupSqlite(sqlitePath);
@@ -94,11 +86,11 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
   const base = `http://127.0.0.1:${server.address().port}`;
 
   db.prepare(
-    "INSERT INTO servers (slug, name, upstream_url, mission_folder_key) VALUES (?, ?, ?, ?)"
-  ).run("training", "DCS Deutschland - Training", `http://127.0.0.1:${dummyUpstreamPort}`, "training");
+    "INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)"
+  ).run("training", "Example Server - Training", "training");
   db.prepare(
-    "INSERT INTO servers (slug, name, upstream_url, mission_folder_key) VALUES (?, ?, ?, ?)"
-  ).run("community1", "DCS Deutschland - Community 1", `http://127.0.0.1:${dummyUpstreamPort}`, "community1");
+    "INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)"
+  ).run("community1", "Example Server - Community 1", "community1");
 
   try {
     // --- /setup creates the first admin with full access ---
@@ -112,15 +104,15 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const siteAdminCookie = extractCookie(setupRes);
     assert.ok(siteAdminCookie, "setup should set a session cookie");
 
-    // /setup is a one-time door: must 404 now that an admin exists
+    // /setup is a one-time door. Must 404 now that an admin exists.
     const setupAgainRes = await fetch(`${base}/setup`);
     assert.equal(setupAgainRes.status, 404, "/setup must 404 once an admin account exists");
 
     // --- dashboard shows the site admin's (full) access ---
     const dashRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
     const dashHtml = await dashRes.text();
-    assert.match(dashHtml, /DCS Deutschland - Training/);
-    assert.match(dashHtml, /DCS Deutschland - Community 1/);
+    assert.match(dashHtml, /Example Server - Training/);
+    assert.match(dashHtml, /Example Server - Community 1/);
 
     // --- create a second admin, granted access to Training only, no upload, no account mgmt ---
     const trainingServerId = db.prepare("SELECT id FROM servers WHERE slug = ?").get("training").id;
@@ -137,10 +129,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     // --- the accounts page must render checkbox state that matches what was
     // actually granted, not just accept the grant server-side. Regression
-    // check for a bug where getAccessibleServers()'s rows exposed the
-    // server's own `id` but not `server_id`, so the page's `x.server_id`
-    // lookup always missed and every checkbox rendered unchecked no matter
-    // what had just been saved. ---
+    // check for the getAccessibleServers() `server_id` gotcha (see
+    // src/servers.js). ---
     const accountsHtmlAfterCreate = await (
       await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })
     ).text();
@@ -171,8 +161,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // dashboard should show ONLY Training, not Community 1
     const restrictedDash = await fetch(`${base}/`, { headers: { Cookie: serverAdminCookie } });
     const restrictedHtml = await restrictedDash.text();
-    assert.match(restrictedHtml, /DCS Deutschland - Training/);
-    assert.doesNotMatch(restrictedHtml, /DCS Deutschland - Community 1/);
+    assert.match(restrictedHtml, /Example Server - Training/);
+    assert.doesNotMatch(restrictedHtml, /Example Server - Community 1/);
 
     // restricted account must not reach account management
     const forbiddenAccounts = await fetch(`${base}/admin/accounts`, { headers: { Cookie: serverAdminCookie } });
@@ -186,11 +176,24 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const forbiddenUpload = await fetch(`${base}/s/training/missions`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenUpload.status, 403, "access without the upload flag must not reach the missions page");
 
-    // --- proxy passthrough + prefix stripping, as the site admin ---
-    const proxyRes = await fetch(`${base}/s/training/some/deep/path?x=1`, { headers: { Cookie: siteAdminCookie } });
-    assert.equal(proxyRes.status, 200);
-    const proxyBody = await proxyRes.json();
-    assert.equal(proxyBody.path, "/some/deep/path?x=1", "the /s/<slug> prefix must be stripped before reaching upstream");
+    // --- the real webgui's own static bundle is served under /s/<slug>/, as the site admin ---
+    const webguiRes = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(webguiRes.status, 200);
+    const webguiHtml = await webguiRes.text();
+    assert.match(webguiHtml, /<div id="app">/, "must serve the real webgui's index.html, not a proxied response");
+
+    // the control-port token bootstrap must be injected before app.js loads,
+    // with a fresh token each page load. Nothing else lets the SPA's own
+    // fetch() reach the control-port proxy.
+    const tokenMatch = webguiHtml.match(/var TOKEN = "([0-9a-f]+)"/);
+    assert.ok(tokenMatch, "index.html response must include the control-port token bootstrap script");
+    const webguiRes2 = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
+    const tokenMatch2 = (await webguiRes2.text()).match(/var TOKEN = "([0-9a-f]+)"/);
+    assert.notEqual(tokenMatch2[1], tokenMatch[1], "each page load must mint its own distinct token");
+
+    // a path with no matching static asset must 404, not fall through to some proxy
+    const missingAssetRes = await fetch(`${base}/s/training/does/not/exist.js`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(missingAssetRes.status, 404);
 
     // --- unauthenticated page navigation redirects to /login; unauthenticated API-style call gets 401 ---
     const anonNav = await fetch(`${base}/s/training/`, { redirect: "manual", headers: { "Sec-Fetch-Dest": "document" } });
@@ -208,7 +211,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(uploadRes.status, 200);
     assert.equal(dummyAgentReceived.authorization, `Bearer ${AGENT_TOKEN}`, "agent must receive the shared bearer token");
-    assert.match(dummyAgentReceived.body.toString("latin1"), /training/, "folder_key must be forwarded to the agent");
+    assert.match(dummyAgentReceived.body.toString("latin1"), /training/, "instance_name must be forwarded to the agent");
 
     // non-.miz upload must be rejected before it ever reaches the agent
     dummyAgentReceived = null;
@@ -236,7 +239,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const createServerRes = await fetch(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
-      body: `slug=community2&name=${encodeURIComponent("DCS Deutschland - Community 2")}&upstream_url=${encodeURIComponent(`http://127.0.0.1:${dummyUpstreamPort}`)}&mission_folder_key=community2`,
+      body: `slug=community2&name=${encodeURIComponent("Example Server - Community 2")}&instance_name=community2`,
     });
     assert.equal(createServerRes.status, 200);
     const newServerRow = db.prepare("SELECT * FROM servers WHERE slug = ?").get("community2");
@@ -251,7 +254,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const badSlugRes = await fetch(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
-      body: `slug=${encodeURIComponent("not a slug!")}&name=X&upstream_url=http://127.0.0.1:1&mission_folder_key=x`,
+      body: `slug=${encodeURIComponent("not a slug!")}&name=X&instance_name=x`,
     });
     assert.equal(badSlugRes.status, 400);
 
@@ -259,15 +262,23 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const dupSlugRes = await fetch(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
-      body: `slug=community2&name=X&upstream_url=http://127.0.0.1:1&mission_folder_key=x`,
+      body: `slug=community2&name=X&instance_name=x`,
     });
     assert.equal(dupSlugRes.status, 400);
+
+    // rejects an instance name with path-traversal characters
+    const badInstanceRes = await fetch(`${base}/admin/servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `slug=community3&name=X&instance_name=${encodeURIComponent("../escape")}`,
+    });
+    assert.equal(badInstanceRes.status, 400);
 
     // edit the server
     const editServerRes = await fetch(`${base}/admin/servers/${newServerRow.id}`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
-      body: `name=${encodeURIComponent("Renamed Community 2")}&upstream_url=${encodeURIComponent(`http://127.0.0.1:${dummyUpstreamPort}`)}&mission_folder_key=community2`,
+      body: `name=${encodeURIComponent("Renamed Community 2")}&instance_name=community2`,
       redirect: "manual",
     });
     assert.equal(editServerRes.status, 302);
@@ -298,9 +309,10 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(deleteSelfRes.status, 400, "must refuse to delete the last remaining admin account");
 
-    // --- login rate limiting: a throwaway username, on the same running server,
-    // so this doesn't need a second app/db instance (better-sqlite3's native
-    // addon does not tolerate require.cache-driven re-instantiation mid-process) ---
+    // --- login rate limiting. A throwaway username on the same running
+    // server avoids a second app/db instance -- better-sqlite3's native
+    // addon does not tolerate require.cache-driven re-instantiation
+    // mid-process. ---
     let lastAttempt;
     for (let i = 0; i < 6; i++) {
       lastAttempt = await fetch(`${base}/login`, {
