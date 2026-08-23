@@ -1,23 +1,28 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const multer = require("multer");
-const { createProxyMiddleware } = require("http-proxy-middleware");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
+const { pipeline } = require("node:stream/promises");
+const { Readable } = require("node:stream");
+const tar = require("tar");
 const db = require("./db");
 const auth = require("./auth");
 const serversDb = require("./servers");
 const views = require("./views");
+const controlTokens = require("./controlTokens");
+const serverProxy = require("./serverProxy");
 
 const PORT = Number(process.env.PORT || 3000);
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
 const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
-const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false"; // default true; only disable for local http dev
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false"; // Default true. Disable only for local http dev.
 
 const app = express();
 app.disable("x-powered-by");
-app.set("trust proxy", true); // sits behind nginx
+app.set("trust proxy", true); // Sits behind nginx.
 app.use(cookieParser());
 app.use("/assets", express.static(path.join(__dirname, "..", "public")));
 
@@ -185,7 +190,13 @@ app.use("/admin/accounts", accountsRouter);
 // ---- server management (site admins only) ----
 
 const SLUG_RE = /^[a-z0-9-]+$/;
-const FOLDER_KEY_RE = /^[a-z0-9-]+$/;
+// Must match the real Windows DCS instance folder name under Saved Games,
+// e.g. "Example_Training", or the DCS default "DCS.dcs_serverrelease".
+// Dots are normal here. Only a string of dots alone (".", "..") is
+// rejected, not dots in general. No slashes/backslashes -- the agent
+// builds filesystem paths from this. Kept in sync with agent.js.
+const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
+const DEFAULT_INSTANCE_NAME = "DCS.dcs_serverrelease";
 
 const serversRouter = express.Router();
 serversRouter.use(auth.requireAccountManager);
@@ -199,74 +210,215 @@ serversRouter.get("/", (req, res) => {
 });
 
 serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
-  const { slug, name, upstream_url, mission_folder_key } = req.body;
-  if (!slug || !name || !upstream_url || !mission_folder_key) {
+  const { slug, name, instance_name, dcs_install_path } = req.body;
+  if (!slug || !name || !instance_name) {
     return res.status(400).send(loadServersPageData(req, { error: "All fields are required." }));
   }
   if (!SLUG_RE.test(slug)) {
     return res.status(400).send(loadServersPageData(req, { error: "Slug must be lowercase letters, numbers, and hyphens only (it becomes part of the URL: /s/<slug>/)." }));
   }
-  if (!FOLDER_KEY_RE.test(mission_folder_key)) {
-    return res.status(400).send(loadServersPageData(req, { error: "Mission folder key must be lowercase letters, numbers, and hyphens only." }));
+  if (!INSTANCE_NAME_RE.test(instance_name)) {
+    return res.status(400).send(loadServersPageData(req, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." }));
   }
-  let parsedUpstream;
-  try {
-    parsedUpstream = new URL(upstream_url);
-  } catch {
-    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL is not a valid URL." }));
-  }
-  if (!["http:", "https:"].includes(parsedUpstream.protocol)) {
-    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL must be http:// or https://." }));
-  }
+  const installPath = dcs_install_path && dcs_install_path.trim() ? dcs_install_path.trim() : null;
 
   try {
-    db.prepare(
-      "INSERT INTO servers (slug, name, upstream_url, mission_folder_key) VALUES (?, ?, ?, ?)"
-    ).run(slug, name, upstream_url, mission_folder_key);
+    db.prepare("INSERT INTO servers (slug, name, instance_name, dcs_install_path) VALUES (?, ?, ?, ?)").run(slug, name, instance_name, installPath);
   } catch (err) {
     return res.status(400).send(loadServersPageData(req, { error: "That slug is already in use." }));
   }
   res.send(
     loadServersPageData(req, {
-      notice: `Created "${name}". No admin has access to it yet — grant access from Manage accounts. The mission-agent on the physical host must also have a matching MISSION_FOLDER_${mission_folder_key.toUpperCase()} configured before uploads to it will work.`,
+      notice: `Created "${name}". No admin has access to it yet — grant access from Manage accounts. "${instance_name}" must match the real DCS instance folder name under Saved Games on the host, or the webgui and mission uploads won't find it.`,
     })
   );
 });
 
 serversRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) => {
   const targetId = Number(req.params.id);
-  const { name, upstream_url, mission_folder_key } = req.body;
-  if (!name || !upstream_url || !mission_folder_key) {
+  const { name, instance_name, dcs_install_path } = req.body;
+  if (!name || !instance_name) {
     return res.status(400).send(loadServersPageData(req, { error: "All fields are required." }));
   }
-  if (!FOLDER_KEY_RE.test(mission_folder_key)) {
-    return res.status(400).send(loadServersPageData(req, { error: "Mission folder key must be lowercase letters, numbers, and hyphens only." }));
+  if (!INSTANCE_NAME_RE.test(instance_name)) {
+    return res.status(400).send(loadServersPageData(req, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." }));
   }
-  let parsedUpstream;
-  try {
-    parsedUpstream = new URL(upstream_url);
-  } catch {
-    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL is not a valid URL." }));
-  }
-  if (!["http:", "https:"].includes(parsedUpstream.protocol)) {
-    return res.status(400).send(loadServersPageData(req, { error: "Upstream URL must be http:// or https://." }));
-  }
+  const installPath = dcs_install_path && dcs_install_path.trim() ? dcs_install_path.trim() : null;
 
-  db.prepare("UPDATE servers SET name = ?, upstream_url = ?, mission_folder_key = ? WHERE id = ?").run(
-    name,
-    upstream_url,
-    mission_folder_key,
-    targetId
-  );
+  db.prepare("UPDATE servers SET name = ?, instance_name = ?, dcs_install_path = ? WHERE id = ?").run(name, instance_name, installPath, targetId);
   res.redirect("/admin/servers");
 });
 
 serversRouter.post("/:id/delete", (req, res) => {
   const targetId = Number(req.params.id);
   // admin_server_access rows for this server cascade-delete automatically
-  // (ON DELETE CASCADE in the schema); no separate cleanup needed here.
+  // via ON DELETE CASCADE in the schema. No separate cleanup needed here.
   db.prepare("DELETE FROM servers WHERE id = ?").run(targetId);
   res.redirect("/admin/servers");
+});
+
+// ---- webgui control-port assignment: review + explicit confirm before
+// ever writing to a server's own autoexec.cfg on the physical host ----
+
+async function agentStatus(instanceName) {
+  const url = new URL(`/webgui/${encodeURIComponent(instanceName)}/status`, MISSION_AGENT_URL);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  if (!res.ok) throw new Error(`agent returned ${res.status} for ${instanceName}`);
+  return res.json();
+}
+
+async function buildWebguiPortProposal() {
+  const servers = serversDb.getAllServers();
+  const statuses = await Promise.all(
+    servers.map(async (server) => ({ server, ...(await agentStatus(server.instance_name)) }))
+  );
+
+  const usedPorts = new Set(statuses.filter((s) => s.webguiPort !== null).map((s) => s.webguiPort));
+  const missing = statuses.filter((s) => s.webguiPort === null);
+
+  let candidate = 8088;
+  const proposals = missing.map((s) => {
+    while (usedPorts.has(candidate)) candidate++;
+    usedPorts.add(candidate);
+    return { server: s.server, proposedPort: candidate++ };
+  });
+
+  return { alreadyConfigured: statuses.filter((s) => s.webguiPort !== null), proposals };
+}
+
+serversRouter.get("/webgui-ports", async (req, res) => {
+  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
+  }
+  try {
+    const { proposals } = await buildWebguiPortProposal();
+    res.send(views.webguiPortsPage({ admin: req.admin, proposals }));
+  } catch (err) {
+    res.status(502).send(loadServersPageData(req, { error: `Could not reach the mission agent: ${err.message}` }));
+  }
+});
+
+serversRouter.post("/webgui-ports/confirm", async (req, res) => {
+  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
+  }
+  try {
+    const { proposals } = await buildWebguiPortProposal();
+    for (const { server, proposedPort } of proposals) {
+      const url = new URL(`/webgui/${encodeURIComponent(server.instance_name)}/ensure-port`, MISSION_AGENT_URL);
+      const agentRes = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ port: proposedPort }),
+      });
+      if (!agentRes.ok) throw new Error(`agent returned ${agentRes.status} for ${server.instance_name}`);
+    }
+    res.send(
+      loadServersPageData(req, {
+        notice:
+          proposals.length === 0
+            ? "No servers needed a webgui port assigned."
+            : `Assigned webgui ports for: ${proposals.map((p) => `${p.server.name} (${p.proposedPort})`).join(", ")}.`,
+      })
+    );
+  } catch (err) {
+    res.status(502).send(loadServersPageData(req, { error: `Could not reach the mission agent: ${err.message}` }));
+  }
+});
+
+// ---- webgui bundle sync ----
+// Pulls the real DCS webgui SPA straight out of a DCS World Server install
+// already on the host, instead of an admin copying their own legitimate
+// copy into webgui-static/ by hand. Explicit admin action, same shape as
+// webgui-ports above -- a silent DCS update on the host must not silently
+// change what every admin sees. webgui-static/ stays a single shared
+// folder for every server slug. The admin just picks which configured
+// server to sync *from*.
+
+async function fetchWebguiBundle(installPath) {
+  const url = new URL("/dcs-install/webgui-bundle", MISSION_AGENT_URL);
+  url.searchParams.set("path", installPath);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  if (!res.ok) {
+    throw new Error(`agent returned ${res.status}: ${await res.text()}`);
+  }
+  return res;
+}
+
+serversRouter.get("/webgui-sync", (req, res) => {
+  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
+  }
+  res.send(views.webguiSyncPage({ admin: req.admin, servers: serversDb.getAllServers() }));
+});
+
+// Two path segments deliberately. A single-segment "/webgui-sync" would be
+// shadowed by the earlier POST "/:id" route above -- Express matches ":id"
+// against the literal string "webgui-sync". Same reason webgui-ports' own
+// confirm route is "/webgui-ports/confirm" rather than a bare POST
+// "/webgui-ports".
+serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), async (req, res) => {
+  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
+  }
+  const server = serversDb.getServerById(Number(req.body.server_id));
+  if (!server || !server.dcs_install_path) {
+    return res.status(400).send(
+      views.webguiSyncPage({
+        admin: req.admin,
+        servers: serversDb.getAllServers(),
+        error: "Pick a server that has a DCS install path set.",
+      })
+    );
+  }
+
+  // Extract into a scratch dir first and validate it before touching the
+  // live webgui-static/ at all. Then swap via two renames -- fast, same
+  // filesystem -- with a restore-on-failure path. A bad path, a
+  // mid-transfer failure, or a bundle missing index.html must never leave
+  // /s/:slug/ serving a half-replaced or missing bundle. The scratch dir
+  // has to be a sibling of webguiRoot, not e.g. somewhere under
+  // local-only/: rename() across filesystems fails with EXDEV, and
+  // WEBGUI_STATIC_PATH can point anywhere, so nothing guarantees they'd
+  // share one otherwise.
+  const tmpDir = `${webguiRoot}.sync-tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const hadExisting = fsSync.existsSync(webguiRoot);
+  const backupDir = `${webguiRoot}.sync-backup-${Date.now()}`;
+
+  try {
+    const bundleRes = await fetchWebguiBundle(server.dcs_install_path);
+    await fs.mkdir(tmpDir, { recursive: true });
+    await pipeline(Readable.fromWeb(bundleRes.body), tar.x({ cwd: tmpDir }));
+    await fs.access(path.join(tmpDir, "index.html"));
+
+    if (hadExisting) await fs.rename(webguiRoot, backupDir);
+    try {
+      await fs.rename(tmpDir, webguiRoot);
+    } catch (renameErr) {
+      if (hadExisting) await fs.rename(backupDir, webguiRoot);
+      throw renameErr;
+    }
+    if (hadExisting) await fs.rm(backupDir, { recursive: true, force: true });
+
+    webguiIndexTemplate = fsSync.readFileSync(path.join(webguiRoot, "index.html"), "utf8");
+
+    res.send(
+      views.webguiSyncPage({
+        admin: req.admin,
+        servers: serversDb.getAllServers(),
+        notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).`,
+      })
+    );
+  } catch (err) {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    res.status(502).send(
+      views.webguiSyncPage({
+        admin: req.admin,
+        servers: serversDb.getAllServers(),
+        error: `Sync failed: ${err.message}`,
+      })
+    );
+  }
 });
 
 app.use("/admin/servers", serversRouter);
@@ -316,7 +468,7 @@ app.post(
     }
     try {
       const form = new FormData();
-      form.append("folder_key", req.dcsServer.mission_folder_key);
+      form.append("instance_name", req.dcsServer.instance_name);
       form.append(
         "mission",
         new Blob([req.file.buffer], { type: "application/octet-stream" }),
@@ -338,25 +490,80 @@ app.post(
   }
 );
 
-app.use(
-  "/s/:slug",
-  requireServerAccess({ upload: false }),
-  createProxyMiddleware({
-    router: (req) => req.dcsServer.upstream_url,
-    pathRewrite: (path, req) => {
-      const prefix = `/s/${req.params.slug}`;
-      const rest = path.startsWith(prefix) ? path.slice(prefix.length) : path;
-      return rest || "/";
-    },
-    changeOrigin: true,
-    on: {
-      error(err, req, res) {
-        res.writeHead(502, { "Content-Type": "text/plain" });
-        res.end(`Could not reach the DCS server: ${err.message}`);
-      },
-    },
-  })
-);
+// The real DCS webgui is a static SPA with no server of its own. Opened as
+// a local file, its own connection logic tries to reach a backend at
+// whatever host/port it decides on -- undocumented, and not necessarily
+// even the page's own hostname:port. Rather than guess that logic, this
+// rewrites it at the network layer: any fetch() that isn't for one of the
+// app's own static files under /s/<slug>/ gets redirected to the one
+// shared control-port proxy, with a short-lived per-load token attached
+// (see controlTokens.js) in place of a cookie. Cross-port/cross-origin
+// fetch() doesn't carry cookies by default, even though the cookie itself
+// is host-scoped, so a plain reverse proxy would have nothing to authorize
+// the connection with.
+
+// webgui-static/ is deliberately gitignored, not shipped in this repo. The
+// real DCS webgui is shared-source, not open source. Redistributing it is
+// not allowed. Each deployment has to populate this directory itself, from
+// its own legitimate copy. Its absence is an expected state on a fresh
+// checkout, not a bug, and must not take the rest of the app down --
+// login/accounts/servers admin should all still work before it's in place.
+const webguiRoot = process.env.WEBGUI_STATIC_PATH || path.join(__dirname, "..", "webgui-static");
+let webguiIndexTemplate = null;
+try {
+  webguiIndexTemplate = fsSync.readFileSync(path.join(webguiRoot, "index.html"), "utf8");
+} catch (err) {
+  if (err.code !== "ENOENT") throw err;
+  console.warn(
+    `webgui-static/index.html not found — /s/<slug>/ will return 503 until it's populated. ` +
+      `The real DCS webgui is shared-source and can't be shipped in this repo; copy your own ` +
+      `legitimate copy (index.html, styles.css, js/, fonts/, images/, lang/) into webgui-static/.`
+  );
+}
+
+app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
+  if (!webguiIndexTemplate) {
+    return res.status(503).send("The DCS webgui bundle is not installed on this server yet.");
+  }
+  const token = controlTokens.mint(req.admin.id, req.dcsServer.id);
+  const bootstrap = `<script>
+  (function () {
+    var TOKEN = ${JSON.stringify(token)};
+    var CONTROL_PORT = ${JSON.stringify(String(serverProxy.CONTROL_PORT))};
+    var BASE_PATH = ${JSON.stringify(`/s/${req.params.slug}/`)};
+    function rewriteIfBackendCall(url) {
+      var target;
+      try {
+        target = new URL(url, location.href);
+      } catch (e) {
+        return null;
+      }
+      // Anything for one of the app's own served files stays untouched.
+      // Anything else same-host is the app trying to reach its live backend.
+      if (target.hostname !== location.hostname || target.pathname.indexOf(BASE_PATH) === 0) return null;
+      target.protocol = location.protocol;
+      target.port = CONTROL_PORT;
+      return target.toString();
+    }
+    var nativeFetch = window.fetch;
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : input.url;
+      var rewritten = rewriteIfBackendCall(url);
+      if (rewritten) {
+        init = Object.assign({}, init);
+        init.headers = new Headers(init.headers || {});
+        init.headers.set("X-Auth-Gate-Token", TOKEN);
+        return nativeFetch.call(this, rewritten, init);
+      }
+      return nativeFetch.call(this, input, init);
+    };
+  })();
+</script>`;
+  res.set("Content-Type", "text/html");
+  res.send(webguiIndexTemplate.replace("<script src=\"js/app.js\"></script>", `${bootstrap}\n  <script src="js/app.js"></script>`));
+});
+
+app.use("/s/:slug", requireServerAccess({ upload: false }), express.static(webguiRoot, { index: false }));
 
 app.use((req, res) => res.status(404).send("Not found."));
 
@@ -364,14 +571,17 @@ if (require.main === module) {
   const httpServer = app.listen(PORT, () => {
     console.log(`dcs-webgui-auth-gate listening on :${PORT}`);
   });
-  // Explicit db.close() on shutdown, not just process exit: leaving it to
-  // GC/finalizers to close better-sqlite3's native handles has been observed
-  // to crash the process during teardown rather than exiting cleanly.
+  const controlProxyServer = serverProxy.startControlProxy();
+  // Explicit db.close() on shutdown, not just process exit. Leaving
+  // better-sqlite3's native handles to GC/finalizers has crashed the
+  // process during teardown instead of exiting cleanly.
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
-      httpServer.close(() => {
-        db.close();
-        process.exit(0);
+      controlProxyServer.close(() => {
+        httpServer.close(() => {
+          db.close();
+          process.exit(0);
+        });
       });
     });
   }

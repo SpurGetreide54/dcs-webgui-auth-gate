@@ -4,6 +4,10 @@ function getServerBySlug(slug) {
   return db.prepare("SELECT * FROM servers WHERE slug = ?").get(slug);
 }
 
+function getServerById(id) {
+  return db.prepare("SELECT * FROM servers WHERE id = ?").get(id);
+}
+
 function getAllServers() {
   return db.prepare("SELECT * FROM servers ORDER BY id").all();
 }
@@ -11,12 +15,12 @@ function getAllServers() {
 function getAccessibleServers(adminId) {
   return db
     .prepare(
-      // servers.* alone would give a bare `id` (the server's own id) with
-      // no way to tell it apart from an admin_server_access row's id, so
-      // callers checking "does this admin have access to server X" via
-      // `.server_id` always got `undefined` and never matched — that's
-      // what made the accounts page render every checkbox as unchecked
-      // regardless of the real grant, no matter what was just saved.
+      // servers.* alone gives a bare `id` -- the server's own id -- with no
+      // way to tell it apart from an admin_server_access row's id. Callers
+      // checking "does this admin have access to server X" via
+      // `.server_id` would get `undefined` and never match. Left unfixed,
+      // the accounts page renders every checkbox as unchecked, regardless
+      // of the real grant.
       `SELECT servers.*, admin_server_access.server_id, admin_server_access.can_upload_missions
        FROM servers
        JOIN admin_server_access ON admin_server_access.server_id = servers.id
@@ -62,6 +66,7 @@ function grantAllServers(adminId, { canUploadMissions: canUpload }) {
 
 module.exports = {
   getServerBySlug,
+  getServerById,
   getAllServers,
   getAccessibleServers,
   getAccess,

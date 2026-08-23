@@ -1,3 +1,5 @@
+const BRAND_NAME = process.env.BRAND_NAME || "DCS Auth Gate";
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;",
@@ -8,8 +10,9 @@ function escapeHtml(str) {
   }[c]));
 }
 
-// Mirrors the real DCS webgui's own left-sidebar: icon-only nav, active item
-// gets a blue left border, sign-out pinned to the bottom via a second <ul>.
+// Mirrors the real DCS webgui's own left-sidebar. Icon-only nav. Active
+// item gets a blue left border. Sign-out is pinned to the bottom via a
+// second <ul>.
 function sidebarNav(admin, active) {
   const navItem = (key, href, icon, label) =>
     `<li><a href="${href}" class="${key === active ? "active" : ""}" title="${escapeHtml(label)}">
@@ -32,7 +35,7 @@ function layout(title, body, { admin, active, pageTitle } = {}) {
   const navbar = `<div class="navbar">
     <div class="navbar-brand">
       <img src="/assets/logo.png" alt="">
-      <span class="brand-name">DCS Deutschland<span class="brand-tagline">Control Panel</span></span>
+      <span class="brand-name">${escapeHtml(BRAND_NAME)}<span class="brand-tagline">Control Panel</span></span>
     </div>
     ${admin ? `<div class="navbar-right">Signed in as ${escapeHtml(admin.username)}</div>` : ""}
   </div>`;
@@ -106,10 +109,10 @@ function dashboardPage({ admin, servers }) {
 }
 
 function accountsPage({ admin, accounts, servers, error, notice }) {
-  // A <form> can't legally wrap a <tr>/<td> — browsers silently relocate or
+  // A <form> can't legally wrap a <tr>/<td>. Browsers silently relocate or
   // drop it during HTML parsing, so checkboxes "inside" it never actually
-  // belong to it and don't get submitted. Fix: one empty <form id="...">
-  // per row, placed outside the table, with every input/button in that row
+  // belong to it and don't get submitted. Fix: one empty <form id="..."> per
+  // row, placed outside the table, with every input/button in that row
   // linked to it via the `form="..."` attribute instead of nesting.
   const forms = accounts
     .map((a) => `<form id="acct-${a.id}" method="post" action="/admin/accounts/${a.id}"></form>`)
@@ -171,7 +174,7 @@ ${forms}
 }
 
 function serversPage({ admin, servers, error, notice }) {
-  // Same fix as accountsPage: a <form> can't legally wrap a <tr>, so each
+  // Same fix as accountsPage. A <form> can't legally wrap a <tr>, so each
   // row gets an out-of-band empty <form> plus `form="..."` on its inputs.
   const forms = servers.map((s) => `<form id="srv-${s.id}" method="post" action="/admin/servers/${s.id}"></form>`).join("");
   const rows = servers
@@ -180,8 +183,8 @@ function serversPage({ admin, servers, error, notice }) {
       return `<tr>
         <td>${escapeHtml(s.slug)}</td>
         <td><input type="text" form="${formId}" name="name" value="${escapeHtml(s.name)}" required></td>
-        <td><input type="text" form="${formId}" name="upstream_url" value="${escapeHtml(s.upstream_url)}" required></td>
-        <td><input type="text" form="${formId}" name="mission_folder_key" value="${escapeHtml(s.mission_folder_key)}" required></td>
+        <td><input type="text" form="${formId}" name="instance_name" value="${escapeHtml(s.instance_name)}" required></td>
+        <td><input type="text" form="${formId}" name="dcs_install_path" value="${escapeHtml(s.dcs_install_path || "")}" placeholder="e.g. C:\\Program Files\\Eagle Dynamics\\DCS World Server"></td>
         <td>
           <button type="submit" form="${formId}">Save</button>
           <button form="${formId}" formaction="/admin/servers/${s.id}/delete">Delete</button>
@@ -196,20 +199,64 @@ function serversPage({ admin, servers, error, notice }) {
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 ${forms}
 <table>
-  <thead><tr><th>Slug</th><th>Name</th><th>Upstream URL</th><th>Mission folder key</th><th></th></tr></thead>
+  <thead><tr><th>Slug</th><th>Name</th><th>DCS instance name</th><th>DCS install path</th><th></th></tr></thead>
   <tbody>${rows}</tbody>
 </table>
-<p>Nobody has access to a server until you grant it from <a href="/admin/accounts">Manage accounts</a>. The mission folder key must match a <code>MISSION_FOLDER_&lt;KEY&gt;</code> env var configured on the physical host's mission-agent, or uploads to that server will fail.</p>
+<p>Nobody has access to a server until you grant it from <a href="/admin/accounts">Manage accounts</a>. The DCS instance name must match the real instance folder name under <code>Saved Games</code> on the physical host, or the webgui and mission uploads won't find it. <a href="/admin/servers/webgui-ports">Review/assign webgui control ports</a> once servers are added.</p>
+<p>DCS install path is optional — it's the root folder of a DCS World Server install on this server's host (not the <code>WebGUI</code> folder itself), and only matters if you want this server offered as a source on the <a href="/admin/servers/webgui-sync">webgui sync</a> page.</p>
 <h2>Add server</h2>
 <form method="post" action="/admin/servers">
   <label>Slug (used in the URL, e.g. /s/training/) <input type="text" name="slug" pattern="[a-z0-9-]+" required></label>
   <label>Name <input type="text" name="name" required></label>
-  <label>Upstream URL <input type="text" name="upstream_url" placeholder="http://10.0.1.10:8088" required></label>
-  <label>Mission folder key <input type="text" name="mission_folder_key" pattern="[a-z0-9-]+" required></label>
+  <label>DCS instance name <input type="text" name="instance_name" pattern="(?!\.+$)[A-Za-z0-9_.-]+" value="DCS.dcs_serverrelease" required></label>
+  <label>DCS install path (optional) <input type="text" name="dcs_install_path" placeholder="e.g. C:\\Program Files\\Eagle Dynamics\\DCS World Server"></label>
   <button type="submit">Create server</button>
 </form>`,
     { admin, active: "servers", pageTitle: "DCS servers" }
   );
+}
+
+function webguiPortsPage({ admin, proposals }) {
+  const rows = proposals
+    .map((p) => `<tr><td>${escapeHtml(p.server.name)}</td><td>${escapeHtml(p.server.instance_name)}</td><td>${p.proposedPort}</td></tr>`)
+    .join("");
+
+  const body =
+    proposals.length === 0
+      ? `<p>Every configured server already has a webgui control port. Nothing to do.</p>`
+      : `<p>These servers have no <code>webgui_port</code> in their <code>Config\\autoexec.cfg</code> yet. Confirming will create or append that line on the physical host via the mission-agent — existing config content is preserved either way.</p>
+<table>
+  <thead><tr><th>Server</th><th>Instance</th><th>Proposed port</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<form method="post" action="/admin/servers/webgui-ports/confirm">
+  <button type="submit">Confirm and assign these ports</button>
+</form>`;
+
+  return layout(`Webgui ports — DCS Control Panel`, body, { admin, active: "servers", pageTitle: "Assign webgui control ports" });
+}
+
+function webguiSyncPage({ admin, servers, error, notice }) {
+  const withPath = servers.filter((s) => s.dcs_install_path);
+  const options = withPath
+    .map((s) => `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(s.dcs_install_path)})</option>`)
+    .join("");
+
+  const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+<p>Pulls the real webgui SPA straight out of a DCS World Server install already on the host (<code>&lt;install path&gt;\\WebGUI</code>) and replaces <code>webgui-static/</code> with it — no manual copying needed. This fully replaces the currently-served bundle for every server; it's used to serve <code>/s/&lt;slug&gt;/</code> for all of them, not just the one picked below.</p>
+${
+  withPath.length === 0
+    ? `<p>No server has a DCS install path set yet. Add one from <a href="/admin/servers">Manage servers</a> first.</p>`
+    : `<form method="post" action="/admin/servers/webgui-sync/confirm">
+  <label>Sync from
+    <select name="server_id" required>${options}</select>
+  </label>
+  <button type="submit">Sync webgui-static/ now</button>
+</form>`
+}`;
+
+  return layout("Sync webgui — DCS Control Panel", body, { admin, active: "servers", pageTitle: "Sync webgui bundle" });
 }
 
 function missionsPage({ admin, server, error, notice }) {
@@ -225,4 +272,14 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
   );
 }
 
-module.exports = { escapeHtml, loginPage, setupPage, dashboardPage, accountsPage, serversPage, missionsPage };
+module.exports = {
+  escapeHtml,
+  loginPage,
+  setupPage,
+  dashboardPage,
+  accountsPage,
+  serversPage,
+  webguiPortsPage,
+  webguiSyncPage,
+  missionsPage,
+};

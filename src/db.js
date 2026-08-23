@@ -23,8 +23,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
-    upstream_url TEXT NOT NULL,
-    mission_folder_key TEXT NOT NULL,
+    instance_name TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -49,5 +48,25 @@ db.exec(`
     attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// Guarded migration for DBs created before the servers table dropped
+// upstream_url and renamed mission_folder_key to instance_name. Direct
+// reverse-proxying to a DCS host never actually worked -- its control port
+// only accepts 127.0.0.1. instance_name now also locates
+// Config/autoexec.cfg, not just the Missions folder. CREATE TABLE IF NOT
+// EXISTS above never alters an existing table, so this runs every startup
+// and is a no-op once migrated.
+{
+  const columns = db.prepare("PRAGMA table_info(servers)").all().map((c) => c.name);
+  if (columns.includes("mission_folder_key") && !columns.includes("instance_name")) {
+    db.exec("ALTER TABLE servers RENAME COLUMN mission_folder_key TO instance_name");
+  }
+  if (db.prepare("PRAGMA table_info(servers)").all().some((c) => c.name === "upstream_url")) {
+    db.exec("ALTER TABLE servers DROP COLUMN upstream_url");
+  }
+  if (!db.prepare("PRAGMA table_info(servers)").all().some((c) => c.name === "dcs_install_path")) {
+    db.exec("ALTER TABLE servers ADD COLUMN dcs_install_path TEXT");
+  }
+}
 
 module.exports = db;
