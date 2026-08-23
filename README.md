@@ -1,85 +1,57 @@
 # dcs-webgui-auth-gate
 
-Per-admin, per-server login gate in front of the DCS webgui control panel
-(see the sibling `dcs webgui` project), plus a small companion agent that
-lets granted admins upload `.miz` mission files straight into a DCS
-server's mission folder.
+DCS World is a combat flight simulator. People run private multiplayer
+game servers for it. Each DCS dedicated-server install ships its own
+admin control panel — a small web app from Eagle Dynamics for managing
+that one server: missions, players, and so on.
 
-This does not modify `dcs webgui`'s `index.html`/`app.js`. It's a reverse
-proxy that sits in front of the whole thing: unauthenticated requests get a
-login page instead of the app; authenticated requests get proxied through
-transparently, per-server, based on what that admin was granted access to.
+That control panel talks to the game server through a "control port". The
+control port only accepts connections from the server's own machine
+(127.0.0.1). Out of the box, only someone logged into that exact machine
+can reach it.
 
-Two processes, from one repo:
+This project puts a gate in front of that control panel. It lets several
+admins reach the panel securely from anywhere, without exposing the
+control port to the open internet. Each admin gets their own login and
+their own scoped access: which server they can see, and whether they can
+upload missions to it. One deployment can front several DCS servers at
+once.
 
-- **`src/server.js`** (`npm start`) — the auth-gate itself. Deploy on the
-  control-panel VM.
-- **`src/agent.js`** (`npm run agent`) — the mission-upload agent. Deploy
-  on the physical host, next to the DCS gameservers. Write-only, single
-  endpoint, shared-token auth — see the comments in that file for why it's
-  kept this minimal.
+This repo does not include the real control panel's own files
+(`index.html`, `app.js`, and so on) — that code belongs to Eagle
+Dynamics. A deployer supplies their own legitimate copy, either by hand
+(copy it into `webgui-static/`) or by pulling it live from a real DCS
+install through `/admin/servers/webgui-sync`.
 
-Full infrastructure/design context is in the plan this was built from:
-`~/.claude/plans/eager-jumping-allen.md` on the machine this was written on.
+## Two processes, one repo
 
-## Why two roles
+- **`src/server.js`** (`npm start`) — the auth-gate. Deploy it on a
+  control-panel VM, reachable from the internet behind a reverse proxy
+  (see the sibling `dcs-webgui-reverse-proxy` repo). It serves the real
+  control panel as a static bundle under `webgui-static/`, gated behind
+  login and per-server access checks. It also runs a second listener in
+  the same process: a shared control-port proxy that relays each admin's
+  panel traffic to the right DCS server.
+- **`src/agent.js`** (`npm run agent`) — a small relay agent. Deploy it on
+  the physical host, next to the DCS gameservers — the only machine that
+  can reach a control port directly. It does two jobs: it accepts `.miz`
+  mission-file uploads into a server's mission folder, and it relays
+  control-port traffic from the auth-gate. A shared token authenticates
+  it. It has no accounts, no login, and no read/list/delete access to the
+  folders it's given — see the comments in that file for why.
+
+## Two admin roles
 
 - **Site admin** (`can_manage_accounts`): manages other admin accounts and
   decides who gets access to which server.
 - **Per-server access + upload** (`admin_server_access`): a site admin
   grants each admin access to specific servers individually, and,
-  separately, whether they're allowed to upload missions on each one.
-  Access to one server implies nothing about any other.
+  separately, whether they can upload missions on each one. Access to one
+  server says nothing about any other.
 
-## Local setup
+## More docs
 
-Anything that doesn't get committed (env file, SQLite data, dev scripts)
-lives under `local-only/`, gitignored as a single unit.
-
-```
-npm install
-mkdir -p local-only
-cp .env.example local-only/.env    # edit values
-npm run seed-servers                 # writes the three DCS Deutschland servers into SQLite
-```
-
-Easiest path: `local-only/scripts/devenv.sh {start|stop|status}` runs both
-`src/server.js` and `src/agent.js` together, with local-dev defaults for
-everything (scratch mission folders, a fixed test token, `COOKIE_SECURE=false`)
-so it starts clean with no `local-only/.env` at all — that file only
-overrides what you actually want to change. Registered with the `devenv`
-skill.
-
-To run either piece by hand instead:
-
-```
-npm start                                                                  # auth-gate, :3000
-AGENT_PORT=4000 MISSION_AGENT_TOKEN=... MISSION_FOLDER_TRAINING=/tmp/training ... npm run agent
-```
-
-## Tests
-
-```
-npm test
-```
-
-Runs against dummy in-process HTTP servers standing in for a DCS webgui
-origin and the mission-agent — see `test/`. This is as far as verification
-can go without a real DCS server; the plan's "Verification" section covers
-the manual steps needed on the real infrastructure.
-
-## Deployment notes
-
-- **auth-gate** goes on the control-panel VM, behind the nginx reverse
-  proxy in the sibling `dcs-webgui-reverse-proxy` repo. `COOKIE_SECURE`
-  must stay `true` there — the session cookie relies on the HTTPS the
-  reverse proxy provides.
-- **mission-agent** goes on the physical Windows host running the DCS
-  gameservers. There's no existing Node process supervisor there — run it
-  as a Windows service via NSSM or `node-windows`. It must bind only to an
-  interface reachable from the control-panel VM's internal IP, never the
-  host's internet-facing side.
-- Both sides of `MISSION_AGENT_TOKEN` must match exactly.
-- `servers.upstream_url` and the mission-agent's `MISSION_FOLDER_*` paths
-  are real-environment values — edit `scripts/seed-servers.js` and the
-  agent's env vars before deploying, they're placeholders here.
+- [`docs/SETUP.md`](docs/SETUP.md) — install, configure, and run this, for
+  local development and for production.
+- [`docs/TESTING.md`](docs/TESTING.md) — run the tests, and troubleshoot a
+  deployment.
