@@ -55,3 +55,15 @@ install through `/admin/servers/webgui-sync`.
   local development and for production.
 - [`docs/TESTING.md`](docs/TESTING.md) — run the tests, and troubleshoot a
   deployment.
+
+## License
+
+[GPL-3.0-or-later](LICENSE).
+
+## Disclaimer
+
+This software comes with no warranty. Use it at your own risk. The
+authors and contributors accept no liability for damages that result
+from using it — data loss, a misconfigured or broken game server, or
+any other harm. See sections 15 and 16 of the [license](LICENSE) for
+the full legal terms.
