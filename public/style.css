@@ -147,6 +147,10 @@ form {
 }
 label { font-size: 0.9rem; color: var(--text-muted); }
 
+/* out-of-band forms exist only so row checkboxes/buttons can reference them
+   via form="..." (a <form> can't legally wrap a <tr>) — never rendered */
+.row-form { display: none; }
+
 input[type=text], input[type=password], input[type=file] {
   padding: 0.5rem;
   font-size: 1rem;

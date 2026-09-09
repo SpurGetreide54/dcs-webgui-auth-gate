@@ -115,7 +115,7 @@ function accountsPage({ admin, accounts, servers, error, notice }) {
   // row, placed outside the table, with every input/button in that row
   // linked to it via the `form="..."` attribute instead of nesting.
   const forms = accounts
-    .map((a) => `<form id="acct-${a.id}" method="post" action="/admin/accounts/${a.id}"></form>`)
+    .map((a) => `<form id="acct-${a.id}" class="row-form" method="post" action="/admin/accounts/${a.id}"></form>`)
     .join("");
   const rows = accounts
     .map((a) => {
@@ -176,7 +176,7 @@ ${forms}
 function serversPage({ admin, servers, error, notice }) {
   // Same fix as accountsPage. A <form> can't legally wrap a <tr>, so each
   // row gets an out-of-band empty <form> plus `form="..."` on its inputs.
-  const forms = servers.map((s) => `<form id="srv-${s.id}" method="post" action="/admin/servers/${s.id}"></form>`).join("");
+  const forms = servers.map((s) => `<form id="srv-${s.id}" class="row-form" method="post" action="/admin/servers/${s.id}"></form>`).join("");
   const rows = servers
     .map((s) => {
       const formId = `srv-${s.id}`;

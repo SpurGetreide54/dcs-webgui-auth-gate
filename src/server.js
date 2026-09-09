@@ -22,7 +22,11 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false"; // Default true. Di
 
 const app = express();
 app.disable("x-powered-by");
-app.set("trust proxy", true); // Sits behind nginx.
+// Trust exactly one hop (nginx), not the whole chain. nginx's
+// $proxy_add_x_forwarded_for appends to X-Forwarded-For rather than
+// replacing it, so trusting the full chain would let a client spoof
+// req.ip with their own header and dodge the login rate limiter.
+app.set("trust proxy", 1);
 app.use(cookieParser());
 app.use("/assets", express.static(path.join(__dirname, "..", "public")));
 
