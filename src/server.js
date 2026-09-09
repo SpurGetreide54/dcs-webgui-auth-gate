@@ -404,7 +404,7 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
     }
     if (hadExisting) await fs.rm(backupDir, { recursive: true, force: true });
 
-    webguiIndexTemplate = fsSync.readFileSync(path.join(webguiRoot, "index.html"), "utf8");
+    webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 
     res.send(
       views.webguiSyncPage({
@@ -513,17 +513,42 @@ app.post(
 // checkout, not a bug, and must not take the rest of the app down --
 // login/accounts/servers admin should all still work before it's in place.
 const webguiRoot = process.env.WEBGUI_STATIC_PATH || path.join(__dirname, "..", "webgui-static");
-let webguiIndexTemplate = null;
-try {
-  webguiIndexTemplate = fsSync.readFileSync(path.join(webguiRoot, "index.html"), "utf8");
-} catch (err) {
-  if (err.code !== "ENOENT") throw err;
-  console.warn(
-    `webgui-static/index.html not found — /s/<slug>/ will return 503 until it's populated. ` +
-      `The real DCS webgui is shared-source and can't be shipped in this repo; copy your own ` +
-      `legitimate copy (index.html, styles.css, js/, fonts/, images/, lang/) into webgui-static/.`
-  );
+
+// Matches the app.js script tag regardless of quoting style or whitespace.
+// A real DCS webgui build ships this minified -- no quotes around the src
+// attribute (<script src=js/app.js></script>) -- which an exact literal-
+// string match misses entirely and silently. A silent miss here means the
+// bootstrap below never gets injected: app.js runs with native fetch(),
+// talks straight to 127.0.0.1 instead of the control-port proxy, and every
+// admin just sees "server not responding" with no error anywhere.
+const APP_JS_SCRIPT_RE = /<script\s+src=["']?js\/app\.js["']?\s*>\s*<\/script>/;
+
+function loadWebguiIndexTemplate(root) {
+  let template;
+  try {
+    template = fsSync.readFileSync(path.join(root, "index.html"), "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+    console.warn(
+      `webgui-static/index.html not found — /s/<slug>/ will return 503 until it's populated. ` +
+        `The real DCS webgui is shared-source and can't be shipped in this repo; copy your own ` +
+        `legitimate copy (index.html, styles.css, js/, fonts/, images/, lang/) into webgui-static/.`
+    );
+    return null;
+  }
+  if (!APP_JS_SCRIPT_RE.test(template)) {
+    console.warn(
+      `webgui-static/index.html doesn't contain the expected <script src="js/app.js"> tag in any ` +
+        `recognized form. The fetch-rewrite bootstrap will NOT be injected -- /s/<slug>/ will still ` +
+        `serve normally, but the DCS webgui will talk straight to 127.0.0.1 instead of the ` +
+        `control-port proxy, and just show "server not responding" with no visible error. This DCS ` +
+        `webgui build's markup may not match what this app expects; check webgui-static/index.html by hand.`
+    );
+  }
+  return template;
 }
+
+let webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 
 app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
   if (!webguiIndexTemplate) {
@@ -542,9 +567,12 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
       } catch (e) {
         return null;
       }
-      // Anything for one of the app's own served files stays untouched.
-      // Anything else same-host is the app trying to reach its live backend.
-      if (target.hostname !== location.hostname || target.pathname.indexOf(BASE_PATH) === 0) return null;
+      // Anything for one of the app's own served files (same-origin, under
+      // BASE_PATH) stays untouched. Everything else -- same-host on a
+      // different path, or a hardcoded absolute host like the real DCS
+      // webgui's own 127.0.0.1 -- is the app trying to reach its live
+      // backend.
+      if (target.hostname === location.hostname && target.pathname.indexOf(BASE_PATH) === 0) return null;
       target.protocol = location.protocol;
       target.port = CONTROL_PORT;
       return target.toString();
@@ -564,7 +592,7 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
   })();
 </script>`;
   res.set("Content-Type", "text/html");
-  res.send(webguiIndexTemplate.replace("<script src=\"js/app.js\"></script>", `${bootstrap}\n  <script src="js/app.js"></script>`));
+  res.send(webguiIndexTemplate.replace(APP_JS_SCRIPT_RE, `${bootstrap}\n  <script src="js/app.js"></script>`));
 });
 
 app.use("/s/:slug", requireServerAccess({ upload: false }), express.static(webguiRoot, { index: false }));
