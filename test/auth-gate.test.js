@@ -424,6 +424,98 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(afterChangeOtherSession.status, 302, "changing the password must sign out every other session for that account");
 
+    // --- invite-based account creation ---
+    const createInviteRes = await fetch(`${base}/admin/accounts/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `access_${trainingServerId}=on`,
+    });
+    assert.equal(createInviteRes.status, 200);
+    const createInviteHtml = await createInviteRes.text();
+    const inviteLinkMatch = createInviteHtml.match(/\/invite\/([0-9a-f]{64})/);
+    assert.ok(inviteLinkMatch, "creating an invite must display the full invite link");
+    const inviteToken = inviteLinkMatch[1];
+    const inviteRow = db.prepare("SELECT * FROM invites WHERE token_prefix = ?").get(inviteToken.slice(0, 6));
+    assert.ok(inviteRow, "invite must be persisted");
+
+    // pending invite shows up in the accounts table like a real user, with
+    // its permissions, a Save button, and a Revoke button
+    const accountsWithInviteHtml = await (
+      await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })
+    ).text();
+    assert.match(accountsWithInviteHtml, new RegExp(`${inviteToken.slice(0, 6)}.*\\(pending, expires`));
+    assert.match(accountsWithInviteHtml, new RegExp(`formaction="/admin/accounts/invites/${inviteRow.id}/revoke" class="destructive"`));
+
+    // Save updates the pending invite's stored permissions
+    const saveInviteRes = await fetch(`${base}/admin/accounts/invites/${inviteRow.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `can_manage_accounts=on&access_${trainingServerId}=on&upload_${trainingServerId}=on`,
+      redirect: "manual",
+    });
+    assert.equal(saveInviteRes.status, 302);
+    assert.equal(db.prepare("SELECT can_manage_accounts FROM invites WHERE id = ?").get(inviteRow.id).can_manage_accounts, 1);
+
+    // Revoke deletes it outright
+    const revokeInviteRes = await fetch(`${base}/admin/accounts/invites/${inviteRow.id}/revoke`, {
+      method: "POST",
+      headers: { Cookie: siteAdminCookie },
+      redirect: "manual",
+    });
+    assert.equal(revokeInviteRes.status, 302);
+    assert.equal(db.prepare("SELECT * FROM invites WHERE id = ?").get(inviteRow.id), undefined);
+
+    // a non-site-admin must not be able to create or revoke invites
+    const forbiddenInviteCreate = await fetch(`${base}/admin/accounts/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: serverAdminCookie },
+      body: "",
+    });
+    assert.equal(forbiddenInviteCreate.status, 403);
+
+    // --- invite redemption: the invitee picks their own username/password,
+    // permissions come from what the invite already had set ---
+    const redeemInviteRes = await fetch(`${base}/admin/accounts/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `access_${trainingServerId}=on&upload_${trainingServerId}=on`,
+    });
+    const redeemToken = (await redeemInviteRes.text()).match(/\/invite\/([0-9a-f]{64})/)[1];
+    const redeemInviteId = db.prepare("SELECT id FROM invites WHERE token_prefix = ?").get(redeemToken.slice(0, 6)).id;
+
+    const inviteLandingRes = await fetch(`${base}/invite/${redeemToken}`);
+    assert.equal(inviteLandingRes.status, 200);
+    assert.match(await inviteLandingRes.text(), /Create your account/);
+
+    const redeemPostRes = await fetch(`${base}/invite/${redeemToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=invitee&password=invitee-long-password&confirm_password=invitee-long-password",
+      redirect: "manual",
+    });
+    assert.equal(redeemPostRes.status, 302, "redeeming a valid invite must create the account and sign it in");
+    const inviteeCookie = extractCookie(redeemPostRes);
+    assert.ok(inviteeCookie);
+
+    const inviteeRow = db.prepare("SELECT * FROM admins WHERE username = 'invitee'").get();
+    assert.ok(inviteeRow, "redeeming the invite must create the admin account");
+    assert.equal(inviteeRow.can_manage_accounts, 0);
+    assert.equal(
+      serversDb.hasServerAccess(inviteeRow.id, trainingServerId),
+      true,
+      "the new account must get exactly the access the invite was created with"
+    );
+    assert.equal(db.prepare("SELECT * FROM invites WHERE id = ?").get(redeemInviteId), undefined, "a redeemed invite must be consumed (deleted)");
+
+    // the token is single-use: redeeming it again must fail
+    const reuseTokenRes = await fetch(`${base}/invite/${redeemToken}`);
+    assert.equal(reuseTokenRes.status, 404, "a consumed invite token must not be redeemable again");
+
+    // an unknown/expired token also 404s with the expired-invite page
+    const bogusTokenRes = await fetch(`${base}/invite/${"0".repeat(64)}`);
+    assert.equal(bogusTokenRes.status, 404);
+    assert.match(await bogusTokenRes.text(), /invalid or has expired/);
+
     // --- logout is a destructive-styled navbar button, POST only ---
     const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(dashboardHtmlForLogout, /<form method="post" action="\/logout" class="logout-form">/);

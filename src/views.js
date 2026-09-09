@@ -140,36 +140,64 @@ function changePasswordSection() {
 </form>`;
 }
 
-// Site admins get the full roster, all editable, plus account creation.
-// Everyone else gets myAccountPage() below instead -- see accountsPage()'s
-// branch.
-function siteAdminAccountsPage({ admin, accounts, servers, error, notice }) {
+// Both the link text and the Copy button trigger the same
+// navigator.clipboard.writeText -- the only bit of client JS on this page
+// besides the fetch-rewrite bootstrap injected under /s/<slug>/.
+function inviteLinkNotice(inviteUrl) {
+  if (!inviteUrl) return "";
+  const safeUrl = escapeHtml(inviteUrl);
+  return `<p class="invite-notice">
+  Invite link: <a href="${safeUrl}" class="invite-link" data-copy="${safeUrl}">${safeUrl}</a>
+  <button type="button" class="invite-copy" data-copy="${safeUrl}">Copy</button>
+</p>
+<script>
+(function () {
+  document.querySelectorAll("[data-copy]").forEach(function (el) {
+    el.addEventListener("click", function (e) {
+      e.preventDefault();
+      navigator.clipboard.writeText(el.getAttribute("data-copy"));
+    });
+  });
+})();
+</script>`;
+}
+
+// Site admins get the full roster (real accounts + pending invites, all
+// editable) plus account creation. Everyone else gets myAccountPage()
+// below instead -- see accountsPage()'s branch.
+function siteAdminAccountsPage({ admin, accounts, servers, invites, error, notice, inviteUrl }) {
   // A <form> can't legally wrap a <tr>/<td>. Browsers silently relocate or
   // drop it during HTML parsing, so checkboxes "inside" it never actually
   // belong to it and don't get submitted. Fix: one empty <form id="..."> per
   // row, placed outside the table, with every input/button in that row
   // linked to it via the `form="..."` attribute instead of nesting.
-  const forms = accounts
+  const acctForms = accounts
     .map((a) => `<form id="acct-${a.id}" class="row-form" method="post" action="/admin/accounts/${a.id}"></form>`)
     .join("");
-  const rows = accounts
-    .map((a) => {
-      const formId = `acct-${a.id}`;
-      const cells = servers
-        .map((s) => {
-          const access = a.access.find((x) => x.server_id === s.id);
-          const checked = access ? "checked" : "";
-          const uploadChecked = access && access.can_upload_missions ? "checked" : "";
-          return `<td>
+  const inviteForms = invites
+    .map((inv) => `<form id="inv-${inv.id}" class="row-form" method="post" action="/admin/accounts/invites/${inv.id}"></form>`)
+    .join("");
+
+  const permissionCells = (formId, access) =>
+    servers
+      .map((s) => {
+        const grant = access.find((x) => x.server_id === s.id);
+        const checked = grant ? "checked" : "";
+        const uploadChecked = grant && grant.can_upload_missions ? "checked" : "";
+        return `<td>
           <label><input type="checkbox" form="${formId}" name="access_${s.id}" ${checked}> access</label><br>
           <label><input type="checkbox" form="${formId}" name="upload_${s.id}" ${uploadChecked}> upload</label>
         </td>`;
-        })
-        .join("");
+      })
+      .join("");
+
+  const acctRows = accounts
+    .map((a) => {
+      const formId = `acct-${a.id}`;
       return `<tr>
         <td>${escapeHtml(a.username)}</td>
         <td><input type="checkbox" form="${formId}" name="can_manage_accounts" ${a.can_manage_accounts ? "checked" : ""}></td>
-        ${cells}
+        ${permissionCells(formId, a.access)}
         <td>
           <button type="submit" form="${formId}">Save</button>
           ${accounts.length > 1 ? `<button form="${formId}" formaction="/admin/accounts/${a.id}/delete" class="destructive">Delete</button>` : ""}
@@ -177,25 +205,58 @@ function siteAdminAccountsPage({ admin, accounts, servers, error, notice }) {
       </tr>`;
     })
     .join("");
+
+  const inviteRows = invites
+    .map((inv) => {
+      const formId = `inv-${inv.id}`;
+      // expires_at is SQLite's own "YYYY-MM-DD HH:MM:SS" in UTC -- just the
+      // time portion is enough context for a 30-minute-lived row.
+      const expiresLabel = inv.expires_at.slice(11, 16);
+      return `<tr class="pending-invite">
+        <td><em>${escapeHtml(inv.token_prefix)}&hellip; <span class="pending-label">(pending, expires ${escapeHtml(expiresLabel)} UTC)</span></em></td>
+        <td><input type="checkbox" form="${formId}" name="can_manage_accounts" ${inv.can_manage_accounts ? "checked" : ""}></td>
+        ${permissionCells(formId, inv.access)}
+        <td>
+          <button type="submit" form="${formId}">Save</button>
+          <button form="${formId}" formaction="/admin/accounts/invites/${inv.id}/revoke" class="destructive">Revoke</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+
   const header = servers.map((s) => `<th>${escapeHtml(s.name)}</th>`).join("");
 
   return layout(
     "Manage accounts — DCS Control Panel",
     `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
-${forms}
+${inviteLinkNotice(inviteUrl)}
+${acctForms}${inviteForms}
 <table>
   <thead><tr><th>Username</th><th>Site admin</th>${header}<th></th></tr></thead>
-  <tbody>${rows}</tbody>
+  <tbody>${acctRows}${inviteRows}</tbody>
 </table>
 <h2>Add account</h2>
-<form method="post" action="/admin/accounts">
-  <label>Username <input type="text" name="username" required></label>
-  <label>Password <input type="password" name="password" required minlength="12"></label>
-  <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
-  ${serverFieldsets(servers)}
-  <button type="submit">Create account</button>
-</form>
+<div class="account-create">
+  <input type="checkbox" id="mode-invite" class="mode-toggle-input">
+  <label for="mode-invite" class="mode-switch-row">
+    <span class="mode-switch-text-fixed">Fixed</span>
+    <span class="mode-switch-track"><span class="mode-switch-thumb"></span></span>
+    <span class="mode-switch-text-invite">Invite link</span>
+  </label>
+  <form method="post" action="/admin/accounts" class="create-form create-form-fixed">
+    <label>Username <input type="text" name="username" required></label>
+    <label>Password <input type="password" name="password" required minlength="12"></label>
+    <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
+    ${serverFieldsets(servers)}
+    <button type="submit">Create account</button>
+  </form>
+  <form method="post" action="/admin/accounts/invite" class="create-form create-form-invite">
+    <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
+    ${serverFieldsets(servers)}
+    <button type="submit">Generate invite link</button>
+  </form>
+</div>
 ${changePasswordSection()}`,
     { admin, active: "accounts", pageTitle: "Admin accounts" }
   );
@@ -233,6 +294,28 @@ ${changePasswordSection()}`,
 
 function accountsPage(data) {
   return data.admin.can_manage_accounts ? siteAdminAccountsPage(data) : myAccountPage(data);
+}
+
+function invitePage({ error } = {}) {
+  return layout(
+    "Accept invite — DCS Control Panel",
+    `<h1>Create your account</h1>
+${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+<form method="post">
+  <label>Username <input type="text" name="username" required autofocus></label>
+  <label>Password <input type="password" name="password" required minlength="12"></label>
+  <label>Confirm password <input type="password" name="confirm_password" required minlength="12"></label>
+  <button type="submit">Create account</button>
+</form>`
+  );
+}
+
+function inviteExpiredPage() {
+  return layout(
+    "Invite expired — DCS Control Panel",
+    `<h1>This invite link is invalid or has expired</h1>
+<p>Ask a site admin for a new one.</p>`
+  );
 }
 
 function serversPage({ admin, servers, error, notice }) {
@@ -340,6 +423,8 @@ module.exports = {
   setupPage,
   dashboardPage,
   accountsPage,
+  invitePage,
+  inviteExpiredPage,
   serversPage,
   webguiPortsPage,
   webguiSyncPage,

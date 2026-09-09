@@ -223,3 +223,53 @@ fieldset {
   margin: 0;
 }
 legend { padding: 0 0.4rem; color: var(--text-muted); }
+
+/* fixed-vs-invite account creation slider: pure CSS, no JS. A single
+   checkbox drives an actual sliding-thumb switch (not segmented buttons),
+   plus which .create-form is visible, all via :checked. The checkbox is a
+   direct child of .account-create, so both the following <label> (via +)
+   and the two forms further down (via the general sibling ~) react to it. */
+.account-create { display: flex; flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+.mode-toggle-input { position: absolute; opacity: 0; pointer-events: none; }
+.mode-switch-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  user-select: none;
+}
+.mode-switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.mode-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.15s, background-color 0.15s;
+}
+.mode-toggle-input:checked + .mode-switch-row .mode-switch-track { background: var(--accent-blue); border-color: var(--accent-blue); }
+.mode-toggle-input:checked + .mode-switch-row .mode-switch-thumb { transform: translateX(16px); background: #fff; }
+.mode-toggle-input:checked + .mode-switch-row .mode-switch-text-fixed { opacity: 0.5; }
+.mode-toggle-input:not(:checked) + .mode-switch-row .mode-switch-text-invite { opacity: 0.5; }
+.create-form-invite { display: none; }
+.mode-toggle-input:checked ~ .create-form-fixed { display: none; }
+.mode-toggle-input:checked ~ .create-form-invite { display: flex; }
+
+.invite-notice { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.invite-link { word-break: break-all; }
+.invite-copy { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+tr.pending-invite td { color: var(--text-muted); }
+.pending-label { font-style: italic; }

@@ -10,6 +10,7 @@ const tar = require("tar");
 const db = require("./db");
 const auth = require("./auth");
 const serversDb = require("./servers");
+const invitesDb = require("./invites");
 const views = require("./views");
 const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
@@ -104,6 +105,49 @@ app.post("/logout", express.urlencoded({ extended: false }), (req, res) => {
   res.redirect("/login");
 });
 
+// ---- /invite/:token: redeem an account-creation invite. Unauthenticated,
+// same tier as /setup and /login -- the account being created doesn't
+// exist yet. ----
+
+app.get("/invite/:token", (req, res) => {
+  const invite = invitesDb.getValidInviteByToken(req.params.token);
+  if (!invite) return res.status(404).send(views.inviteExpiredPage());
+  res.send(views.invitePage({}));
+});
+
+app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) => {
+  const invite = invitesDb.getValidInviteByToken(req.params.token);
+  if (!invite) return res.status(404).send(views.inviteExpiredPage());
+
+  const { username, password, confirm_password } = req.body;
+  if (!username || !password || !confirm_password) {
+    return res.status(400).send(views.invitePage({ error: "All fields are required." }));
+  }
+  if (password.length < 12) {
+    return res.status(400).send(views.invitePage({ error: "Password must be at least 12 characters." }));
+  }
+  if (password !== confirm_password) {
+    return res.status(400).send(views.invitePage({ error: "Password and confirmation do not match." }));
+  }
+
+  let info;
+  try {
+    info = db
+      .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
+      .run(username, auth.hashPassword(password), invite.can_manage_accounts);
+  } catch (err) {
+    return res.status(400).send(views.invitePage({ error: "That username is already taken." }));
+  }
+  for (const grant of invitesDb.getInviteAccess(invite.id)) {
+    serversDb.setAccess(info.lastInsertRowid, grant.server_id, { canUploadMissions: grant.can_upload_missions });
+  }
+  invitesDb.deleteInvite(invite.id);
+
+  const token = auth.createSession(info.lastInsertRowid);
+  setSessionCookie(res, token);
+  res.redirect("/");
+});
+
 // ---- everything below requires a session ----
 
 app.use(auth.requireAuth);
@@ -123,17 +167,19 @@ const accountsRouter = express.Router();
 // account, or account creation, gets requireAccountManager on its own
 // route below instead.
 
-function loadAccountsPageData(req, { error, notice } = {}) {
+function loadAccountsPageData(req, { error, notice, inviteUrl } = {}) {
   const servers = serversDb.getAllServers();
   if (!req.admin.can_manage_accounts) {
     const own = { username: req.admin.username, access: serversDb.getAccessibleServers(req.admin.id) };
     return views.accountsPage({ admin: req.admin, own, servers, error, notice });
   }
+  invitesDb.pruneExpired();
   const accounts = db
     .prepare("SELECT id, username, can_manage_accounts FROM admins ORDER BY id")
     .all()
     .map((a) => ({ ...a, access: serversDb.getAccessibleServers(a.id) }));
-  return views.accountsPage({ admin: req.admin, accounts, servers, error, notice });
+  const invites = invitesDb.listValidInvites();
+  return views.accountsPage({ admin: req.admin, accounts, servers, invites, error, notice, inviteUrl });
 }
 
 accountsRouter.get("/", (req, res) => {
@@ -167,6 +213,41 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
 
 // ---- everything below is site-admin only ----
 
+accountsRouter.post("/invite", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
+  invitesDb.pruneExpired();
+  const { id: inviteId, token } = invitesDb.createInvite({ canManageAccounts: Boolean(req.body.can_manage_accounts) });
+  for (const server of serversDb.getAllServers()) {
+    const wantsAccess = Boolean(req.body[`access_${server.id}`]);
+    const wantsUpload = Boolean(req.body[`upload_${server.id}`]);
+    if (wantsAccess) invitesDb.setInviteAccess(inviteId, server.id, { canUploadMissions: wantsUpload });
+  }
+  const inviteUrl = `${req.protocol}://${req.get("host")}/invite/${token}`;
+  res.send(loadAccountsPageData(req, { inviteUrl }));
+});
+
+accountsRouter.post("/invites/:id", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
+  const inviteId = Number(req.params.id);
+  if (!invitesDb.getValidInviteById(inviteId)) {
+    return res.status(404).send(loadAccountsPageData(req, { error: "That invite has expired or no longer exists." }));
+  }
+  invitesDb.setCanManageAccounts(inviteId, Boolean(req.body.can_manage_accounts));
+  for (const server of serversDb.getAllServers()) {
+    const wantsAccess = Boolean(req.body[`access_${server.id}`]);
+    const wantsUpload = Boolean(req.body[`upload_${server.id}`]);
+    if (wantsAccess) {
+      invitesDb.setInviteAccess(inviteId, server.id, { canUploadMissions: wantsUpload });
+    } else {
+      invitesDb.revokeInviteAccess(inviteId, server.id);
+    }
+  }
+  res.redirect("/admin/accounts");
+});
+
+accountsRouter.post("/invites/:id/revoke", auth.requireAccountManager, (req, res) => {
+  invitesDb.deleteInvite(Number(req.params.id));
+  res.redirect("/admin/accounts");
+});
+
 accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const { username, password, can_manage_accounts } = req.body;
   if (!username || !password || password.length < 12) {
@@ -188,7 +269,7 @@ accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extend
   res.redirect("/admin/accounts");
 });
 
-accountsRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) => {
+accountsRouter.post("/:id", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const targetId = Number(req.params.id);
   const canManage = Boolean(req.body.can_manage_accounts);
 
@@ -214,7 +295,7 @@ accountsRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) 
   res.redirect("/admin/accounts");
 });
 
-accountsRouter.post("/:id/delete", (req, res) => {
+accountsRouter.post("/:id/delete", auth.requireAccountManager, (req, res) => {
   const targetId = Number(req.params.id);
   const target = db.prepare("SELECT * FROM admins WHERE id = ?").get(targetId);
   if (!target) return res.status(404).send(loadAccountsPageData(req, { error: "No such account." }));

@@ -47,6 +47,22 @@ db.exec(`
     key TEXT NOT NULL,
     attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL,
+    can_manage_accounts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS invite_server_access (
+    invite_id INTEGER NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    can_upload_missions INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (invite_id, server_id)
+  );
 `);
 
 // Guarded migration for DBs created before the servers table dropped
