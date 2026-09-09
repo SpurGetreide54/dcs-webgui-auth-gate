@@ -29,6 +29,12 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(cookieParser());
 app.use("/assets", express.static(path.join(__dirname, "..", "public")));
+// Browsers request /favicon.ico at the domain root as a fallback whenever
+// a page has no <link rel="icon"> of its own -- true of the real DCS
+// webgui's index.html, which we don't control. Answering it here avoids
+// a stray 404 on every /s/<slug>/ page load; a real .ico isn't required,
+// browsers accept any image type regardless of the request's extension.
+app.get("/favicon.ico", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "logo.png")));
 
 function adminCount() {
   return db.prepare("SELECT COUNT(*) AS n FROM admins").get().n;
