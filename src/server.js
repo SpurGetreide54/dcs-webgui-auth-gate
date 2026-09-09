@@ -596,9 +596,26 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
       target.port = CONTROL_PORT;
       return target.toString();
     }
+    // The real DCS webgui's own control-port discovery call
+    // (ACTION=GetJSONData) only exists to hand back { address, webPort,
+    // webKey } so the app can set its live backend URL and derive its
+    // AES key from webKey. The app's own code already skips this call
+    // entirely when opened via file:// or localhost, hardcoding this
+    // exact response instead -- webKey is a fixed, publicly known
+    // constant baked into every DCS install (never a per-server secret),
+    // not something that needs a real round trip. Mirroring that same
+    // shortcut here, for the reverse-proxied case, is exactly as
+    // legitimate as the app's own file://+localhost path already is.
+    function isControlPortDiscoveryCall(url) {
+      return /[?&]ACTION=GetJSONData(?:&|$)/.test(url);
+    }
     var nativeFetch = window.fetch;
     window.fetch = function (input, init) {
       var url = typeof input === "string" ? input : input.url;
+      if (isControlPortDiscoveryCall(url)) {
+        var body = JSON.stringify({ address: "127.0.0.1", webPort: Number(CONTROL_PORT), webKey: "DigitalCombatSimulator.com" });
+        return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
       var rewritten = rewriteIfBackendCall(url);
       if (rewritten) {
         init = Object.assign({}, init);
