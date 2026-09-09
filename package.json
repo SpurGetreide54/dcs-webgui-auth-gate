@@ -1,6 +1,6 @@
 {
   "name": "dcs-webgui-auth-gate",
-  "version": "1.0-alpha",
+  "version": "1.0.1-alpha",
   "private": true,
   "license": "GPL-3.0-or-later",
   "description": "Per-admin, per-server login gate and reverse proxy in front of the DCS webgui control panel, plus a mission-upload agent for the game server host.",
