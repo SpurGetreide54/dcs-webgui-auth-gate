@@ -166,9 +166,18 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(restrictedHtml, /Example Server - Training/);
     assert.doesNotMatch(restrictedHtml, /Example Server - Community 1/);
 
-    // restricted account must not reach account management
-    const forbiddenAccounts = await fetch(`${base}/admin/accounts`, { headers: { Cookie: serverAdminCookie } });
-    assert.equal(forbiddenAccounts.status, 403);
+    // restricted account gets the read-only "My account" page, not a 403 --
+    // its own row only, no site-admin column, no account-management actions
+    const myAccountRes = await fetch(`${base}/admin/accounts`, { headers: { Cookie: serverAdminCookie } });
+    assert.equal(myAccountRes.status, 200);
+    const myAccountHtml = await myAccountRes.text();
+    assert.match(myAccountHtml, /My account/);
+    assert.match(myAccountHtml, />serveradmin</);
+    assert.doesNotMatch(myAccountHtml, />siteadmin</, "My account must show only the logged-in admin's own row, not the full roster");
+    assert.doesNotMatch(myAccountHtml, /Site admin/, "read-only view must not show the Site admin column");
+    assert.doesNotMatch(myAccountHtml, /Add account/, "a non-site-admin must not see account creation");
+    assert.match(myAccountHtml, /Change password/);
+    assert.match(myAccountHtml, /<input type="checkbox" disabled checked>/, "own granted access must render as a checked, disabled checkbox");
 
     // restricted account must not reach Community 1's proxy
     const forbiddenProxy = await fetch(`${base}/s/community1/`, { headers: { Cookie: serverAdminCookie } });
@@ -374,6 +383,46 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       });
     }
     assert.equal(lastAttempt.status, 429, "6th attempt within the window should be rate-limited");
+
+    // --- self-service password change: wrong current password rejected,
+    // correct flow updates the hash and signs out every *other* session for
+    // that account while leaving the one that made the change alone ---
+    const secondServerAdminLogin = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=serveradmin&password=another-long-password",
+      redirect: "manual",
+    });
+    const serverAdminCookie2 = extractCookie(secondServerAdminLogin);
+    assert.ok(serverAdminCookie2, "a second concurrent session for the same account must be possible");
+
+    const badCurrentPwRes = await fetch(`${base}/admin/accounts/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: serverAdminCookie },
+      body: "current_password=wrong-password&new_password=brand-new-password-1&confirm_password=brand-new-password-1",
+    });
+    assert.equal(badCurrentPwRes.status, 400, "wrong current password must be rejected");
+
+    const changePwRes = await fetch(`${base}/admin/accounts/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: serverAdminCookie },
+      body: "current_password=another-long-password&new_password=brand-new-password-1&confirm_password=brand-new-password-1",
+    });
+    assert.equal(changePwRes.status, 200);
+
+    // the session that made the change stays alive
+    const afterChangeOwnSession = await fetch(`${base}/`, {
+      headers: { Cookie: serverAdminCookie, "Sec-Fetch-Dest": "document" },
+      redirect: "manual",
+    });
+    assert.equal(afterChangeOwnSession.status, 200, "the session that changed the password must stay signed in");
+
+    // the other, older session for the same account must have been signed out
+    const afterChangeOtherSession = await fetch(`${base}/`, {
+      headers: { Cookie: serverAdminCookie2, "Sec-Fetch-Dest": "document" },
+      redirect: "manual",
+    });
+    assert.equal(afterChangeOtherSession.status, 302, "changing the password must sign out every other session for that account");
 
     // --- logout is a destructive-styled navbar button, POST only ---
     const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();

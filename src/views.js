@@ -19,8 +19,15 @@ function sidebarNav(admin, active) {
     </a></li>`;
 
   const items = [navItem("dashboard", "/", "icon-dashboard.png", "Dashboard")];
+  // Every admin gets a link here now, not just site admins -- it's either
+  // the full "Manage accounts" page or the read-only "My account" page,
+  // see accountsPage(). Icon/label tell the two apart at a glance.
+  items.push(
+    admin.can_manage_accounts
+      ? navItem("accounts", "/admin/accounts", "icon-manage-accounts.png", "Manage accounts")
+      : navItem("accounts", "/admin/accounts", "icon-user.png", "My account")
+  );
   if (admin.can_manage_accounts) {
-    items.push(navItem("accounts", "/admin/accounts", "icon-user.png", "Manage accounts"));
     items.push(navItem("servers", "/admin/servers", "icon-server.png", "Manage servers"));
   }
 
@@ -111,7 +118,32 @@ function dashboardPage({ admin, servers }) {
   return layout("Dashboard — DCS Control Panel", list, { admin, active: "dashboard", pageTitle: "Your servers" });
 }
 
-function accountsPage({ admin, accounts, servers, error, notice }) {
+function serverFieldsets(servers) {
+  return servers
+    .map(
+      (s) => `<fieldset>
+      <legend>${escapeHtml(s.name)}</legend>
+      <label><input type="checkbox" name="access_${s.id}"> Access</label>
+      <label><input type="checkbox" name="upload_${s.id}"> Can upload missions</label>
+    </fieldset>`
+    )
+    .join("");
+}
+
+function changePasswordSection() {
+  return `<h2>Change password</h2>
+<form method="post" action="/admin/accounts/change-password">
+  <label>Current password <input type="password" name="current_password" required></label>
+  <label>New password <input type="password" name="new_password" required minlength="12"></label>
+  <label>Confirm new password <input type="password" name="confirm_password" required minlength="12"></label>
+  <button type="submit" class="destructive">Change password</button>
+</form>`;
+}
+
+// Site admins get the full roster, all editable, plus account creation.
+// Everyone else gets myAccountPage() below instead -- see accountsPage()'s
+// branch.
+function siteAdminAccountsPage({ admin, accounts, servers, error, notice }) {
   // A <form> can't legally wrap a <tr>/<td>. Browsers silently relocate or
   // drop it during HTML parsing, so checkboxes "inside" it never actually
   // belong to it and don't get submitted. Fix: one empty <form id="..."> per
@@ -140,7 +172,7 @@ function accountsPage({ admin, accounts, servers, error, notice }) {
         ${cells}
         <td>
           <button type="submit" form="${formId}">Save</button>
-          ${accounts.length > 1 ? `<button form="${formId}" formaction="/admin/accounts/${a.id}/delete">Delete</button>` : ""}
+          ${accounts.length > 1 ? `<button form="${formId}" formaction="/admin/accounts/${a.id}/delete" class="destructive">Delete</button>` : ""}
         </td>
       </tr>`;
     })
@@ -161,19 +193,46 @@ ${forms}
   <label>Username <input type="text" name="username" required></label>
   <label>Password <input type="password" name="password" required minlength="12"></label>
   <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
-  ${servers
-    .map(
-      (s) => `<fieldset>
-      <legend>${escapeHtml(s.name)}</legend>
-      <label><input type="checkbox" name="access_${s.id}"> Access</label>
-      <label><input type="checkbox" name="upload_${s.id}"> Can upload missions</label>
-    </fieldset>`
-    )
-    .join("")}
+  ${serverFieldsets(servers)}
   <button type="submit">Create account</button>
-</form>`,
+</form>
+${changePasswordSection()}`,
     { admin, active: "accounts", pageTitle: "Admin accounts" }
   );
+}
+
+// Everyone who isn't a site admin: their own row only, read-only, no
+// account-management actions -- just a look at their own permissions plus
+// the ability to change their own password.
+function myAccountPage({ admin, own, servers, error, notice }) {
+  const cells = servers
+    .map((s) => {
+      const grant = own.access.find((x) => x.server_id === s.id);
+      const checked = grant ? "checked" : "";
+      const uploadChecked = grant && grant.can_upload_missions ? "checked" : "";
+      return `<td>
+          <label><input type="checkbox" disabled ${checked}> access</label><br>
+          <label><input type="checkbox" disabled ${uploadChecked}> upload</label>
+        </td>`;
+    })
+    .join("");
+  const header = servers.map((s) => `<th>${escapeHtml(s.name)}</th>`).join("");
+
+  return layout(
+    "My account — DCS Control Panel",
+    `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+<table>
+  <thead><tr><th>Username</th>${header}</tr></thead>
+  <tbody><tr><td>${escapeHtml(own.username)}</td>${cells}</tr></tbody>
+</table>
+${changePasswordSection()}`,
+    { admin, active: "accounts", pageTitle: "My account" }
+  );
+}
+
+function accountsPage(data) {
+  return data.admin.can_manage_accounts ? siteAdminAccountsPage(data) : myAccountPage(data);
 }
 
 function serversPage({ admin, servers, error, notice }) {

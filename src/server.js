@@ -113,13 +113,22 @@ app.get("/", (req, res) => {
   res.send(views.dashboardPage({ admin: req.admin, servers }));
 });
 
-// ---- account management (site admins only) ----
+// ---- account management: full page for site admins, read-only "My
+// account" + self-service password change for everyone else ----
 
 const accountsRouter = express.Router();
-accountsRouter.use(auth.requireAccountManager);
+// No blanket requireAccountManager gate here -- GET / and the
+// change-password route are for every admin (see accountsPage()'s
+// site-admin/self-service branch). Every mutation that touches another
+// account, or account creation, gets requireAccountManager on its own
+// route below instead.
 
 function loadAccountsPageData(req, { error, notice } = {}) {
   const servers = serversDb.getAllServers();
+  if (!req.admin.can_manage_accounts) {
+    const own = { username: req.admin.username, access: serversDb.getAccessibleServers(req.admin.id) };
+    return views.accountsPage({ admin: req.admin, own, servers, error, notice });
+  }
   const accounts = db
     .prepare("SELECT id, username, can_manage_accounts FROM admins ORDER BY id")
     .all()
@@ -131,7 +140,34 @@ accountsRouter.get("/", (req, res) => {
   res.send(loadAccountsPageData(req));
 });
 
-accountsRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
+// Self-service: change the logged-in admin's own password. Available to
+// every admin, not just site admins, which is why this isn't under
+// requireAccountManager. Signs out every other session for this account --
+// the point of requiring the current password is letting the real owner
+// kick out anyone (or anything hijacked) still logged in elsewhere.
+accountsRouter.post("/change-password", express.urlencoded({ extended: false }), (req, res) => {
+  const { current_password, new_password, confirm_password } = req.body;
+  if (!current_password || !new_password || !confirm_password) {
+    return res.status(400).send(loadAccountsPageData(req, { error: "All password fields are required." }));
+  }
+  if (!auth.verifyPassword(current_password, req.admin.password_hash)) {
+    return res.status(400).send(loadAccountsPageData(req, { error: "Current password is incorrect." }));
+  }
+  if (new_password.length < 12) {
+    return res.status(400).send(loadAccountsPageData(req, { error: "New password must be at least 12 characters." }));
+  }
+  if (new_password !== confirm_password) {
+    return res.status(400).send(loadAccountsPageData(req, { error: "New password and confirmation do not match." }));
+  }
+  db.prepare("UPDATE admins SET password_hash = ? WHERE id = ?").run(auth.hashPassword(new_password), req.admin.id);
+  const currentToken = req.cookies[auth.SESSION_COOKIE];
+  db.prepare("DELETE FROM sessions WHERE admin_id = ? AND token_hash != ?").run(req.admin.id, auth.hashToken(currentToken));
+  res.send(loadAccountsPageData(req, { notice: "Password changed. You're still signed in here; any other sessions were signed out." }));
+});
+
+// ---- everything below is site-admin only ----
+
+accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const { username, password, can_manage_accounts } = req.body;
   if (!username || !password || password.length < 12) {
     return res.status(400).send(loadAccountsPageData(req, { error: "Username required, password must be at least 12 characters." }));

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <!-- back figure is an exact offset copy of the front figure's strokes,
+       masked out wherever the front figure's silhouette sits, not just its
+       stroke line. Both figures are hollow outlines, so a stroke-only
+       cutout still let the back arc show through the front head's open
+       interior. -->
+  <mask id="front-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96">
+    <rect x="0" y="0" width="96" height="96" fill="#fff"/>
+    <path d="M12 88 C12 60 28 52 42 52 C56 52 72 60 72 88 Z" fill="#000" stroke="#000" stroke-width="11"/>
+    <circle cx="42" cy="34" r="18" fill="#000" stroke="#000" stroke-width="11"/>
+  </mask>
+  <g mask="url(#front-cutout)">
+    <circle cx="62" cy="22" r="15" fill="none" stroke="#e9ecef" stroke-width="7"/>
+    <path d="M32 76 C32 48 48 40 62 40 C76 40 92 48 92 76" fill="none" stroke="#e9ecef" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <circle cx="42" cy="34" r="15" fill="none" stroke="#e9ecef" stroke-width="7"/>
+  <path d="M12 88 C12 60 28 52 42 52 C56 52 72 60 72 88" fill="none" stroke="#e9ecef" stroke-width="7" stroke-linecap="round"/>
+</svg>

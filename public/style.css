@@ -173,6 +173,10 @@ input[type=text], input[type=password], input[type=file] {
   color: var(--text);
 }
 input[type=checkbox] { accent-color: var(--accent-green); width: 16px; height: 16px; }
+/* read-only permission checkboxes (My account page) -- ticked and unticked
+   both render as the same neutral gray, never the "this is a live control"
+   green */
+input[type=checkbox]:disabled { accent-color: var(--text-muted); opacity: 1; }
 
 button {
   padding: 0.6rem;

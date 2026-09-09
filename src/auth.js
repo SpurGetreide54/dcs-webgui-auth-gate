@@ -120,6 +120,7 @@ module.exports = {
   SESSION_COOKIE,
   hashPassword,
   verifyPassword,
+  hashToken,
   isRateLimited,
   recordLoginAttempt,
   pruneOldLoginAttempts,
