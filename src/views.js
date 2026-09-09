@@ -11,8 +11,7 @@ function escapeHtml(str) {
 }
 
 // Mirrors the real DCS webgui's own left-sidebar. Icon-only nav. Active
-// item gets a blue left border. Sign-out is pinned to the bottom via a
-// second <ul>.
+// item gets a blue left border.
 function sidebarNav(admin, active) {
   const navItem = (key, href, icon, label) =>
     `<li><a href="${href}" class="${key === active ? "active" : ""}" title="${escapeHtml(label)}">
@@ -27,7 +26,6 @@ function sidebarNav(admin, active) {
 
   return `<nav class="left-sidebar">
     <ul class="menu-items">${items.join("")}</ul>
-    <ul class="menu-items">${navItem("logout", "/logout", "icon-close.png", "Sign out")}</ul>
   </nav>`;
 }
 
@@ -37,7 +35,12 @@ function layout(title, body, { admin, active, pageTitle } = {}) {
       <img src="/assets/logo.png" alt="">
       <span class="brand-name">${escapeHtml(BRAND_NAME)}<span class="brand-tagline">Control Panel</span></span>
     </div>
-    ${admin ? `<div class="navbar-right">Signed in as ${escapeHtml(admin.username)}</div>` : ""}
+    ${admin ? `<div class="navbar-right">
+      <span>Signed in as ${escapeHtml(admin.username)}</span>
+      <form method="post" action="/logout" class="logout-form">
+        <button type="submit" class="destructive">Sign out</button>
+      </form>
+    </div>` : ""}
   </div>`;
 
   const main = admin

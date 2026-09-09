@@ -86,6 +86,18 @@ a { color: var(--accent-cyan); }
   padding: 0 1.2rem;
   color: var(--text-muted);
   font-size: 0.85em;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+/* form's default card styling (background/border/padding/max-width) is
+   wrong for a single inline button sitting in the navbar */
+.logout-form {
+  display: inline-flex;
+  max-width: none;
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 /* ---- shell: left icon sidebar + main content, only present once signed in ---- */
@@ -173,8 +185,8 @@ button {
   color: #fff;
 }
 button:hover { background: var(--accent-green-hover); }
-button[formaction$="/delete"] { background: var(--accent-red); }
-button[formaction$="/delete"]:hover { background: var(--accent-red-hover); }
+button[formaction$="/delete"], button.destructive { background: var(--accent-red); }
+button[formaction$="/delete"]:hover, button.destructive:hover { background: var(--accent-red-hover); }
 
 table {
   border-collapse: collapse;

@@ -98,7 +98,7 @@ app.post("/login", express.urlencoded({ extended: false }), (req, res) => {
   res.redirect("/");
 });
 
-app.get("/logout", (req, res) => {
+app.post("/logout", express.urlencoded({ extended: false }), (req, res) => {
   auth.destroySession(req.cookies[auth.SESSION_COOKIE]);
   res.clearCookie(auth.SESSION_COOKIE);
   res.redirect("/login");

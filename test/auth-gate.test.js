@@ -375,8 +375,15 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
     assert.equal(lastAttempt.status, 429, "6th attempt within the window should be rate-limited");
 
+    // --- logout is a destructive-styled navbar button, POST only ---
+    const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(dashboardHtmlForLogout, /<form method="post" action="\/logout" class="logout-form">/);
+    assert.match(dashboardHtmlForLogout, /<button type="submit" class="destructive">Sign out<\/button>/);
+    const getLogoutRes = await fetch(`${base}/logout`, { headers: { Cookie: siteAdminCookie }, redirect: "manual" });
+    assert.equal(getLogoutRes.status, 404, "logout must only accept POST now, not the old GET link");
+
     // --- logout actually invalidates the session ---
-    await fetch(`${base}/logout`, { headers: { Cookie: siteAdminCookie }, redirect: "manual" });
+    await fetch(`${base}/logout`, { method: "POST", headers: { Cookie: siteAdminCookie }, redirect: "manual" });
     const afterLogout = await fetch(`${base}/`, {
       headers: { Cookie: siteAdminCookie, "Sec-Fetch-Dest": "document" },
       redirect: "manual",
