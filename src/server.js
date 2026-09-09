@@ -574,6 +574,7 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
       // backend.
       if (target.hostname === location.hostname && target.pathname.indexOf(BASE_PATH) === 0) return null;
       target.protocol = location.protocol;
+      target.hostname = location.hostname;
       target.port = CONTROL_PORT;
       return target.toString();
     }
