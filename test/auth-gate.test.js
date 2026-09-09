@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
+const vm = require("node:vm");
 
 function startDummyHttpServer(handler) {
   return new Promise((resolve) => {
@@ -42,7 +43,7 @@ function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
-let app, db, serversDb;
+let app, db, serversDb, serverProxy;
 let dummyAgent, dummyAgentPort;
 let dummyAgentReceived;
 let sqlitePath;
@@ -72,6 +73,7 @@ test.before(async () => {
   app = require("../src/server");
   db = require("../src/db");
   serversDb = require("../src/servers");
+  serverProxy = require("../src/serverProxy");
 });
 
 test.after(async () => {
@@ -190,6 +192,56 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const webguiRes2 = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
     const tokenMatch2 = (await webguiRes2.text()).match(/var TOKEN = "([0-9a-f]+)"/);
     assert.notEqual(tokenMatch2[1], tokenMatch[1], "each page load must mint its own distinct token");
+
+    // The bootstrap's fetch-rewrite logic itself, actually executed -- not
+    // just checked for presence. This exact function shipped four broken
+    // versions in a row to a real production deploy with nobody catching
+    // it, including one break from a \d escape silently getting eaten by
+    // Node's own template-literal parsing (server.js's own source has to
+    // double-escape backslashes precisely so the *browser* receives a
+    // working regex -- a mistake invisible by reading the source, only
+    // caught by running what actually reaches the browser, which is what
+    // this does).
+    const bootstrapMatch = webguiHtml.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(bootstrapMatch, "index.html response must include an inline bootstrap <script> block");
+    const bootstrapScript = bootstrapMatch[1];
+
+    function runBootstrapFetch(requestUrl, { hostname, pathname }) {
+      const calls = [];
+      const context = { location: { hostname, protocol: "https:", href: `https://${hostname}${pathname}` }, URL, Headers };
+      context.window = {
+        fetch: async (url) => {
+          calls.push(url);
+          return { ok: true };
+        },
+      };
+      vm.createContext(context);
+      vm.runInContext(bootstrapScript, context);
+      context.window.fetch(requestUrl);
+      return calls[0];
+    }
+
+    const hostname = "panel.example.test";
+    const pathname = "/s/training/";
+
+    // The real DCS webgui's own hardcoded default backend URL, byte for
+    // byte: a literal backslash before the port colon. A backslash right
+    // after the host ends URL authority parsing for http(s) URLs, so an
+    // unfixed regex here lets "8088" leak into the path and show up
+    // doubled next to the port this rewrite sets correctly.
+    const rewritten = runBootstrapFetch("http://127.0.0.1\\:8088/encryptedRequest", { hostname, pathname });
+    assert.equal(
+      rewritten,
+      `https://${hostname}:${serverProxy.CONTROL_PORT}/encryptedRequest`,
+      "must rewrite the real DCS webgui's malformed default backend URL to a clean same-host URL with no doubled port"
+    );
+
+    // A request for one of the app's own served files, same-origin under
+    // BASE_PATH, must pass through untouched -- rewriting it too would
+    // send the app's own JS/CSS/font requests at the control-port proxy
+    // instead of this app's own static file server.
+    const ownAsset = runBootstrapFetch(`${pathname}js/app.js`, { hostname, pathname });
+    assert.equal(ownAsset, `${pathname}js/app.js`, "a request for the app's own served files must not be rewritten");
 
     // a path with no matching static asset must 404, not fall through to some proxy
     const missingAssetRes = await fetch(`${base}/s/training/does/not/exist.js`, { headers: { Cookie: siteAdminCookie } });

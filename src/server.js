@@ -572,7 +572,16 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
         // untouched through the rewrite below and shows up doubled next to
         // the port we do set correctly. Undo that one specific escape
         // before parsing, so the URL's own port is what wins.
-        target = new URL(url.replace(/\\+:(\d+)/, ":$1"), location.href);
+        //
+        // Quadruple/double backslashes below, not the single/double a
+        // plain regex would use: this whole block is itself a JS template
+        // literal in server.js. \\d is not a recognized string escape, so
+        // Node's own parser silently drops the backslash and ships the
+        // browser a regex that can never match a digit -- confirmed with
+        // node -e before writing this the second time. This exact count
+        // survives that first unescaping and reaches the browser as the
+        // literal regex /\\+:(\d+)/.
+        target = new URL(url.replace(/\\\\+:(\\d+)/, ":$1"), location.href);
       } catch (e) {
         return null;
       }
