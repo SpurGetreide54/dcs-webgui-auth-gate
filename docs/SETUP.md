@@ -32,13 +32,12 @@ npm start
 
 ## Production deployment
 
-Two pieces deploy to two different machines. See the main README for what
+Two pieces deploy to two different machines.<br>See the main README for what
 each one does.
 
 ### auth-gate
 
-Deploy on a control-panel VM, behind an nginx reverse proxy (see the
-sibling `dcs-webgui-reverse-proxy` repo).
+Deploy on a control-panel VM, behind a reverse proxy.
 
 - Keep `COOKIE_SECURE=true`. The session cookie needs the HTTPS the
   reverse proxy provides.
