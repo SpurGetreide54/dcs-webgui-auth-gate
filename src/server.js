@@ -563,7 +563,16 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
     function rewriteIfBackendCall(url) {
       var target;
       try {
-        target = new URL(url, location.href);
+        // The real DCS webgui's own default backend URL is malformed --
+        // "http://127.0.0.1\\:8088/..." with a literal backslash before the
+        // port colon. Per the URL spec, a backslash right after the host
+        // ends authority parsing for http(s) URLs, so the port number never
+        // gets recognized as a port at all -- it falls into the path
+        // instead ("/8088/encryptedRequest"), which then rides along
+        // untouched through the rewrite below and shows up doubled next to
+        // the port we do set correctly. Undo that one specific escape
+        // before parsing, so the URL's own port is what wins.
+        target = new URL(url.replace(/\\+:(\d+)/, ":$1"), location.href);
       } catch (e) {
         return null;
       }
