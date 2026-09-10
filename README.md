@@ -1,4 +1,4 @@
-# dcs-webgui-auth-gate
+# DCS Webgui Auth Gate
 
 DCS World is a combat flight simulator. People run private multiplayer
 game servers for it. Each DCS dedicated-server install ships its own
