@@ -34,11 +34,13 @@ install through `/admin/servers/webgui-sync`.
   panel traffic to the right DCS server.
 - **`src/agent.js`** (`npm run agent`) — a small relay agent. Deploy it on
   the physical host, next to the DCS gameservers — the only machine that
-  can reach a control port directly. It does two jobs: it accepts `.miz`
-  mission-file uploads into a server's mission folder, and it relays
-  control-port traffic from the auth-gate. A shared token authenticates
-  it. It has no accounts, no login, and no read/list/delete access to the
-  folders it's given — see the comments in that file for why.
+  can reach a control port directly. It accepts `.miz` mission-file
+  uploads into a server's mission folder, reads and writes the server's
+  `autoexec.cfg` to check and assign its webgui port, relays control-port
+  traffic from the auth-gate, and can read and tar up a DCS install's
+  WebGUI folder for `webgui-sync`. A shared token authenticates it. It has
+  no accounts, no login, and no delete access to anything — see the
+  comments in that file for why.
 
 ## Two admin roles
 
