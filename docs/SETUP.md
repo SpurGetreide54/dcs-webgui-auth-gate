@@ -165,10 +165,10 @@ Safe to re-run with the same parameters as before; see the script's own
 2. Sign the release:
    ```
    node scripts/release/sign-updates.js \
-     --version 1.2.0 \
-     --changelog-url https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases/tag/1.2.0 \
-     --auth-gate local-only/release/auth-gate/auth-gate-1.2.0.tar.gz \
-     --agent local-only/release/agent/agent-1.2.0.exe
+     --version 1.2-alpha \
+     --changelog-url https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases/tag/1.2-alpha \
+     --auth-gate local-only/release/auth-gate/auth-gate-1.2-alpha.tar.gz \
+     --agent local-only/release/agent/agent-1.2-alpha.exe
    ```
    Needs `local-only/keys/update-signing-key.pem` -- generate one once with
    `node -e "require('crypto').generateKeyPairSync('ed25519')"`-style code
