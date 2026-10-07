@@ -31,6 +31,9 @@ db.exec(`
     admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
     server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     can_upload_missions INTEGER NOT NULL DEFAULT 0,
+    can_view_missions INTEGER NOT NULL DEFAULT 0,
+    can_download_missions INTEGER NOT NULL DEFAULT 0,
+    can_delete_missions INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (admin_id, server_id)
   );
 
@@ -61,6 +64,9 @@ db.exec(`
     invite_id INTEGER NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
     server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     can_upload_missions INTEGER NOT NULL DEFAULT 0,
+    can_view_missions INTEGER NOT NULL DEFAULT 0,
+    can_download_missions INTEGER NOT NULL DEFAULT 0,
+    can_delete_missions INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (invite_id, server_id)
   );
 `);
@@ -82,6 +88,28 @@ db.exec(`
   }
   if (!db.prepare("PRAGMA table_info(servers)").all().some((c) => c.name === "dcs_install_path")) {
     db.exec("ALTER TABLE servers ADD COLUMN dcs_install_path TEXT");
+  }
+}
+
+// Guarded migration for DBs created before view/download/delete mission
+// permissions existed as their own columns, independent of upload. Adding
+// the columns is harmless (they default to 0), but a DB that already had
+// upload-granted admins would otherwise lock every one of them out of the
+// now-view-gated /missions page the moment this ships -- so the one-time
+// backfill right after adding the columns carries their existing access
+// forward. Only runs the backfill in the same pass the columns are first
+// added; a later toggle of upload alone must never re-grant view.
+for (const table of ["admin_server_access", "invite_server_access"]) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!columns.includes("can_view_missions")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN can_view_missions INTEGER NOT NULL DEFAULT 0`);
+    db.exec(`UPDATE ${table} SET can_view_missions = 1 WHERE can_upload_missions = 1`);
+  }
+  if (!columns.includes("can_download_missions")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN can_download_missions INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!columns.includes("can_delete_missions")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN can_delete_missions INTEGER NOT NULL DEFAULT 0`);
   }
 }
 

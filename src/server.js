@@ -552,12 +552,16 @@ app.use("/admin/servers", serversRouter);
 
 // ---- per-server: access check, mission upload, then generic proxy ----
 
-function requireServerAccess({ upload }) {
+// permission is one of servers.js's PERMISSION_COLUMNS keys ("upload",
+// "view", "download", "delete"), or omitted for routes that only need
+// *some* access to the server at all (the generic webgui proxy/static
+// passthrough) -- "view" is specifically the mission-management page's own
+// gate, not a stand-in for bare access.
+function requireServerAccess({ permission } = {}) {
   return (req, res, next) => {
     const server = serversDb.getServerBySlug(req.params.slug);
     if (!server) return res.status(404).send("Unknown server.");
-    const access = serversDb.getAccess(req.admin.id, server.id);
-    if (!access || (upload && !access.can_upload_missions)) {
+    if (!serversDb.hasPermission(req.admin.id, server.id, permission || "access")) {
       return res.status(403).send("Forbidden: you don't have access to this server.");
     }
     req.dcsServer = server;
@@ -573,26 +577,57 @@ const upload = multer({
   },
 });
 
-app.get("/s/:slug/missions", requireServerAccess({ upload: true }), (req, res) => {
-  res.send(views.missionsPage({ admin: req.admin, server: req.dcsServer }));
+function loadMissionAccess(req) {
+  const access = serversDb.getAccess(req.admin.id, req.dcsServer.id) || {};
+  return {
+    canUpload: Boolean(access.can_upload_missions),
+    canView: Boolean(access.can_view_missions),
+    canDownload: Boolean(access.can_download_missions),
+    canDelete: Boolean(access.can_delete_missions),
+  };
+}
+
+async function fetchMissionsList(instanceName) {
+  const url = new URL(`/missions/${encodeURIComponent(instanceName)}`, MISSION_AGENT_URL);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  if (!res.ok) throw new Error(`agent returned ${res.status}`);
+  return (await res.json()).missions;
+}
+
+async function renderMissionsPage(req, res, { status = 200, error, notice } = {}) {
+  const access = loadMissionAccess(req);
+  let missions = [];
+  let pageError = error;
+  if (access.canView) {
+    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+      pageError = pageError || "Mission agent is not configured.";
+    } else {
+      try {
+        missions = await fetchMissionsList(req.dcsServer.instance_name);
+      } catch (err) {
+        pageError = pageError || `Could not reach the mission agent: ${err.message}`;
+      }
+    }
+  }
+  res.status(status).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, access, missions, error: pageError, notice }));
+}
+
+app.get("/s/:slug/missions", requireServerAccess({ permission: "view" }), (req, res) => {
+  renderMissionsPage(req, res);
 });
 
 app.post(
   "/s/:slug/missions/upload",
-  requireServerAccess({ upload: true }),
+  requireServerAccess({ permission: "upload" }),
   (req, res, next) => {
     upload.single("mission")(req, res, (err) => {
-      if (err) return res.status(400).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: err.message }));
+      if (err) return renderMissionsPage(req, res, { status: 400, error: err.message });
       next();
     });
   },
   async (req, res) => {
-    if (!req.file) {
-      return res.status(400).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: "No .miz file provided." }));
-    }
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
-      return res.status(500).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: "Mission agent is not configured." }));
-    }
+    if (!req.file) return renderMissionsPage(req, res, { status: 400, error: "No .miz file provided." });
+    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
     try {
       const form = new FormData();
       form.append("instance_name", req.dcsServer.instance_name);
@@ -608,12 +643,12 @@ app.post(
       });
       if (!agentRes.ok) {
         const detail = await agentRes.text().catch(() => "");
-        return res.status(502).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: `Mission agent rejected the upload: ${detail || agentRes.status}` }));
+        return renderMissionsPage(req, res, { status: 502, error: `Mission agent rejected the upload: ${detail || agentRes.status}` });
       }
     } catch (err) {
-      return res.status(502).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, error: `Could not reach the mission agent: ${err.message}` }));
+      return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
     }
-    res.send(views.missionsPage({ admin: req.admin, server: req.dcsServer, notice: `Uploaded ${req.file.originalname}.` }));
+    renderMissionsPage(req, res, { notice: `Uploaded ${req.file.originalname}.` });
   }
 );
 
@@ -673,7 +708,7 @@ function loadWebguiIndexTemplate(root) {
 
 let webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 
-app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
+app.get("/s/:slug/", requireServerAccess(), (req, res) => {
   if (!webguiIndexTemplate) {
     return res.status(503).send("The DCS webgui bundle is not installed on this server yet.");
   }
@@ -754,7 +789,7 @@ app.get("/s/:slug/", requireServerAccess({ upload: false }), (req, res) => {
   res.send(webguiIndexTemplate.replace(APP_JS_SCRIPT_RE, `${bootstrap}\n  <script src="js/app.js"></script>`));
 });
 
-app.use("/s/:slug", requireServerAccess({ upload: false }), express.static(webguiRoot, { index: false }));
+app.use("/s/:slug", requireServerAccess(), express.static(webguiRoot, { index: false }));
 
 app.use((req, res) => res.status(404).send("Not found."));
 

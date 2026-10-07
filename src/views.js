@@ -110,7 +110,7 @@ function dashboardPage({ admin, servers }) {
           (s) => `<li>
         <strong>${escapeHtml(s.name)}</strong>
         — <a href="/s/${encodeURIComponent(s.slug)}/">Open control panel</a>
-        ${s.can_upload_missions ? `— <a href="/s/${encodeURIComponent(s.slug)}/missions">Upload mission</a>` : ""}
+        ${s.can_view_missions ? `— <a href="/s/${encodeURIComponent(s.slug)}/missions">Missions</a>` : ""}
       </li>`
         )
         .join("")}</ul>`
@@ -404,16 +404,54 @@ ${
   return layout("Sync webgui — DCS Control Panel", body, { admin, active: "servers", pageTitle: "Sync webgui bundle" });
 }
 
-function missionsPage({ admin, server, error, notice }) {
-  return layout(
-    `Upload mission — ${server.name}`,
-    `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
-${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes;
+  let unit = -1;
+  do {
+    value /= 1024;
+    unit++;
+  } while (value >= 1024 && unit < units.length - 1);
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
+function missionListSection(missions) {
+  const rows = missions.length
+    ? missions
+        .map(
+          (m) => `<tr>
+        <td>${escapeHtml(m.name)}</td>
+        <td class="mission-size">${formatBytes(m.size)}</td>
+        <td class="mission-date">${escapeHtml(m.modifiedAt.slice(0, 16).replace("T", " "))}</td>
+      </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="3">No missions on this server yet.</td></tr>`;
+
+  return `<h2>Missions</h2>
+<table>
+  <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>`;
+}
+
+function missionsPage({ admin, server, access = {}, missions = [], error, notice }) {
+  const uploadForm = access.canUpload
+    ? `<h2>Upload mission</h2>
 <form method="post" action="/s/${encodeURIComponent(server.slug)}/missions/upload" enctype="multipart/form-data">
   <label>Mission file (.miz) <input type="file" name="mission" accept=".miz" required></label>
   <button type="submit">Upload</button>
-</form>`,
-    { admin, active: "dashboard", pageTitle: `Upload mission — ${server.name}` }
+</form>`
+    : "";
+
+  return layout(
+    `Missions — ${server.name}`,
+    `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+${access.canView ? missionListSection(missions) : ""}
+${uploadForm}`,
+    { admin, active: "dashboard", pageTitle: `Missions — ${server.name}` }
   );
 }
 

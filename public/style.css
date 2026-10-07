@@ -273,3 +273,6 @@ legend { padding: 0 0.4rem; color: var(--text-muted); }
 .invite-copy { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
 tr.pending-invite td { color: var(--text-muted); }
 .pending-label { font-style: italic; }
+
+/* ---- mission list ---- */
+.mission-size, .mission-date { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }

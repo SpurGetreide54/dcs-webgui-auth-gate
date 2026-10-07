@@ -2,9 +2,9 @@
 // the only place that can reach a DCS server's control port -- that port
 // only accepts connections from 127.0.0.1 on its own machine.
 //
-// Deliberately small: a write-only mission-upload endpoint, a webgui
+// Deliberately small: a mission-upload endpoint, a list endpoint, a webgui
 // control-port relay, and a shared-token check. No accounts. No login. No
-// read/list/delete of the mission folders it's given.
+// download or delete of the mission folders it's given, yet.
 //
 // Deploy on Windows as a service, e.g. via NSSM or node-windows. This host
 // has no existing Node process supervisor. See scripts/build-agent-exe.sh
@@ -167,6 +167,31 @@ app.post("/upload", checkToken, upload.single("mission"), async (req, res) => {
   }
 
   res.json({ ok: true, path: finalPath });
+});
+
+function missionsDir(instanceDir) {
+  return path.join(instanceDir, "Missions");
+}
+
+app.get("/missions/:instanceName", checkToken, requireInstanceDir, async (req, res) => {
+  const targetDir = missionsDir(req.instanceDir);
+  let entries;
+  try {
+    entries = await fs.readdir(targetDir, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") return res.json({ missions: [] });
+    return res.status(500).send(`Could not list missions: ${err.message}`);
+  }
+
+  const missions = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".miz"))
+      .map(async (entry) => {
+        const stat = await fs.stat(path.join(targetDir, entry.name));
+        return { name: entry.name, size: stat.size, modifiedAt: stat.mtime.toISOString() };
+      })
+  );
+  res.json({ missions });
 });
 
 // ---- webgui control port: status, config write, relay ----

@@ -306,6 +306,37 @@ test("webgui-bundle 404s when the install path has no WebGUI folder", async () =
   }
 });
 
+// ---- mission list ----
+
+test("list is empty when the Missions folder doesn't exist yet", async () => {
+  const instance = "Example_NoMissionsYet";
+  fs.mkdirSync(instanceDir(instance), { recursive: true });
+  const res = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { missions: [] });
+});
+
+test("list returns .miz files with name/size/mtime, excluding non-.miz files", async () => {
+  const instance = "Example_MissionsList";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "one.miz"), "fake miz one");
+  fs.writeFileSync(path.join(missionsDir, "readme.txt"), "not a mission");
+
+  const res = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.missions.length, 1);
+  assert.equal(body.missions[0].name, "one.miz");
+  assert.equal(body.missions[0].size, "fake miz one".length);
+  assert.ok(new Date(body.missions[0].modifiedAt).getTime() > 0, "modifiedAt must be a real timestamp");
+});
+
+test("list rejects requests with no token", async () => {
+  const res = await fetch(`${base}/missions/${INSTANCE}`);
+  assert.equal(res.status, 401);
+});
+
 test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
   const res = await fetch(`${base}/dcs-install/webgui-bundle?path=${encodeURIComponent(dcsInstallRoot)}`, {
     headers: authHeaders(),
