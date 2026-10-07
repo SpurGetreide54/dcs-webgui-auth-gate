@@ -27,4 +27,4 @@ try {
   slot = "a";
 }
 
-require(path.join(__dirname, "releases", slot, "src", "server.js"));
+require(path.join(__dirname, "releases", slot, "src", "server.js")).start();

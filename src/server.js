@@ -891,7 +891,7 @@ app.use("/s/:slug", requireServerAccess(), express.static(webguiRoot, { index: f
 
 app.use((req, res) => res.status(404).send("Not found."));
 
-if (require.main === module) {
+function start() {
   const httpServer = app.listen(PORT, () => {
     console.log(`dcs-webgui-auth-gate listening on :${PORT}`);
   });
@@ -912,4 +912,14 @@ if (require.main === module) {
   }
 }
 
+// require.main === module is only true for `node src/server.js` directly
+// (local dev, and the pre-A/B deployment path) -- launcher.js requires
+// this file instead of running it, so require.main there is launcher.js's
+// own module, never this one. It calls start() explicitly instead; see
+// launcher.js.
+if (require.main === module) {
+  start();
+}
+
 module.exports = app;
+module.exports.start = start;
