@@ -68,3 +68,13 @@ failed: ...`. Common causes: the GitHub release has no
 `signed_updates.json` asset, or it failed Ed25519 verification (the
 hardcoded `PUBLIC_KEY_PEM` in `src/updateCheck.js` doesn't match the key
 `sign-updates.js` signed with).
+
+**Clicking "Update now" does nothing visible, or the service never comes
+back.** The update itself runs in the background after the page responds
+(see the `/admin/update` POST route) and ends in a deliberate
+`process.exit(1)` on success -- `systemctl status dcs-webgui-auth-gate`
+and its journal are the real source of truth, not the browser. If it
+crash-loops 3 times within 60 seconds, the rollback unit
+(`dcs-webgui-auth-gate-rollback.service`) should fire automatically; check
+`journalctl -u dcs-webgui-auth-gate-rollback` to confirm it ran. See
+SETUP.md's A/B migration section if that unit was never installed.

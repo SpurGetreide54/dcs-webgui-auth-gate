@@ -1,0 +1,41 @@
+# Reference copy of the production unit, updated for the A/B self-update
+# system. Diff against the live one on the host with:
+#   systemctl cat dcs-webgui-auth-gate
+# then apply by hand (systemctl edit --full dcs-webgui-auth-gate, or edit
+# /etc/systemd/system/dcs-webgui-auth-gate.service directly) followed by
+# systemctl daemon-reload. See docs/SETUP.md's A/B migration section for
+# the full one-time procedure, including why this can't be automated.
+#
+# Changed from the pre-A/B unit:
+#   - ExecStart now runs launcher.js (the stable, never-swapped bootstrap
+#     that reads active-slot and loads whichever slot it names), not
+#     src/server.js directly.
+#   - StartLimitIntervalSec/StartLimitBurst/OnFailure are new: once
+#     Restart=on-failure has retried 3 times within 60 seconds and given
+#     up, OnFailure runs the rollback unit, which flips active-slot back
+#     to the other slot and restarts -- this is what makes "a bad update
+#     rolls back automatically" work without the service account (which
+#     has no sudo) ever calling systemctl itself.
+# Unchanged: User/Group, WorkingDirectory, EnvironmentFile, Restart,
+# RestartSec -- the service account's own restart behavior for an
+# ordinary crash is exactly as it was before.
+
+[Unit]
+Description=dcs-webgui-auth-gate
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+OnFailure=dcs-webgui-auth-gate-rollback.service
+
+[Service]
+Type=simple
+User=dcs-webgui-auth-gate
+Group=dcs-webgui-auth-gate
+WorkingDirectory=/var/www/dcs-webgui-auth-gate
+EnvironmentFile=/var/www/dcs-webgui-auth-gate/.env
+ExecStart=/usr/bin/node launcher.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

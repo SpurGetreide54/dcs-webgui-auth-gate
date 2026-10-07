@@ -126,10 +126,11 @@ supervised. Routine updates after that need no further manual steps.
    sudo cp scripts/systemd/dcs-webgui-auth-gate.service scripts/systemd/dcs-webgui-auth-gate-rollback.service /tmp/
    ```
 3. Copy `launcher.js` to the top level (it's not part of either slot --
-   see its own top comment for why) and point the systemd unit's
-   `ExecStart` at it:
+   see its own top comment for why) and install the two unit files from
+   this repo (`scripts/systemd/dcs-webgui-auth-gate.service` replaces the
+   existing unit; `dcs-webgui-auth-gate-rollback.service` is new):
    ```
-   sudo cp /tmp/dcs-webgui-auth-gate.service /etc/systemd/system/
+   sudo cp /tmp/dcs-webgui-auth-gate.service /tmp/dcs-webgui-auth-gate-rollback.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl restart dcs-webgui-auth-gate
    ```

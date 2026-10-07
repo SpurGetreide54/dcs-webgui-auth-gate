@@ -1,0 +1,32 @@
+# Runs once, as root, only when dcs-webgui-auth-gate.service has already
+# exhausted its own Restart=on-failure budget (StartLimitBurst=3 within
+# StartLimitIntervalSec=60 -- see dcs-webgui-auth-gate.service's
+# OnFailure=). This is deliberately a *separate* unit, not logic inside
+# the app: the dcs-webgui-auth-gate service account has no sudo (confirmed
+# during the A/B design's own live-infra audit), so it cannot call
+# systemctl itself -- this root-run unit is what makes "a bad update rolls
+# back automatically" possible without granting the app account anything
+# new.
+#
+# Flips active-slot (a<->b) and restarts -- correct precisely because a
+# failed start always just happened in whichever slot an update flipped
+# *to*, so "the other slot" is always the last one that was actually
+# working.
+#
+# Install alongside the real unit at
+# /etc/systemd/system/dcs-webgui-auth-gate-rollback.service, then
+# systemctl daemon-reload. See docs/SETUP.md's A/B migration section.
+
+[Unit]
+Description=Roll dcs-webgui-auth-gate back to its other A/B slot after repeated start failures
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '\
+  STATE_FILE=/var/www/dcs-webgui-auth-gate/active-slot; \
+  CURRENT=$(cat "$STATE_FILE" 2>/dev/null || echo a); \
+  if [ "$CURRENT" = "a" ]; then NEW=b; else NEW=a; fi; \
+  printf %s "$NEW" > "$STATE_FILE"; \
+  echo "Rolled back: active-slot $CURRENT -> $NEW"; \
+  systemctl start dcs-webgui-auth-gate \
+'
