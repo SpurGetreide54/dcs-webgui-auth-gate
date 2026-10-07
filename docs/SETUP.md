@@ -106,12 +106,19 @@ supervised. Routine updates after that need no further manual steps.
 
 ### auth-gate: one-time migration (on the VM, over SSH)
 
-1. Add the shared `WEBGUI_STATIC_PATH` line to `.env` if it isn't already
-   there (see the "Values that must match" note above this section was
-   added for -- without it, each A/B slot would look for its own, empty
-   `webgui-static/` instead of the real one):
+1. Add the shared `WEBGUI_STATIC_PATH` and `ACTIVE_SLOT_PATH` lines to
+   `.env` if they aren't already there. Without the first, each A/B slot
+   would look for its own, empty `webgui-static/` instead of the real one
+   (see the "Values that must match" note above). Without the second, each
+   slot's own code defaults to looking for `active-slot` *inside itself*
+   (`src/activeSlot.js`'s own fallback, meant for a plain single-checkout
+   local dev setup) instead of the shared top-level file `launcher.js`
+   reads -- an update would stage and "flip" without error, but the flip
+   would land somewhere the launcher never looks, so it would keep
+   launching the old slot forever:
    ```
    echo 'WEBGUI_STATIC_PATH=/var/www/dcs-webgui-auth-gate/webgui-static' | sudo tee -a /var/www/dcs-webgui-auth-gate/.env
+   echo 'ACTIVE_SLOT_PATH=/var/www/dcs-webgui-auth-gate/active-slot' | sudo tee -a /var/www/dcs-webgui-auth-gate/.env
    ```
 2. Create the two slot directories and seed slot A with the code already
    running (so the very first update has something real to diff against,
