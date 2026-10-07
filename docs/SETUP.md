@@ -174,15 +174,20 @@ Safe to re-run with the same parameters as before; see the script's own
    `node -e "require('crypto').generateKeyPairSync('ed25519')"`-style code
    if it doesn't exist yet, and hardcode the matching public key into
    `src/updateCheck.js`'s `PUBLIC_KEY_PEM`. Never commit the private key.
-3. Also build a `.zip` of the auth-gate for manual deployment -- same
-   contents as the `.tar.gz` (`node_modules` included, same excludes), just
-   a different container for whoever would rather not use `tar`. Not part
-   of the signed manifest and never touched by `src/updateCheck.js`; it
-   exists only for a human extracting it by hand (e.g. seeding a slot
-   directly instead of the rsync steps above, or a from-scratch install).
+3. Also build two `.zip`s for manual deployment -- neither is part of the
+   signed manifest or touched by the self-update code; both exist only for
+   a human installing by hand, e.g. a from-scratch install or seeding a
+   slot directly instead of the rsync steps above:
+   - auth-gate: same contents as the `.tar.gz` (`node_modules` included,
+     same excludes), just a different container for whoever would rather
+     not use `tar`.
+   - agent: `agent.exe` alongside `install.ps1`, `uninstall.ps1`,
+     `VERSION`, `DISCLAIMER`, and `LICENSE` -- everything `install.ps1`
+     needs to run standalone on a DCS host that has no git clone of this
+     repo at all.
 4. Create the GitHub Release by hand (tag matching `--version`/`--tag`),
    and upload both signed artifacts, the generated
-   `local-only/release/signed_updates.json`, and the manual-deployment
-   `.zip` as release assets. The two signed artifacts' filenames must match
-   what `sign-updates.js` put in the manifest's `downloads[].url` fields;
-   the `.zip`'s name is unconstrained since nothing parses it.
+   `local-only/release/signed_updates.json`, and both manual-deployment
+   `.zip`s as release assets. The two signed artifacts' filenames must
+   match what `sign-updates.js` put in the manifest's `downloads[].url`
+   fields; the `.zip`s' names are unconstrained since nothing parses them.
