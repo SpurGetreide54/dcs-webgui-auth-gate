@@ -104,6 +104,56 @@ This needs a one-time manual migration on each side before it works --
 deliberately not automated, since it changes how the service itself is
 supervised. Routine updates after that need no further manual steps.
 
+### auth-gate: one-time migration (on the VM, over SSH)
+
+1. Add the shared `WEBGUI_STATIC_PATH` line to `.env` if it isn't already
+   there (see the "Values that must match" note above this section was
+   added for -- without it, each A/B slot would look for its own, empty
+   `webgui-static/` instead of the real one):
+   ```
+   echo 'WEBGUI_STATIC_PATH=/var/www/dcs-webgui-auth-gate/webgui-static' | sudo tee -a /var/www/dcs-webgui-auth-gate/.env
+   ```
+2. Create the two slot directories and seed slot A with the code already
+   running (so the very first update has something real to diff against,
+   and the app keeps working if you stop here):
+   ```
+   cd /var/www/dcs-webgui-auth-gate
+   sudo mkdir -p releases/a releases/b
+   sudo rsync -a --exclude releases --exclude local-only --exclude webgui-static --exclude node_modules . releases/a/
+   sudo cp -r node_modules releases/a/
+   sudo chown -R dcs-webgui-auth-gate:dcs-webgui-auth-gate releases
+   echo -n a | sudo tee active-slot
+   sudo cp scripts/systemd/dcs-webgui-auth-gate.service scripts/systemd/dcs-webgui-auth-gate-rollback.service /tmp/
+   ```
+3. Copy `launcher.js` to the top level (it's not part of either slot --
+   see its own top comment for why) and point the systemd unit's
+   `ExecStart` at it:
+   ```
+   sudo cp /tmp/dcs-webgui-auth-gate.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl restart dcs-webgui-auth-gate
+   ```
+4. Confirm it came back up running from the new launcher: `systemctl
+   status dcs-webgui-auth-gate` should show it active, and the app should
+   still be reachable normally. From here on, `/admin/update` handles
+   updates -- this whole migration never needs repeating.
+
+### mission-agent: one-time migration (on the DCS host)
+
+Re-run `install.ps1` once (see its own `-Confirm`-free idempotent-reinstall
+behavior, described in its header comment). The updated script now copies
+`agent.exe` into `releases\a\` and points a `current` junction at it,
+instead of placing it directly in the install directory -- NSSM's own
+config ends up targeting `current\agent.exe`, a path that never changes
+again across future updates.
+
+```
+.\install.ps1 -DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"
+```
+
+Safe to re-run with the same parameters as before; see the script's own
+`.DESCRIPTION` for exactly what changes and what doesn't.
+
 ### Release process (cutting a new version)
 
 1. Bump `package.json`'s (and `VERSION`'s) version, build both artifacts

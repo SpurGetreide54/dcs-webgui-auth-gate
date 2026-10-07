@@ -356,6 +356,87 @@ app.get("/dcs-install/webgui-bundle", checkToken, async (req, res) => {
   stream.pipe(res);
 });
 
+// ---- self-update: stage + commit ----
+// Relayed through the auth-gate (see src/updateCheck.js) since this host
+// has no internet access of its own by design (kept off the internet-
+// facing side, per SETUP.md). "current" is a directory junction NSSM's
+// ExecStart always targets (...\current\agent.exe) -- flipping it, not
+// NSSM's own config, is what switches versions between restarts.
+//
+// AGENT_SELF_UPDATE_ROOT overrides the root for local dev/tests, where
+// process.execPath points at node itself, not a packaged agent.exe
+// sitting next to a real "current" junction.
+const SELF_UPDATE_ROOT = process.env.AGENT_SELF_UPDATE_ROOT || path.dirname(path.dirname(process.execPath));
+const CURRENT_LINK = path.join(SELF_UPDATE_ROOT, "current");
+const RELEASES_DIR = path.join(SELF_UPDATE_ROOT, "releases");
+
+function readActiveAgentSlot() {
+  try {
+    return path.basename(fsSync.readlinkSync(CURRENT_LINK)) === "b" ? "b" : "a";
+  } catch (err) {
+    return "a";
+  }
+}
+
+function otherAgentSlot(slot) {
+  return slot === "a" ? "b" : "a";
+}
+
+const selfUpdateUpload = express.raw({ type: "application/octet-stream", limit: MAX_MISSION_BYTES });
+
+app.post("/self-update/stage", checkToken, selfUpdateUpload, async (req, res) => {
+  const expectedSha256 = req.get("X-Sha256");
+  if (!expectedSha256) return res.status(400).send("Missing X-Sha256 header.");
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).send("No file body received.");
+
+  // Re-hashes independently rather than trusting the header alone -- the
+  // real verification already happened against the signed manifest on the
+  // auth-gate side; this just catches corruption on this specific hop.
+  const actualSha256 = crypto.createHash("sha256").update(req.body).digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    return res.status(400).send(`sha256 mismatch (expected ${expectedSha256}, got ${actualSha256}).`);
+  }
+
+  const idleSlot = otherAgentSlot(readActiveAgentSlot());
+  const slotDir = path.join(RELEASES_DIR, idleSlot);
+  await fs.mkdir(slotDir, { recursive: true });
+  const finalPath = path.join(slotDir, "agent.exe");
+  const tmpPath = `${finalPath}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await fs.writeFile(tmpPath, req.body);
+    await fs.rename(tmpPath, finalPath); // Atomic write, same reasoning as the mission upload above.
+  } catch (err) {
+    await fs.rm(tmpPath, { force: true });
+    return res.status(500).send(`Could not stage update: ${err.message}`);
+  }
+  res.json({ ok: true, slot: idleSlot });
+});
+
+app.post("/self-update/commit", checkToken, async (req, res) => {
+  const idleSlot = otherAgentSlot(readActiveAgentSlot());
+  const idleSlotDir = path.join(RELEASES_DIR, idleSlot);
+  if (!fsSync.existsSync(path.join(idleSlotDir, "agent.exe"))) {
+    return res.status(400).send(`No staged build in slot ${idleSlot}. Stage one first.`);
+  }
+
+  try {
+    await fs.rm(CURRENT_LINK, { force: true });
+    await fs.symlink(idleSlotDir, CURRENT_LINK, "junction");
+  } catch (err) {
+    return res.status(500).send(`Could not flip to the new build: ${err.message}`);
+  }
+
+  // Deliberate restart, not a crash: same reasoning as the auth-gate's own
+  // exit-based flip. No sc.exe/NSSM call needed here -- the Windows
+  // service's own restart-on-exit policy brings the process back up
+  // through the now-repointed "current" junction.
+  // AGENT_SELF_UPDATE_SKIP_EXIT exists only for tests, so a real HTTP
+  // round trip can exercise this route without killing the test runner's
+  // own process -- same spirit as AGENT_SELF_UPDATE_ROOT above.
+  if (!process.env.AGENT_SELF_UPDATE_SKIP_EXIT) res.on("finish", () => process.exit(1));
+  res.json({ ok: true, activeSlot: idleSlot });
+});
+
 app.use((req, res) => res.status(404).send("Not found."));
 
 if (require.main === module) {

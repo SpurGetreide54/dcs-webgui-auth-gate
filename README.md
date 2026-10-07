@@ -58,6 +58,16 @@ install through `/admin/servers/webgui-sync`.
   checkboxes — there are too many permissions now for that to stay
   readable.
 
+## Self-update
+
+Both pieces can update themselves. The auth-gate checks a signed GitHub
+release hourly; a site admin triggers the actual update from
+`/admin/update` once a sidebar icon shows one's available. Staged into
+whichever A/B slot isn't currently running, then flipped to — a version
+that fails to start rolls back automatically. See
+[`docs/SETUP.md`](docs/SETUP.md#ab-self-update) for the one-time migration
+this needs and the release process.
+
 ## More docs
 
 - [`docs/SETUP.md`](docs/SETUP.md) — install, configure, and run this, for

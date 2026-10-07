@@ -575,6 +575,23 @@ updateRouter.get("/", (req, res) => {
   res.send(views.updatePage({ admin: req.admin, currentVersion: updateCheck.getCurrentVersion(), updateState: updateCheck.getUpdateState() }));
 });
 
+updateRouter.post("/", (req, res) => {
+  // Responds first, then kicks applyUpdate() off only once that response
+  // has actually finished sending -- it ends in process.exit() on
+  // success, which must never race the admin's own page load.
+  res.on("finish", () => {
+    updateCheck.applyUpdate().catch((err) => console.error(`Update failed: ${err.message}`));
+  });
+  res.send(
+    views.updatePage({
+      admin: req.admin,
+      currentVersion: updateCheck.getCurrentVersion(),
+      updateState: updateCheck.getUpdateState(),
+      notice: "Update started. Staging the new release and restarting both services -- this can take a minute; refresh afterward.",
+    })
+  );
+});
+
 app.use("/admin/update", updateRouter);
 
 // ---- per-server: access check, mission upload, then generic proxy ----

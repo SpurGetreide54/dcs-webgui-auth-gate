@@ -4,16 +4,27 @@
   runs the DCS server(s) it's paired with.
 
 .DESCRIPTION
-  Copies agent.exe into a fixed install directory. Downloads and checksum-
-  verifies a pinned NSSM release to wrap it as a proper Windows Service --
-  starts before any login, restarts itself on crash. Sets the required
-  config as service-scoped environment variables, and starts it. No UI.
-  Status/output goes to a plain rotating log file. Check Get-Service or the
-  log instead.
+  Copies agent.exe into releases\a\ under a fixed install directory, and
+  points a "current" directory junction at it. Downloads and checksum-
+  verifies a pinned NSSM release to wrap current\agent.exe as a proper
+  Windows Service -- starts before any login, restarts itself on crash.
+  Sets the required config as service-scoped environment variables, and
+  starts it. No UI. Status/output goes to a plain rotating log file. Check
+  Get-Service or the log instead.
+
+  The junction is what makes the A/B self-update system work on this side
+  (see src/agent.js's "self-update: stage + commit" section): NSSM always
+  points at current\agent.exe, a path that never changes, while an update
+  flips the junction between releases\a\ and releases\b\ and restarts.
+  This script only ever (re)creates the junction pointing at releases\a\
+  -- it never touches releases\b\ or an update already staged there.
 
   Safe to re-run. An existing service with the same name is stopped and
   removed first, so changing config is just running install.ps1 again with
-  new parameters, or uninstall.ps1 then install.ps1.
+  new parameters, or uninstall.ps1 then install.ps1. Re-running always
+  resets the junction back to releases\a\, discarding any staged-but-not-
+  yet-active update in releases\b\ -- fine for a config change, but worth
+  knowing before re-running this right after an update was staged.
 
 .PARAMETER MissionAgentToken
   Shared bearer token the auth-gate uses to authenticate to this agent.
@@ -65,8 +76,15 @@ if (-not (Test-Path $DcsSavedGamesRoot)) {
 Write-Host "==> Creating install directory $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-Write-Host "==> Copying agent.exe"
-Copy-Item -Path $AgentExePath -Destination "$InstallDir\agent.exe" -Force
+Write-Host "==> Copying agent.exe into releases\a"
+$SlotADir = "$InstallDir\releases\a"
+New-Item -ItemType Directory -Force -Path $SlotADir | Out-Null
+Copy-Item -Path $AgentExePath -Destination "$SlotADir\agent.exe" -Force
+
+Write-Host "==> Pointing current\ at releases\a"
+$CurrentLink = "$InstallDir\current"
+if (Test-Path $CurrentLink) { Remove-Item -Path $CurrentLink -Force }
+New-Item -ItemType Junction -Path $CurrentLink -Target $SlotADir | Out-Null
 
 # NSSM pinned to the 2.24 stable release. Checksum verified once against
 # the real nssm.cc download and pinned here, not trusted fresh on every
@@ -103,14 +121,27 @@ if ($existingService) {
 }
 
 Write-Host "==> Registering service $ServiceName"
-& $NssmExePath install $ServiceName "$InstallDir\agent.exe"
+& $NssmExePath install $ServiceName "$CurrentLink\agent.exe"
 & $NssmExePath set $ServiceName AppDirectory $InstallDir
 
 # NSSM's AppEnvironmentExtra takes one KEY=VALUE pair per line, as a single
 # parameter value -- not separate command-line arguments. MISSION_AGENT_TOKEN
 # is only included when explicitly passed in. Left out, agent.js generates
 # and persists its own on first start.
-$envLines = @("DCS_SAVED_GAMES_ROOT=$DcsSavedGamesRoot", "AGENT_PORT=$AgentPort")
+#
+# MISSION_AGENT_TOKEN_FILE is pinned explicitly here, always -- agent.js's
+# own default (next to process.execPath) would otherwise resolve to
+# current\agent-token.txt, which the "current" junction makes slot-local
+# (releases\a\agent-token.txt today). An update flipping to releases\b\
+# would then look like the token got reset, when really the file just got
+# left behind in the old slot. Pinning it to the stable top-level
+# InstallDir keeps one token file shared across both slots, the same way
+# .env is shared (not duplicated) on the auth-gate side.
+$envLines = @(
+    "DCS_SAVED_GAMES_ROOT=$DcsSavedGamesRoot",
+    "AGENT_PORT=$AgentPort",
+    "MISSION_AGENT_TOKEN_FILE=$InstallDir\agent-token.txt"
+)
 if ($MissionAgentToken) {
     $envLines += "MISSION_AGENT_TOKEN=$MissionAgentToken"
 }
