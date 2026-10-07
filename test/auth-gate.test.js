@@ -601,6 +601,29 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(bogusTokenRes.status, 404);
     assert.match(await bogusTokenRes.text(), /invalid or has expired/);
 
+    // --- A/B self-update page: site-admin only, sidebar icon tracks
+    // whether update_state actually has an available version ---
+    const forbiddenUpdatePage = await fetch(`${base}/admin/update`, { headers: { Cookie: serverAdminCookie } });
+    assert.equal(forbiddenUpdatePage.status, 403, "a non-site-admin must not reach the update page");
+
+    const dashBeforeUpdate = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(dashBeforeUpdate, /icon-update\.svg/, "no update icon when update_state has no available version");
+
+    const updatePageRes = await fetch(`${base}/admin/update`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(updatePageRes.status, 200);
+    assert.match(await updatePageRes.text(), /latest version/i);
+
+    db.prepare("UPDATE update_state SET available_version = ?, changelog_url = ? WHERE id = 1").run("9.9.9", "https://example.test/changelog");
+    const dashAfterUpdate = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(dashAfterUpdate, /icon-update\.svg/, "sidebar icon must appear once update_state has an available version");
+    assert.match(dashAfterUpdate, /href="\/admin\/update"/);
+
+    const updatePageWithUpdateHtml = await (await fetch(`${base}/admin/update`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(updatePageWithUpdateHtml, /9\.9\.9/);
+    assert.match(updatePageWithUpdateHtml, /Update now/);
+
+    db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
+
     // --- logout is a destructive-styled navbar button, POST only ---
     const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(dashboardHtmlForLogout, /<form method="post" action="\/logout" class="logout-form">/);

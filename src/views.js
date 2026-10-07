@@ -1,4 +1,12 @@
 const BRAND_NAME = process.env.BRAND_NAME || "DCS Auth Gate";
+// A small, deliberate exception to "views.js never touches the DB":
+// unlike every other piece of page data (loaded by server.js and passed
+// in), the update-available sidebar icon has to show on every
+// authenticated page, and threading one more param through every single
+// page function's call site in server.js for a single cheap synchronous
+// read isn't worth it. updateCheck.js's own DB read is a single-row
+// SELECT, not network I/O, so this stays fast.
+const updateCheck = require("./updateCheck");
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -29,6 +37,10 @@ function sidebarNav(admin, active) {
   );
   if (admin.can_manage_accounts) {
     items.push(navItem("servers", "/admin/servers", "icon-server.png", "Manage servers"));
+    const updateState = updateCheck.getUpdateState();
+    if (updateState.available_version) {
+      items.push(navItem("update", "/admin/update", "icon-update.svg", `Update available: ${updateState.available_version}`));
+    }
   }
 
   return `<nav class="left-sidebar">
@@ -586,6 +598,27 @@ ${uploadForm}`,
   );
 }
 
+function updatePage({ admin, currentVersion, updateState, error, notice }) {
+  const hasUpdate = Boolean(updateState.available_version);
+  const checkedLabel = updateState.last_checked_at ? `${updateState.last_checked_at.slice(0, 16).replace("T", " ")} UTC` : "never";
+
+  const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+<p>Running version <strong>${escapeHtml(currentVersion)}</strong>. Last checked: ${escapeHtml(checkedLabel)}.</p>
+${
+  hasUpdate
+    ? `<p>A new version is available: <strong>${escapeHtml(updateState.available_version)}</strong>. <a href="${escapeHtml(updateState.changelog_url || "")}" target="_blank" rel="noopener">Changelog</a></p>
+${updateState.needs_service_update ? `<p class="error">This release needs a manual service-config change (systemd unit / NSSM install.ps1) before or after updating -- check the changelog for specifics. The A/B swap alone can't apply it.</p>` : ""}
+<form method="post" action="/admin/update">
+  <p>Updates both this auth-gate and the mission-agent, staged into the idle slot, then restarts into it. Rolls back automatically on crash.</p>
+  <button type="submit">Update now</button>
+</form>`
+    : `<p>You're running the latest version. Checked automatically once an hour.</p>`
+}`;
+
+  return layout("Update — DCS Control Panel", body, { admin, active: "update", pageTitle: "Software update" });
+}
+
 module.exports = {
   escapeHtml,
   loginPage,
@@ -598,4 +631,5 @@ module.exports = {
   webguiPortsPage,
   webguiSyncPage,
   missionsPage,
+  updatePage,
 };

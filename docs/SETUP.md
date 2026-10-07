@@ -89,3 +89,42 @@ Deploy on the physical Windows host running the DCS gameservers.
   DCS instance folder name under `Saved Games` on the physical host.
 - `dcs_install_path` is optional. Set it only to offer that server as a
   source on `/admin/servers/webgui-sync`.
+
+## A/B self-update
+
+Both pieces can update themselves: the auth-gate checks GitHub hourly for
+a new signed release, and a site admin triggers the actual update from
+`/admin/update` (a sidebar icon lights up when one's available). Updating
+stages the new version into whichever "slot" (A or B) isn't currently
+running, then restarts into it; a version that fails to start gets rolled
+back automatically. See `src/updateCheck.js`'s top comment for the full
+design.
+
+This needs a one-time manual migration on each side before it works --
+deliberately not automated, since it changes how the service itself is
+supervised. Routine updates after that need no further manual steps.
+
+### Release process (cutting a new version)
+
+1. Bump `package.json`'s (and `VERSION`'s) version, build both artifacts
+   as usual (`scripts/build-agent-exe.sh` for the agent; the auth-gate's
+   own artifact is a `tar.gz` of the repo, `node_modules` included, matching
+   what `src/updateCheck.js` extracts with the `tar` package already a
+   dependency).
+2. Sign the release:
+   ```
+   node scripts/release/sign-updates.js \
+     --version 1.2.0 \
+     --changelog-url https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases/tag/1.2.0 \
+     --auth-gate local-only/release/auth-gate/auth-gate-1.2.0.tar.gz \
+     --agent local-only/release/agent/agent-1.2.0.exe
+   ```
+   Needs `local-only/keys/update-signing-key.pem` -- generate one once with
+   `node -e "require('crypto').generateKeyPairSync('ed25519')"`-style code
+   if it doesn't exist yet, and hardcode the matching public key into
+   `src/updateCheck.js`'s `PUBLIC_KEY_PEM`. Never commit the private key.
+3. Create the GitHub Release by hand (tag matching `--version`/`--tag`),
+   and upload both artifacts plus the generated
+   `local-only/release/signed_updates.json` as release assets, with
+   filenames matching what `sign-updates.js` put in the manifest's
+   `downloads[].url` fields.

@@ -69,7 +69,22 @@ db.exec(`
     can_delete_missions INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (invite_id, server_id)
   );
+
+  -- Single row (id is always 1). Tracks what the hourly GitHub check last
+  -- found, for the update-tab UI. Deliberately does NOT hold the active
+  -- slot -- that lives in a plain flat file (see src/activeSlot.js) read by
+  -- launcher.js, which can't depend on better-sqlite3 or this schema
+  -- without breaking its own "no dependencies beyond Node itself" rule.
+  CREATE TABLE IF NOT EXISTS update_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_checked_at TEXT,
+    available_version TEXT,
+    changelog_url TEXT,
+    needs_service_update INTEGER NOT NULL DEFAULT 0
+  );
 `);
+
+db.prepare("INSERT OR IGNORE INTO update_state (id) VALUES (1)").run();
 
 // Guarded migration for DBs created before the servers table dropped
 // upstream_url and renamed mission_folder_key to instance_name. Direct

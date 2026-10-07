@@ -14,6 +14,7 @@ const invitesDb = require("./invites");
 const views = require("./views");
 const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
+const updateCheck = require("./updateCheck");
 
 const PORT = Number(process.env.PORT || 3000);
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
@@ -565,6 +566,17 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
 
 app.use("/admin/servers", serversRouter);
 
+// ---- A/B self-update (site admins only) ----
+
+const updateRouter = express.Router();
+updateRouter.use(auth.requireAccountManager);
+
+updateRouter.get("/", (req, res) => {
+  res.send(views.updatePage({ admin: req.admin, currentVersion: updateCheck.getCurrentVersion(), updateState: updateCheck.getUpdateState() }));
+});
+
+app.use("/admin/update", updateRouter);
+
 // ---- per-server: access check, mission upload, then generic proxy ----
 
 // permission is one of servers.js's PERMISSION_COLUMNS keys ("upload",
@@ -867,6 +879,7 @@ if (require.main === module) {
     console.log(`dcs-webgui-auth-gate listening on :${PORT}`);
   });
   const controlProxyServer = serverProxy.startControlProxy();
+  updateCheck.startHourlyCheck();
   // Explicit db.close() on shutdown, not just process exit. Leaving
   // better-sqlite3's native handles to GC/finalizers has crashed the
   // process during teardown instead of exiting cleanly.

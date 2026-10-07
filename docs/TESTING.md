@@ -59,3 +59,12 @@ than assuming a fix to one covers the other.
 **`webgui-sync` 404s for a server.**
 `webgui-sync` assumes a DCS install's WebGUI files sit directly under
 `<install path>\WebGUI`.
+
+**The update sidebar icon never appears, even after a real release.**
+Check `update_state.last_checked_at` in the SQLite DB -- `NULL` means the
+hourly check hasn't run or keeps failing. Failures are logged (not
+thrown), so check the service's own log/journal for `Update check
+failed: ...`. Common causes: the GitHub release has no
+`signed_updates.json` asset, or it failed Ed25519 verification (the
+hardcoded `PUBLIC_KEY_PEM` in `src/updateCheck.js` doesn't match the key
+`sign-updates.js` signed with).
