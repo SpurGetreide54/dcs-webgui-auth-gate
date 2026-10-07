@@ -2,9 +2,13 @@
 // the only place that can reach a DCS server's control port -- that port
 // only accepts connections from 127.0.0.1 on its own machine.
 //
-// Deliberately small: a mission-upload endpoint, a list/download pair, a
-// webgui control-port relay, and a shared-token check. No accounts. No
-// login. No delete of the mission folders it's given, yet.
+// Small, and deliberately short of real delete access: a mission-upload
+// endpoint, a list/download pair, a soft-delete-to-trash (moves a file
+// aside, never unlinks it), a webgui control-port relay, and a
+// shared-token check. No accounts. No login -- the shared bearer token
+// can't tell admins apart, so nothing here can destroy a mission file
+// outright. A leaked token can add files and move files into Missions/
+// .trash/, never erase one for good.
 //
 // Deploy on Windows as a service, e.g. via NSSM or node-windows. This host
 // has no existing Node process supervisor. See scripts/build-agent-exe.sh
@@ -127,7 +131,7 @@ function requireInstanceDir(req, res, next) {
   next();
 }
 
-// ---- mission upload, list, download ----
+// ---- mission upload, list, download, soft-delete ----
 
 function missionsDir(instanceDir) {
   return path.join(instanceDir, "Missions");
@@ -135,9 +139,9 @@ function missionsDir(instanceDir) {
 
 // path.basename strips any directory components. The resolve()-inside-
 // targetDir check is what actually stops a crafted filename, e.g.
-// "../../autoexec.cfg", from reaching outside targetDir. Shared by upload
-// and download -- both turn admin-typed-adjacent input into a path inside
-// a mission folder.
+// "../../autoexec.cfg", from reaching outside targetDir. Shared by upload,
+// download, and trash -- every one of them turns admin-typed-adjacent
+// input into a path inside a mission folder.
 function safeMissionPath(targetDir, filename) {
   const safeName = path.basename(filename || "");
   const finalPath = path.join(targetDir, safeName);
@@ -237,6 +241,33 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
     archive.file(finalPath, { name: safeName });
   }
   archive.finalize();
+});
+
+app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, express.json(), async (req, res) => {
+  const names = Array.isArray(req.body?.missions) ? req.body.missions : [];
+  if (names.length === 0) return res.status(400).send("No missions named.");
+
+  const targetDir = missionsDir(req.instanceDir);
+  const resolvedPaths = [];
+  for (const name of names) {
+    const resolved = safeMissionPath(targetDir, name);
+    if (!resolved) return res.status(400).send(`Invalid mission name: ${name}`);
+    if (!fsSync.existsSync(resolved.finalPath)) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
+    resolvedPaths.push(resolved);
+  }
+
+  // Move aside, never unlink -- see this file's top comment. A leaked
+  // shared token can misplace missions, never destroy one outright.
+  const trashDir = path.join(targetDir, ".trash");
+  await fs.mkdir(trashDir, { recursive: true });
+  try {
+    for (const { safeName, finalPath } of resolvedPaths) {
+      await fs.rename(finalPath, path.join(trashDir, `${safeName}.${Date.now()}`));
+    }
+  } catch (err) {
+    return res.status(500).send(`Could not move to trash: ${err.message}`);
+  }
+  res.json({ ok: true });
 });
 
 // ---- webgui control port: status, config write, relay ----

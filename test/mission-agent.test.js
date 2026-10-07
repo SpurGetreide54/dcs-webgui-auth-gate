@@ -403,6 +403,66 @@ test("download: a path-traversal mission name reduces to a plain filename and 40
   assert.equal(res.status, 404);
 });
 
+// ---- mission soft-delete (trash) ----
+
+test("trash moves the mission aside instead of deleting it", async () => {
+  const instance = "Example_Trash";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "unwanted.miz"), "unwanted bytes");
+
+  const res = await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["unwanted.miz"] }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(fs.existsSync(path.join(missionsDir, "unwanted.miz")), false, "must no longer be in Missions/ under its original name");
+
+  const trashDir = path.join(missionsDir, ".trash");
+  const trashed = fs.readdirSync(trashDir).filter((name) => name.startsWith("unwanted.miz"));
+  assert.equal(trashed.length, 1, "the file must survive, moved aside into .trash/, not unlinked");
+  assert.equal(fs.readFileSync(path.join(trashDir, trashed[0]), "utf8"), "unwanted bytes");
+});
+
+test("trash moves multiple selected missions aside in one request", async () => {
+  const instance = "Example_TrashMulti";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "keep.miz"), "keep bytes");
+  fs.writeFileSync(path.join(missionsDir, "gone-one.miz"), "gone one bytes");
+  fs.writeFileSync(path.join(missionsDir, "gone-two.miz"), "gone two bytes");
+
+  const res = await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["gone-one.miz", "gone-two.miz"] }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(fs.existsSync(path.join(missionsDir, "gone-one.miz")), false);
+  assert.equal(fs.existsSync(path.join(missionsDir, "gone-two.miz")), false);
+  assert.equal(fs.existsSync(path.join(missionsDir, "keep.miz")), true, "a mission not selected for delete must be left alone");
+});
+
+test("trash rejects an unknown mission name", async () => {
+  const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["does-not-exist.miz"] }),
+  });
+  assert.equal(res.status, 404);
+});
+
+// Same basename-neutralizes-it-first reasoning as the download test above.
+test("trash: a path-traversal mission name reduces to a plain filename and 404s, never escapes the folder", async () => {
+  const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["../../../etc/passwd"] }),
+  });
+  assert.equal(res.status, 404);
+});
+
 test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
   const res = await fetch(`${base}/dcs-install/webgui-bundle?path=${encodeURIComponent(dcsInstallRoot)}`, {
     headers: authHeaders(),

@@ -418,9 +418,14 @@ function formatBytes(bytes) {
 
 function missionListSection(server, access, missions) {
   const slug = encodeURIComponent(server.slug);
-  const canSelect = access.canDownload;
+  const canSelect = access.canDownload || access.canDelete;
   const colCount = 3 + (canSelect ? 1 : 0);
 
+  // One shared out-of-band form for the whole list: the same checkboxes
+  // drive both actions. Download is the form's own default action;
+  // Delete overrides it via formaction on that one button, the same
+  // formaction trick the accounts table already uses for its own
+  // Save-vs-Delete buttons on one row-form.
   const rows = missions.length
     ? missions
         .map(
@@ -434,10 +439,15 @@ function missionListSection(server, access, missions) {
         .join("")
     : `<tr><td colspan="${colCount}">No missions on this server yet.</td></tr>`;
 
-  const actions = access.canDownload ? `<button type="submit" form="mission-form">Download selected</button>` : "";
+  const actions = [
+    access.canDownload ? `<button type="submit" form="mission-form">Download selected</button>` : "",
+    access.canDelete ? `<button type="submit" form="mission-form" formaction="/s/${slug}/missions/trash" class="destructive">Delete selected</button>` : "",
+  ]
+    .filter(Boolean)
+    .join("");
 
   return `<h2>Missions</h2>
-${canSelect ? `<form id="mission-form" class="row-form" method="post" action="/s/${slug}/missions/download"></form>` : ""}
+${canSelect ? `<form id="mission-form" class="row-form" method="post" action="/s/${slug}/missions/${access.canDownload ? "download" : "trash"}"></form>` : ""}
 <table>
   <thead><tr>
     ${canSelect ? "<th></th>" : ""}

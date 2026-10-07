@@ -681,6 +681,31 @@ app.post(
   }
 );
 
+app.post(
+  "/s/:slug/missions/trash",
+  requireServerAccess({ permission: "delete" }),
+  express.urlencoded({ extended: false }),
+  async (req, res) => {
+    const names = [].concat(req.body?.mission || []);
+    if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No missions selected." });
+    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    try {
+      const agentRes = await fetch(new URL(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/trash`, MISSION_AGENT_URL), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ missions: names }),
+      });
+      if (!agentRes.ok) {
+        const detail = await agentRes.text().catch(() => "");
+        return renderMissionsPage(req, res, { status: 502, error: `Mission agent rejected the delete: ${detail || agentRes.status}` });
+      }
+    } catch (err) {
+      return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
+    }
+    renderMissionsPage(req, res, { notice: names.length === 1 ? `Moved "${names[0]}" to trash.` : `Moved ${names.length} missions to trash.` });
+  }
+);
+
 // The real DCS webgui is a static SPA with no server of its own. Opened as
 // a local file, its own connection logic tries to reach a backend at
 // whatever host/port it decides on -- undocumented, and not necessarily
