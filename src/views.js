@@ -416,24 +416,36 @@ function formatBytes(bytes) {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-function missionListSection(missions) {
+function missionListSection(server, access, missions) {
+  const slug = encodeURIComponent(server.slug);
+  const canSelect = access.canDownload;
+  const colCount = 3 + (canSelect ? 1 : 0);
+
   const rows = missions.length
     ? missions
         .map(
           (m) => `<tr>
+        ${canSelect ? `<td class="mission-select"><input type="checkbox" form="mission-form" name="mission" value="${escapeHtml(m.name)}"></td>` : ""}
         <td>${escapeHtml(m.name)}</td>
         <td class="mission-size">${formatBytes(m.size)}</td>
         <td class="mission-date">${escapeHtml(m.modifiedAt.slice(0, 16).replace("T", " "))}</td>
       </tr>`
         )
         .join("")
-    : `<tr><td colspan="3">No missions on this server yet.</td></tr>`;
+    : `<tr><td colspan="${colCount}">No missions on this server yet.</td></tr>`;
+
+  const actions = access.canDownload ? `<button type="submit" form="mission-form">Download selected</button>` : "";
 
   return `<h2>Missions</h2>
+${canSelect ? `<form id="mission-form" class="row-form" method="post" action="/s/${slug}/missions/download"></form>` : ""}
 <table>
-  <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+  <thead><tr>
+    ${canSelect ? "<th></th>" : ""}
+    <th>Name</th><th>Size</th><th>Modified</th>
+  </tr></thead>
   <tbody>${rows}</tbody>
-</table>`;
+</table>
+${actions ? `<div class="mission-actions">${actions}</div>` : ""}`;
 }
 
 function missionsPage({ admin, server, access = {}, missions = [], error, notice }) {
@@ -449,7 +461,7 @@ function missionsPage({ admin, server, access = {}, missions = [], error, notice
     `Missions — ${server.name}`,
     `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
-${access.canView ? missionListSection(missions) : ""}
+${access.canView ? missionListSection(server, access, missions) : ""}
 ${uploadForm}`,
     { admin, active: "dashboard", pageTitle: `Missions — ${server.name}` }
   );

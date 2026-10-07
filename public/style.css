@@ -276,3 +276,6 @@ tr.pending-invite td { color: var(--text-muted); }
 
 /* ---- mission list ---- */
 .mission-size, .mission-date { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
+.mission-select { width: 1.6rem; }
+.mission-actions { display: flex; gap: 0.6rem; margin-top: 0.75rem; }
+.mission-actions button { width: auto; }

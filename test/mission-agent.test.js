@@ -337,6 +337,72 @@ test("list rejects requests with no token", async () => {
   assert.equal(res.status, 401);
 });
 
+// ---- mission download ----
+
+test("download of a single selected mission streams the raw .miz back unmodified", async () => {
+  const instance = "Example_DownloadSingle";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "solo.miz"), "solo mission bytes");
+
+  const res = await fetch(`${base}/missions/${instance}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["solo.miz"] }),
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-disposition") || "", /filename="solo\.miz"/);
+  const body = Buffer.from(await res.arrayBuffer());
+  assert.equal(body.toString("utf8"), "solo mission bytes", "a single selection must come back byte-for-byte, not re-wrapped in another zip");
+});
+
+test("download of multiple selected missions bundles them into one zip", async () => {
+  const instance = "Example_DownloadMulti";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "alpha.miz"), "alpha bytes");
+  fs.writeFileSync(path.join(missionsDir, "bravo.miz"), "bravo bytes");
+
+  const res = await fetch(`${base}/missions/${instance}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["alpha.miz", "bravo.miz"] }),
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-disposition") || "", /filename="missions\.zip"/);
+  const body = Buffer.from(await res.arrayBuffer());
+  // Stored (uncompressed) zip entries: both the filename and the raw file
+  // content survive as literal bytes in the archive, so this confirms both
+  // missions actually made it in without needing a zip-reading library.
+  assert.ok(body.includes("alpha.miz"), "zip must contain alpha.miz's name");
+  assert.ok(body.includes("alpha bytes"), "zip must contain alpha.miz's content");
+  assert.ok(body.includes("bravo.miz"), "zip must contain bravo.miz's name");
+  assert.ok(body.includes("bravo bytes"), "zip must contain bravo.miz's content");
+});
+
+test("download rejects an unknown mission name", async () => {
+  const res = await fetch(`${base}/missions/${INSTANCE}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["does-not-exist.miz"] }),
+  });
+  assert.equal(res.status, 404);
+});
+
+// path.basename() strips the traversal down to a plain "passwd" before the
+// containment check ever runs -- same as the upload endpoint's own
+// equivalent test. It's correctly treated as "no mission named that
+// exists", not a special traversal case, so 404 here is the safe,
+// expected outcome, not 400.
+test("download: a path-traversal mission name reduces to a plain filename and 404s, never escapes the folder", async () => {
+  const res = await fetch(`${base}/missions/${INSTANCE}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["../../../etc/passwd"] }),
+  });
+  assert.equal(res.status, 404);
+});
+
 test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
   const res = await fetch(`${base}/dcs-install/webgui-bundle?path=${encodeURIComponent(dcsInstallRoot)}`, {
     headers: authHeaders(),

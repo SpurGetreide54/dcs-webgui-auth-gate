@@ -2,9 +2,9 @@
 // the only place that can reach a DCS server's control port -- that port
 // only accepts connections from 127.0.0.1 on its own machine.
 //
-// Deliberately small: a mission-upload endpoint, a list endpoint, a webgui
-// control-port relay, and a shared-token check. No accounts. No login. No
-// download or delete of the mission folders it's given, yet.
+// Deliberately small: a mission-upload endpoint, a list/download pair, a
+// webgui control-port relay, and a shared-token check. No accounts. No
+// login. No delete of the mission folders it's given, yet.
 //
 // Deploy on Windows as a service, e.g. via NSSM or node-windows. This host
 // has no existing Node process supervisor. See scripts/build-agent-exe.sh
@@ -19,6 +19,7 @@ const fsSync = require("node:fs");
 const crypto = require("node:crypto");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const tar = require("tar");
+const archiver = require("archiver");
 
 const PORT = Number(process.env.AGENT_PORT || 4000);
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
@@ -126,7 +127,25 @@ function requireInstanceDir(req, res, next) {
   next();
 }
 
-// ---- mission upload ----
+// ---- mission upload, list, download ----
+
+function missionsDir(instanceDir) {
+  return path.join(instanceDir, "Missions");
+}
+
+// path.basename strips any directory components. The resolve()-inside-
+// targetDir check is what actually stops a crafted filename, e.g.
+// "../../autoexec.cfg", from reaching outside targetDir. Shared by upload
+// and download -- both turn admin-typed-adjacent input into a path inside
+// a mission folder.
+function safeMissionPath(targetDir, filename) {
+  const safeName = path.basename(filename || "");
+  const finalPath = path.join(targetDir, safeName);
+  const resolvedTarget = path.resolve(targetDir);
+  const resolvedFinal = path.resolve(finalPath);
+  if (resolvedFinal !== resolvedTarget && !resolvedFinal.startsWith(resolvedTarget + path.sep)) return null;
+  return { safeName, finalPath };
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -138,23 +157,14 @@ app.post("/upload", checkToken, upload.single("mission"), async (req, res) => {
   const instanceDir = resolveInstanceDir(instanceName);
   if (!instanceDir) return res.status(400).send("Unknown or invalid instance_name.");
   if (!req.file) return res.status(400).send("No file provided.");
-
-  // path.basename strips any directory components. The extension check and
-  // the resolve()-inside-targetDir check below are what actually stop a
-  // crafted filename, e.g. "../../autoexec.cfg", from writing outside the
-  // mission folder.
-  const safeName = path.basename(req.file.originalname);
-  if (!safeName.toLowerCase().endsWith(".miz")) {
+  if (!req.file.originalname.toLowerCase().endsWith(".miz")) {
     return res.status(400).send("Only .miz files are accepted.");
   }
 
-  const targetDir = path.join(instanceDir, "Missions");
-  const finalPath = path.join(targetDir, safeName);
-  const resolvedTarget = path.resolve(targetDir);
-  const resolvedFinal = path.resolve(finalPath);
-  if (resolvedFinal !== resolvedTarget && !resolvedFinal.startsWith(resolvedTarget + path.sep)) {
-    return res.status(400).send("Invalid filename.");
-  }
+  const targetDir = missionsDir(instanceDir);
+  const resolved = safeMissionPath(targetDir, req.file.originalname);
+  if (!resolved) return res.status(400).send("Invalid filename.");
+  const { finalPath } = resolved;
 
   const tmpPath = `${finalPath}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   try {
@@ -168,10 +178,6 @@ app.post("/upload", checkToken, upload.single("mission"), async (req, res) => {
 
   res.json({ ok: true, path: finalPath });
 });
-
-function missionsDir(instanceDir) {
-  return path.join(instanceDir, "Missions");
-}
 
 app.get("/missions/:instanceName", checkToken, requireInstanceDir, async (req, res) => {
   const targetDir = missionsDir(req.instanceDir);
@@ -192,6 +198,45 @@ app.get("/missions/:instanceName", checkToken, requireInstanceDir, async (req, r
       })
   );
   res.json({ missions });
+});
+
+app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, express.json(), async (req, res) => {
+  const names = Array.isArray(req.body?.missions) ? req.body.missions : [];
+  if (names.length === 0) return res.status(400).send("No missions named.");
+
+  const targetDir = missionsDir(req.instanceDir);
+  const resolvedPaths = [];
+  for (const name of names) {
+    const resolved = safeMissionPath(targetDir, name);
+    if (!resolved) return res.status(400).send(`Invalid mission name: ${name}`);
+    if (!fsSync.existsSync(resolved.finalPath)) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
+    resolvedPaths.push(resolved);
+  }
+
+  // A .miz is already a zip archive (just renamed) -- one selected mission
+  // needs no wrapping at all, it's already exactly the file an admin
+  // wants. More than one gets bundled, unmodified, into one outer zip; the
+  // "nested zip" is just that a .miz inside it is itself a zip, not from
+  // double-zipping anything here.
+  if (resolvedPaths.length === 1) {
+    const { safeName, finalPath } = resolvedPaths[0];
+    res.set("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}"`);
+    res.set("Content-Type", "application/zip");
+    return fsSync.createReadStream(finalPath).pipe(res);
+  }
+
+  res.set("Content-Disposition", `attachment; filename="missions.zip"`);
+  res.set("Content-Type", "application/zip");
+  const archive = archiver("zip", { zlib: { level: 0 } }); // Already-compressed .miz files; re-compressing just burns CPU.
+  archive.on("error", (err) => {
+    if (!res.headersSent) res.status(500);
+    res.end(`Failed to build zip: ${err.message}`);
+  });
+  archive.pipe(res);
+  for (const { safeName, finalPath } of resolvedPaths) {
+    archive.file(finalPath, { name: safeName });
+  }
+  archive.finalize();
 });
 
 // ---- webgui control port: status, config write, relay ----
