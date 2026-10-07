@@ -160,7 +160,13 @@ form {
 label { font-size: 0.9rem; color: var(--text-muted); }
 
 /* out-of-band forms exist only so row checkboxes/buttons can reference them
-   via form="..." (a <form> can't legally wrap a <tr>) — never rendered */
+   via form="..." (a <form> can't legally wrap a <tr>) — never rendered.
+   RULE: every out-of-band <form id="..."> in views.js must carry this
+   class. Without it, the plain `form { background / border / padding }`
+   rule further up this file applies instead, and an empty <form></form>
+   renders as a visible blank box. test/auth-gate.test.js's
+   assertNoBrokenTableForms() checks for this automatically; call it on
+   any new page that adds an out-of-band form. */
 .row-form { display: none; }
 
 input[type=text], input[type=password], input[type=file] {
@@ -273,6 +279,36 @@ legend { padding: 0 0.4rem; color: var(--text-muted); }
 .invite-copy { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
 tr.pending-invite td { color: var(--text-muted); }
 .pending-label { font-style: italic; }
+
+/* ---- permissions matrix popup: one per admin/invite row, opened at the
+   click point. Replaces per-server checkboxes inline in each row, which
+   got unreadable once server access, upload, view, download, and delete
+   were all five separate per-server toggles at once. ---- */
+.perm-btn { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; background: var(--accent-blue); }
+.perm-btn:hover { background: #0a63bd; }
+.perm-popup {
+  position: fixed;
+  z-index: 50;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 0.75rem;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: auto;
+}
+.perm-popup table { margin-top: 0; width: auto; }
+.perm-popup th, .perm-popup td { padding: 0.35rem 0.5rem; }
+/* visual gap between the "server access" column and the four mission-
+   category columns -- a column of its own rather than a CSS margin, since
+   it has to sit inside the table's own column grid */
+.perm-group-gap { width: 1rem; border: none; background: transparent; padding: 0; }
+.perm-cell { width: 2.2rem; text-align: center; cursor: pointer; font-weight: bold; user-select: none; }
+.perm-cell:hover { filter: brightness(0.92); }
+.perm-cell.denied { background: #d9d9d9; color: #6b6b6b; }
+.perm-cell.granted { background: #bbf0c7; color: #1f7a33; }
+.perm-close { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; margin-top: 0.6rem; }
 
 /* ---- mission list ---- */
 .mission-size, .mission-date { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }

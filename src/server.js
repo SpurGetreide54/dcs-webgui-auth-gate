@@ -66,7 +66,12 @@ app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
   const info = db
     .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, 1)")
     .run(username, auth.hashPassword(password));
-  serversDb.grantAllServers(info.lastInsertRowid, { canUploadMissions: true });
+  serversDb.grantAllServers(info.lastInsertRowid, {
+    canUploadMissions: true,
+    canViewMissions: true,
+    canDownloadMissions: true,
+    canDeleteMissions: true,
+  });
   const token = auth.createSession(info.lastInsertRowid);
   setSessionCookie(res, token);
   res.redirect("/");
@@ -139,7 +144,12 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
     return res.status(400).send(views.invitePage({ error: "That username is already taken." }));
   }
   for (const grant of invitesDb.getInviteAccess(invite.id)) {
-    serversDb.setAccess(info.lastInsertRowid, grant.server_id, { canUploadMissions: grant.can_upload_missions });
+    serversDb.setAccess(info.lastInsertRowid, grant.server_id, {
+      canUploadMissions: grant.can_upload_missions,
+      canViewMissions: grant.can_view_missions,
+      canDownloadMissions: grant.can_download_missions,
+      canDeleteMissions: grant.can_delete_missions,
+    });
   }
   invitesDb.deleteInvite(invite.id);
 
@@ -213,14 +223,43 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
 
 // ---- everything below is site-admin only ----
 
+// Permission names the matrix popup is allowed to toggle, one cell at a
+// time. Checked against this fixed list before ever reaching servers.js/
+// invites.js, which also reject anything outside their own PERMISSION_COLUMNS
+// -- belt and suspenders, since this value flows in from a request body.
+const TOGGLEABLE_PERMISSIONS = new Set(["access", "upload", "view", "download", "delete"]);
+
+// The matrix popup's per-cell toggle, for a real account. Server access and
+// each mission-category permission all move through here now, each as its
+// own request -- not the per-server loop the row's own Save button used to
+// run. JSON in, JSON out: this is fetch()-driven, not a page navigation.
+accountsRouter.post("/:id/permissions", auth.requireAccountManager, express.json(), (req, res) => {
+  const targetId = Number(req.params.id);
+  const serverId = Number(req.body?.server_id);
+  const permission = req.body?.permission;
+  const granted = Boolean(req.body?.granted);
+  if (!TOGGLEABLE_PERMISSIONS.has(permission)) return res.status(400).json({ error: "Unknown permission." });
+  if (!db.prepare("SELECT 1 FROM admins WHERE id = ?").get(targetId)) return res.status(404).json({ error: "No such account." });
+  serversDb.setPermission(targetId, serverId, permission, granted);
+  res.json({ ok: true });
+});
+
+accountsRouter.post("/invites/:id/permissions", auth.requireAccountManager, express.json(), (req, res) => {
+  const inviteId = Number(req.params.id);
+  const serverId = Number(req.body?.server_id);
+  const permission = req.body?.permission;
+  const granted = Boolean(req.body?.granted);
+  if (!TOGGLEABLE_PERMISSIONS.has(permission)) return res.status(400).json({ error: "Unknown permission." });
+  if (!invitesDb.getValidInviteById(inviteId)) return res.status(404).json({ error: "That invite has expired or no longer exists." });
+  invitesDb.setInvitePermission(inviteId, serverId, permission, granted);
+  res.json({ ok: true });
+});
+
 accountsRouter.post("/invite", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   invitesDb.pruneExpired();
-  const { id: inviteId, token } = invitesDb.createInvite({ canManageAccounts: Boolean(req.body.can_manage_accounts) });
-  for (const server of serversDb.getAllServers()) {
-    const wantsAccess = Boolean(req.body[`access_${server.id}`]);
-    const wantsUpload = Boolean(req.body[`upload_${server.id}`]);
-    if (wantsAccess) invitesDb.setInviteAccess(inviteId, server.id, { canUploadMissions: wantsUpload });
-  }
+  const { token } = invitesDb.createInvite({ canManageAccounts: Boolean(req.body.can_manage_accounts) });
+  // Starts with no server permissions -- granted afterward from the same
+  // page, via the pending invite's own Permissions button/popup.
   const inviteUrl = `${req.protocol}://${req.get("host")}/invite/${token}`;
   res.send(loadAccountsPageData(req, { inviteUrl }));
 });
@@ -231,15 +270,6 @@ accountsRouter.post("/invites/:id", auth.requireAccountManager, express.urlencod
     return res.status(404).send(loadAccountsPageData(req, { error: "That invite has expired or no longer exists." }));
   }
   invitesDb.setCanManageAccounts(inviteId, Boolean(req.body.can_manage_accounts));
-  for (const server of serversDb.getAllServers()) {
-    const wantsAccess = Boolean(req.body[`access_${server.id}`]);
-    const wantsUpload = Boolean(req.body[`upload_${server.id}`]);
-    if (wantsAccess) {
-      invitesDb.setInviteAccess(inviteId, server.id, { canUploadMissions: wantsUpload });
-    } else {
-      invitesDb.revokeInviteAccess(inviteId, server.id);
-    }
-  }
   res.redirect("/admin/accounts");
 });
 
@@ -253,19 +283,14 @@ accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extend
   if (!username || !password || password.length < 12) {
     return res.status(400).send(loadAccountsPageData(req, { error: "Username required, password must be at least 12 characters." }));
   }
-  let info;
   try {
-    info = db
-      .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
+    db.prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
       .run(username, auth.hashPassword(password), can_manage_accounts ? 1 : 0);
   } catch (err) {
     return res.status(400).send(loadAccountsPageData(req, { error: "That username is already taken." }));
   }
-  for (const server of serversDb.getAllServers()) {
-    const wantsAccess = Boolean(req.body[`access_${server.id}`]);
-    const wantsUpload = Boolean(req.body[`upload_${server.id}`]);
-    if (wantsAccess) serversDb.setAccess(info.lastInsertRowid, server.id, { canUploadMissions: wantsUpload });
-  }
+  // Starts with no server permissions -- granted afterward from the same
+  // page, via the new account's own Permissions button/popup.
   res.redirect("/admin/accounts");
 });
 
@@ -282,16 +307,6 @@ accountsRouter.post("/:id", auth.requireAccountManager, express.urlencoded({ ext
     }
   }
   db.prepare("UPDATE admins SET can_manage_accounts = ? WHERE id = ?").run(canManage ? 1 : 0, targetId);
-
-  for (const server of serversDb.getAllServers()) {
-    const wantsAccess = Boolean(req.body[`access_${server.id}`]);
-    const wantsUpload = Boolean(req.body[`upload_${server.id}`]);
-    if (wantsAccess) {
-      serversDb.setAccess(targetId, server.id, { canUploadMissions: wantsUpload });
-    } else {
-      serversDb.revokeAccess(targetId, server.id);
-    }
-  }
   res.redirect("/admin/accounts");
 });
 

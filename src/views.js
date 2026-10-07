@@ -118,16 +118,139 @@ function dashboardPage({ admin, servers }) {
   return layout("Dashboard — DCS Control Panel", list, { admin, active: "dashboard", pageTitle: "Your servers" });
 }
 
-function serverFieldsets(servers) {
-  return servers
-    .map(
-      (s) => `<fieldset>
-      <legend>${escapeHtml(s.name)}</legend>
-      <label><input type="checkbox" name="access_${s.id}"> Access</label>
-      <label><input type="checkbox" name="upload_${s.id}"> Can upload missions</label>
-    </fieldset>`
-    )
-    .join("");
+// ---- permissions matrix popup: one per admin/invite row, opened at the
+// click point (see public/style.css's .perm-* rules). Replaces inline
+// per-server checkboxes, which got unreadable once server access, upload,
+// view, download, and delete were five separate per-server toggles at
+// once instead of two.
+
+const PERMISSION_CATEGORIES = [
+  { key: "access", label: "Access" },
+  { key: "upload", label: "Upload" },
+  { key: "view", label: "View" },
+  { key: "download", label: "Download" },
+  { key: "delete", label: "Delete" },
+];
+
+function permRowData(servers, access) {
+  return servers.map((s) => {
+    const grant = access.find((x) => x.server_id === s.id);
+    return {
+      server_id: s.id,
+      access: Boolean(grant),
+      upload: Boolean(grant && grant.can_upload_missions),
+      view: Boolean(grant && grant.can_view_missions),
+      download: Boolean(grant && grant.can_download_missions),
+      delete: Boolean(grant && grant.can_delete_missions),
+    };
+  });
+}
+
+// kind is "account" or "invite" -- which permissions endpoint the popup's
+// cell clicks post to. The row's full current state travels in the
+// button's own data-access attribute so opening the popup needs no extra
+// round trip; only a toggle itself calls the server.
+function permButton(kind, id, servers, access) {
+  const data = permRowData(servers, access);
+  return `<button type="button" class="perm-btn" data-kind="${kind}" data-id="${id}" data-access="${escapeHtml(JSON.stringify(data))}">Permissions</button>`;
+}
+
+// Rendered once per page that uses permButton -- one shared popup element,
+// filled in by whichever row's button was last clicked, plus the page's
+// server list (just the bit the popup needs: id and name).
+function permPopupMarkup(servers) {
+  const serversJson = JSON.stringify(servers.map((s) => ({ id: s.id, name: s.name }))).replace(/</g, "\\u003c");
+  const categoriesJson = JSON.stringify(PERMISSION_CATEGORIES).replace(/</g, "\\u003c");
+  return `<div id="perm-popup" class="perm-popup" hidden></div>
+<script>
+(function () {
+  var SERVERS = ${serversJson};
+  var CATEGORIES = ${categoriesJson};
+  var popup = document.getElementById("perm-popup");
+
+  function cellHtml(serverId, perm, granted) {
+    return '<td class="perm-cell ' + (granted ? "granted" : "denied") + '" data-server-id="' + serverId + '" data-permission="' + perm + '">' +
+      (granted ? "\\u2713" : "\\u2715") + "</td>";
+  }
+
+  function render(kind, id, rows) {
+    var head = "<tr><th>Server</th>";
+    CATEGORIES.forEach(function (c, i) {
+      if (i === 1) head += '<th class="perm-group-gap"></th>';
+      head += "<th>" + c.label + "</th>";
+    });
+    head += "</tr>";
+
+    var body = SERVERS.map(function (server) {
+      var row = rows.filter(function (r) { return r.server_id === server.id; })[0];
+      var tds = "<td>" + server.name + "</td>";
+      CATEGORIES.forEach(function (c, i) {
+        if (i === 1) tds += '<td class="perm-group-gap"></td>';
+        tds += cellHtml(server.id, c.key, row ? row[c.key] : false);
+      });
+      return "<tr>" + tds + "</tr>";
+    }).join("");
+
+    popup.innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody></table>" +
+      '<button type="button" class="perm-close">Close</button>';
+    popup.querySelector(".perm-close").addEventListener("click", hide);
+    Array.prototype.forEach.call(popup.querySelectorAll(".perm-cell"), function (cell) {
+      cell.addEventListener("click", function () { toggle(kind, id, cell); });
+    });
+  }
+
+  function setCell(cell, granted) {
+    cell.classList.toggle("granted", granted);
+    cell.classList.toggle("denied", !granted);
+    cell.textContent = granted ? "\\u2713" : "\\u2715";
+  }
+
+  function toggle(kind, id, cell) {
+    var serverId = Number(cell.getAttribute("data-server-id"));
+    var permission = cell.getAttribute("data-permission");
+    var granted = !cell.classList.contains("granted");
+    setCell(cell, granted);
+    // Turning server access off clears every other cell in that row too --
+    // the server deletes the whole row, taking every permission on it
+    // with it. Only a visual mirror of that; the server side is what's
+    // actually authoritative.
+    if (permission === "access" && !granted) {
+      Array.prototype.forEach.call(popup.querySelectorAll('.perm-cell[data-server-id="' + serverId + '"]'), function (c) { setCell(c, false); });
+    }
+    var url = (kind === "invite" ? "/admin/accounts/invites/" : "/admin/accounts/") + id + "/permissions";
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ server_id: serverId, permission: permission, granted: granted }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("request failed");
+    }).catch(function () {
+      setCell(cell, !granted);
+    });
+  }
+
+  function hide() { popup.hidden = true; }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".perm-btn"), function (btn) {
+    btn.addEventListener("click", function (e) {
+      render(btn.getAttribute("data-kind"), btn.getAttribute("data-id"), JSON.parse(btn.getAttribute("data-access")));
+      popup.hidden = false;
+      var rect = popup.getBoundingClientRect();
+      var x = Math.min(Math.max(12, e.clientX), window.innerWidth - rect.width - 12);
+      var y = Math.min(Math.max(12, e.clientY), window.innerHeight - rect.height - 12);
+      popup.style.left = x + "px";
+      popup.style.top = y + "px";
+      e.stopPropagation();
+    });
+  });
+  document.addEventListener("click", function (e) {
+    if (!popup.hidden && !popup.contains(e.target) && !e.target.classList.contains("perm-btn")) hide();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") hide();
+  });
+})();
+</script>`;
 }
 
 function changePasswordSection() {
@@ -178,26 +301,13 @@ function siteAdminAccountsPage({ admin, accounts, servers, invites, error, notic
     .map((inv) => `<form id="inv-${inv.id}" class="row-form" method="post" action="/admin/accounts/invites/${inv.id}"></form>`)
     .join("");
 
-  const permissionCells = (formId, access) =>
-    servers
-      .map((s) => {
-        const grant = access.find((x) => x.server_id === s.id);
-        const checked = grant ? "checked" : "";
-        const uploadChecked = grant && grant.can_upload_missions ? "checked" : "";
-        return `<td>
-          <label><input type="checkbox" form="${formId}" name="access_${s.id}" ${checked}> access</label><br>
-          <label><input type="checkbox" form="${formId}" name="upload_${s.id}" ${uploadChecked}> upload</label>
-        </td>`;
-      })
-      .join("");
-
   const acctRows = accounts
     .map((a) => {
       const formId = `acct-${a.id}`;
       return `<tr>
         <td>${escapeHtml(a.username)}</td>
         <td><input type="checkbox" form="${formId}" name="can_manage_accounts" ${a.can_manage_accounts ? "checked" : ""}></td>
-        ${permissionCells(formId, a.access)}
+        <td>${permButton("account", a.id, servers, a.access)}</td>
         <td>
           <button type="submit" form="${formId}">Save</button>
           ${accounts.length > 1 ? `<button form="${formId}" formaction="/admin/accounts/${a.id}/delete" class="destructive">Delete</button>` : ""}
@@ -215,7 +325,7 @@ function siteAdminAccountsPage({ admin, accounts, servers, invites, error, notic
       return `<tr class="pending-invite">
         <td><em>${escapeHtml(inv.token_prefix)}&hellip; <span class="pending-label">(pending, expires ${escapeHtml(expiresLabel)} UTC)</span></em></td>
         <td><input type="checkbox" form="${formId}" name="can_manage_accounts" ${inv.can_manage_accounts ? "checked" : ""}></td>
-        ${permissionCells(formId, inv.access)}
+        <td>${permButton("invite", inv.id, servers, inv.access)}</td>
         <td>
           <button type="submit" form="${formId}">Save</button>
           <button form="${formId}" formaction="/admin/accounts/invites/${inv.id}/revoke" class="destructive">Revoke</button>
@@ -224,8 +334,6 @@ function siteAdminAccountsPage({ admin, accounts, servers, invites, error, notic
     })
     .join("");
 
-  const header = servers.map((s) => `<th>${escapeHtml(s.name)}</th>`).join("");
-
   return layout(
     "Manage accounts — DCS Control Panel",
     `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
@@ -233,10 +341,11 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 ${inviteLinkNotice(inviteUrl)}
 ${acctForms}${inviteForms}
 <table>
-  <thead><tr><th>Username</th><th>Site admin</th>${header}<th></th></tr></thead>
+  <thead><tr><th>Username</th><th>Site admin</th><th>Permissions</th><th></th></tr></thead>
   <tbody>${acctRows}${inviteRows}</tbody>
 </table>
 <h2>Add account</h2>
+<p>A new account starts with no server access. Grant it from its own Permissions button in the table above, right after creating it.</p>
 <div class="account-create">
   <input type="checkbox" id="mode-invite" class="mode-toggle-input">
   <label for="mode-invite" class="mode-switch-row">
@@ -248,16 +357,15 @@ ${acctForms}${inviteForms}
     <label>Username <input type="text" name="username" required></label>
     <label>Password <input type="password" name="password" required minlength="12"></label>
     <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
-    ${serverFieldsets(servers)}
     <button type="submit">Create account</button>
   </form>
   <form method="post" action="/admin/accounts/invite" class="create-form create-form-invite">
     <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
-    ${serverFieldsets(servers)}
     <button type="submit">Generate invite link</button>
   </form>
 </div>
-${changePasswordSection()}`,
+${changePasswordSection()}
+${permPopupMarkup(servers)}`,
     { admin, active: "accounts", pageTitle: "Admin accounts" }
   );
 }
@@ -269,11 +377,12 @@ function myAccountPage({ admin, own, servers, error, notice }) {
   const cells = servers
     .map((s) => {
       const grant = own.access.find((x) => x.server_id === s.id);
-      const checked = grant ? "checked" : "";
-      const uploadChecked = grant && grant.can_upload_missions ? "checked" : "";
       return `<td>
-          <label><input type="checkbox" disabled ${checked}> access</label><br>
-          <label><input type="checkbox" disabled ${uploadChecked}> upload</label>
+          <label><input type="checkbox" disabled ${grant ? "checked" : ""}> access</label><br>
+          <label><input type="checkbox" disabled ${grant && grant.can_upload_missions ? "checked" : ""}> upload</label><br>
+          <label><input type="checkbox" disabled ${grant && grant.can_view_missions ? "checked" : ""}> view</label><br>
+          <label><input type="checkbox" disabled ${grant && grant.can_download_missions ? "checked" : ""}> download</label><br>
+          <label><input type="checkbox" disabled ${grant && grant.can_delete_missions ? "checked" : ""}> delete</label>
         </td>`;
     })
     .join("");

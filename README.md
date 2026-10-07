@@ -48,10 +48,15 @@ install through `/admin/servers/webgui-sync`.
 
 - **Site admin** (`can_manage_accounts`): manages other admin accounts and
   decides who gets access to which server.
-- **Per-server access + upload** (`admin_server_access`): a site admin
-  grants each admin access to specific servers individually, and,
-  separately, whether they can upload missions on each one. Access to one
-  server says nothing about any other.
+- **Per-server access + mission permissions** (`admin_server_access`): a
+  site admin grants each admin access to specific servers individually,
+  and, separately, four mission-management permissions per server —
+  upload, view, download, delete. `view` is what actually gates reaching
+  a server's missions page; the other three each show or hide their own
+  part of it. Access to one server says nothing about any other. Managed
+  from a popup on each admin's row in `/admin/accounts`, not inline
+  checkboxes — there are too many permissions now for that to stay
+  readable.
 
 ## More docs
 
