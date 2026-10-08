@@ -62,6 +62,15 @@ Deploy on the physical Windows host running the DCS gameservers.
   restart on crash, stop and start through `services.msc`. Without it,
   `agent.exe` would need its own console session to keep running, and
   would die when that session ends.
+- NSSM itself (public domain, see `nssm.cc`) is vendored at
+  `scripts/windows/nssm.exe` and ships in the agent release zip next to
+  `install.ps1`, which uses it straight off disk when its checksum
+  matches. nssm.cc is a small, flaky site that's 503'd on us before, so
+  this reuses a copy we already fetched and verified once instead of
+  hitting it again on every install -- being resourceful with what we
+  already have, not hammering it needlessly. It only falls back to
+  downloading a fresh copy from nssm.cc when the vendored one is missing
+  or its checksum doesn't match.
 - Bind it only to an interface reachable from the control-panel VM's
   internal IP. Keep it off the host's internet-facing side.
 - Run `install.ps1` without `-MissionAgentToken` and the agent generates
@@ -189,9 +198,10 @@ Safe to re-run with the same parameters as before; see the script's own
      same excludes), just a different container for whoever would rather
      not use `tar`.
    - agent: `agent.exe` alongside `install.ps1`, `uninstall.ps1`,
-     `VERSION`, `DISCLAIMER`, and `LICENSE` -- everything `install.ps1`
-     needs to run standalone on a DCS host that has no git clone of this
-     repo at all.
+     `scripts/windows/nssm.exe`, `VERSION`, `DISCLAIMER`, and `LICENSE` --
+     everything `install.ps1` needs to run standalone on a DCS host that
+     has no git clone of this repo at all, and reusing the vendored
+     nssm.exe instead of making every install hit nssm.cc itself.
 4. Create the GitHub Release by hand (tag matching `--version`/`--tag`),
    and upload both signed artifacts, the generated
    `local-only/release/signed_updates.json`, and both manual-deployment
