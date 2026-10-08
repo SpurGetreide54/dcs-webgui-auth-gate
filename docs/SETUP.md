@@ -73,6 +73,18 @@ Deploy on the physical Windows host running the DCS gameservers.
   or its checksum doesn't match.
 - Bind it only to an interface reachable from the control-panel VM's
   internal IP. Keep it off the host's internet-facing side.
+- Whatever opens the inbound port on the Windows Firewall side, don't
+  point a program-path rule at `current\agent.exe`. Confirmed in
+  practice: the firewall doesn't reliably match a program rule through
+  the `current` junction -- it only let traffic through once pointed
+  straight at the junction's resolved target. Since that target alternates
+  between `releases\a\agent.exe` and `releases\b\agent.exe` across
+  self-updates, keep **two** program rules, one per slot, both always
+  present -- whichever slot `current` points at next, a matching rule is
+  already there. (A single port rule, `New-NetFirewallRule -Protocol TCP
+  -LocalPort <AgentPort>`, would also dodge this entirely and only needs
+  one rule, at the cost of not scoping the hole to this one program --
+  not the choice made here, but worth knowing as the alternative.)
 - Run `install.ps1` without `-MissionAgentToken` and the agent generates
   its own on first start, saved to `agent-token.txt` in the install
   directory. Read that file to get the value:
