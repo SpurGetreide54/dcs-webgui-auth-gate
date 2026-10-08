@@ -5,12 +5,15 @@
 
 .DESCRIPTION
   Copies agent.exe into releases\a\ under a fixed install directory, and
-  points a "current" directory junction at it. Downloads and checksum-
-  verifies a pinned NSSM release to wrap current\agent.exe as a proper
-  Windows Service -- starts before any login, restarts itself on crash.
-  Sets the required config as service-scoped environment variables, and
-  starts it. No UI. Status/output goes to a plain rotating log file. Check
-  Get-Service or the log instead.
+  points a "current" directory junction at it. Checksum-verifies a pinned
+  NSSM build to wrap current\agent.exe as a proper Windows Service --
+  starts before any login, restarts itself on crash -- using the nssm.exe
+  the release zip vendors next to this script when it matches, instead of
+  hitting nssm.cc (a small, flaky site) on every single install; only
+  falls back to downloading one from nssm.cc when the vendored copy is
+  missing or stale. Sets the required config as service-scoped
+  environment variables, and starts it. No UI. Status/output goes to a
+  plain rotating log file. Check Get-Service or the log instead.
 
   The junction is what makes the A/B self-update system work on this side
   (see src/agent.js's "self-update: stage + commit" section): NSSM always
@@ -46,6 +49,14 @@
   Path to the built agent.exe (see scripts/build-agent-exe.sh, run elsewhere
   and copied to this host). Defaults to agent.exe sitting next to this script.
 
+.PARAMETER NssmSourcePath
+  Path to a vendored nssm.exe to install from, skipping the download from
+  nssm.cc entirely when it's present and matches NssmExeSha256. Defaults
+  to nssm.exe sitting next to this script -- the release zip ships one
+  there (see scripts/windows/nssm.exe in the repo), reusing a copy we
+  already fetched and verified once instead of hitting nssm.cc -- a
+  small, flaky site that has 503'd on us before -- again on every install.
+
 .EXAMPLE
   .\install.ps1 -DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"
 
@@ -60,6 +71,7 @@ param(
     [Parameter(Mandatory=$true)][string]$DcsSavedGamesRoot,
     [int]$AgentPort = 4000,
     [string]$AgentExePath = "$PSScriptRoot\agent.exe",
+    [string]$NssmSourcePath = "$PSScriptRoot\nssm.exe",
     [string]$InstallDir = "C:\Program Files\dcs-webgui-agent",
     [string]$ServiceName = "DcsWebguiAgent"
 )
@@ -86,9 +98,15 @@ $CurrentLink = "$InstallDir\current"
 if (Test-Path $CurrentLink) { Remove-Item -Path $CurrentLink -Force }
 New-Item -ItemType Junction -Path $CurrentLink -Target $SlotADir | Out-Null
 
-# NSSM pinned to the 2.24 stable release. Checksum verified once against
-# the real nssm.cc download and pinned here, not trusted fresh on every
-# install run.
+# NSSM pinned to the 2.24 stable release. Both checksums verified once
+# against the real nssm.cc download and pinned here, not trusted fresh on
+# every install run: NssmExeSha256 for the bare win64 binary the release
+# zip vendors at NssmSourcePath -- reusing a copy already fetched and
+# verified once, rather than hitting nssm.cc (small, flaky, has 503'd on
+# us) again on every single install -- and NssmSha256 for the nssm.cc zip
+# this falls back to downloading only when that vendored copy is missing
+# or stale.
+$NssmExeSha256 = "F689EE9AF94B00E9E3F0BB072B34CAAF207F32DCB4F5782FC9CA351DF9A06C97"
 $NssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
 $NssmSha256 = "727D1E42275C605E0F04ABA98095C38A8E1E46DEF453CDFFCE42869428AA6743"
 $NssmZip = "$env:TEMP\nssm-2.24.zip"
@@ -96,19 +114,30 @@ $NssmExtractDir = "$env:TEMP\nssm-2.24-extract"
 $NssmExePath = "$InstallDir\nssm.exe"
 
 if (-not (Test-Path $NssmExePath)) {
-    Write-Host "==> Downloading NSSM"
-    Invoke-WebRequest -Uri $NssmUrl -OutFile $NssmZip
+    $vendoredIsFresh = (Test-Path $NssmSourcePath) -and
+        ((Get-FileHash -Path $NssmSourcePath -Algorithm SHA256).Hash -eq $NssmExeSha256)
 
-    $actualHash = (Get-FileHash -Path $NssmZip -Algorithm SHA256).Hash
-    if ($actualHash -ne $NssmSha256) {
-        Remove-Item -Path $NssmZip -Force -ErrorAction SilentlyContinue
-        throw "NSSM download checksum mismatch: expected $NssmSha256, got $actualHash. Refusing to install a tampered or corrupted binary."
+    if ($vendoredIsFresh) {
+        Write-Host "==> Using vendored nssm.exe, no download needed"
+        Copy-Item -Path $NssmSourcePath -Destination $NssmExePath -Force
+    } else {
+        if (Test-Path $NssmSourcePath) {
+            Write-Host "==> Vendored nssm.exe at $NssmSourcePath doesn't match the pinned checksum, falling back to nssm.cc"
+        }
+        Write-Host "==> Downloading NSSM"
+        Invoke-WebRequest -Uri $NssmUrl -OutFile $NssmZip
+
+        $actualHash = (Get-FileHash -Path $NssmZip -Algorithm SHA256).Hash
+        if ($actualHash -ne $NssmSha256) {
+            Remove-Item -Path $NssmZip -Force -ErrorAction SilentlyContinue
+            throw "NSSM download checksum mismatch: expected $NssmSha256, got $actualHash. Refusing to install a tampered or corrupted binary."
+        }
+
+        Write-Host "==> Extracting NSSM"
+        Expand-Archive -Path $NssmZip -DestinationPath $NssmExtractDir -Force
+        Copy-Item -Path "$NssmExtractDir\nssm-2.24\win64\nssm.exe" -Destination $NssmExePath -Force
+        Remove-Item -Path $NssmZip, $NssmExtractDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-
-    Write-Host "==> Extracting NSSM"
-    Expand-Archive -Path $NssmZip -DestinationPath $NssmExtractDir -Force
-    Copy-Item -Path "$NssmExtractDir\nssm-2.24\win64\nssm.exe" -Destination $NssmExePath -Force
-    Remove-Item -Path $NssmZip, $NssmExtractDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Idempotent re-install. Tear down any prior registration under this name
