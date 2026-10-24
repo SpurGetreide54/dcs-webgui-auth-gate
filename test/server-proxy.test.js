@@ -126,6 +126,75 @@ test("control-port proxy: an expired/unknown token is rejected", async () => {
   }
 });
 
+test("control-port proxy: a token used before its TTL slides forward and survives past the original flat expiry", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+
+  try {
+    // 4 minutes in, still within the original 5-minute TTL -- the real
+    // webgui's own 2-second polling would have hit this many times over by
+    // now, this just simulates one such poll.
+    t.mock.timers.tick(4 * 60 * 1000);
+    const midRes = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(midRes.status, 200, "a poll within the original TTL must succeed and slide the token forward");
+
+    // 8 minutes since mint -- past where the original flat TTL would have
+    // expired it, but within TOKEN_TTL_MS of the mid-flight poll above.
+    t.mock.timers.tick(4 * 60 * 1000);
+    const laterRes = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(laterRes.status, 200, "a token used recently enough must still be accepted past its original flat expiry");
+  } finally {
+    server.close();
+  }
+});
+
+test("control-port proxy: an unused token still expires after its flat TTL with no renewal", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+
+  try {
+    t.mock.timers.tick(6 * 60 * 1000); // past the 5-minute TTL, never used in between
+    const res = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(res.status, 403, "a token that's never been used since mint must still expire on its original flat TTL");
+  } finally {
+    server.close();
+  }
+});
+
+test("control-port proxy: a repeatedly-used token still hits its absolute ceiling", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+
+  try {
+    // Poll every 4 minutes -- comfortably inside the 5-minute sliding
+    // window, so the token never lapses on its own -- for just past the
+    // 12-hour ceiling.
+    const pollIntervalMs = 4 * 60 * 1000;
+    const totalPolls = Math.ceil((12 * 60 * 60 * 1000) / pollIntervalMs) + 1;
+    let lastStatus;
+    for (let i = 0; i < totalPolls; i++) {
+      t.mock.timers.tick(pollIntervalMs);
+      const res = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+      lastStatus = res.status;
+    }
+    assert.equal(lastStatus, 403, "a token must still hit its absolute ceiling even if it's always within its sliding window");
+  } finally {
+    server.close();
+  }
+});
+
 test("control-port proxy: CORS preflight reflects the requesting origin", async () => {
   const { app } = serverProxy.buildControlProxyApp();
   const server = app.listen(0, "127.0.0.1");
