@@ -882,6 +882,67 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
       return nativeFetch.call(this, input, init);
     };
   })();
+
+  // The real DCS webgui has no link back to the auth-gate dashboard -- once
+  // an admin is inside it, the only way out is the browser's own back
+  // button, which is unreliable since the webgui's Vue router does its own
+  // in-page navigation. This adds one, anchored to the top bar next to the
+  // "DCS Server" title (.navbar-brand) rather than a fixed screen corner,
+  // because the left icon sidebar can collapse/expand and would shift or
+  // cover a corner-anchored button; the top bar itself never moves.
+  (function () {
+    var STYLE_ID = "auth-gate-back-btn-style";
+    if (!document.getElementById(STYLE_ID)) {
+      var style = document.createElement("style");
+      style.id = STYLE_ID;
+      style.textContent =
+        ".auth-gate-back-btn:hover { opacity: 1; color: #fff; border-left-color: #0d79e5; }";
+      document.head.appendChild(style);
+    }
+
+    function placeButton(brandEl) {
+      var navbarEl = brandEl.closest(".navbar") || brandEl.parentElement;
+      var btn = document.createElement("a");
+      btn.className = "auth-gate-back-btn";
+      btn.href = "/";
+      btn.textContent = "\\u2190 Control Panel";
+      // Styled as a nav item, not a button -- the same idiom the real
+      // webgui's own left sidebar uses for its nav links (dim at rest,
+      // full opacity + a blue left-border accent on hover), not the dark
+      // filled pill this started as, which read as a foreign floating
+      // widget rather than a built-in part of the top bar.
+      btn.style.cssText =
+        "position:absolute;top:50%;transform:translateY(-50%);" +
+        "padding:12px 16px;border-left:3px solid transparent;" +
+        "color:#c3c3c3;opacity:.75;" +
+        "font:1.1em/13px OpenSansRegular,Arial,sans-serif;text-decoration:none;" +
+        "white-space:nowrap;z-index:2147483647;" +
+        "transition:opacity .15s ease-in-out,color .15s ease-in-out,border-color .15s ease-in-out;";
+      navbarEl.appendChild(btn);
+
+      function reposition() {
+        var navRect = navbarEl.getBoundingClientRect();
+        var brandRect = brandEl.getBoundingClientRect();
+        btn.style.left = brandRect.right - navRect.left + 8 + "px";
+      }
+      reposition();
+      window.addEventListener("resize", reposition);
+    }
+
+    var existingBrand = document.querySelector(".navbar-brand");
+    if (existingBrand) {
+      placeButton(existingBrand);
+    } else {
+      var observer = new MutationObserver(function () {
+        var brand = document.querySelector(".navbar-brand");
+        if (brand) {
+          observer.disconnect();
+          placeButton(brand);
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+  })();
 </script>`;
   res.set("Content-Type", "text/html");
   res.send(webguiIndexTemplate.replace(APP_JS_SCRIPT_RE, `${bootstrap}\n  <script src="js/app.js"></script>`));

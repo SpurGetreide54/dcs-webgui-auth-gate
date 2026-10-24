@@ -267,6 +267,24 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
           calls.push(url);
           return { ok: true };
         },
+        addEventListener: () => {},
+      };
+      // The bootstrap script also contains the back-to-dashboard button's
+      // IIFE (below), which needs a `document` to run against. No real
+      // ".navbar-brand" exists in this stub, so it falls into the
+      // MutationObserver branch and sits there without ever placing a
+      // button -- irrelevant to the fetch-rewrite behavior this helper
+      // checks, but it still has to not throw.
+      context.document = {
+        getElementById: () => null,
+        createElement: () => ({ style: {} }),
+        head: { appendChild: () => {} },
+        querySelector: () => null,
+        documentElement: {},
+      };
+      context.MutationObserver = class {
+        observe() {}
+        disconnect() {}
       };
       vm.createContext(context);
       vm.runInContext(bootstrapScript, context);
@@ -295,6 +313,43 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // instead of this app's own static file server.
     const ownAsset = runBootstrapFetch(`${pathname}js/app.js`, { hostname, pathname });
     assert.equal(ownAsset, `${pathname}js/app.js`, "a request for the app's own served files must not be rewritten");
+
+    // The same bootstrap script also injects a "back to control panel"
+    // button next to the real webgui's ".navbar-brand" title, actually run
+    // against a stub DOM exposing one -- not just checked for presence, the
+    // way the fetch-rewrite logic above is.
+    {
+      const headChildren = [];
+      const navbarChildren = [];
+      const navbarEl = {
+        appendChild: (el) => navbarChildren.push(el),
+        getBoundingClientRect: () => ({ left: 0 }),
+      };
+      const brandEl = {
+        closest: (sel) => (sel === ".navbar" ? navbarEl : null),
+        getBoundingClientRect: () => ({ right: 180 }),
+      };
+      const context2 = {
+        document: {
+          getElementById: () => null,
+          createElement: () => ({ style: {} }),
+          head: { appendChild: (el) => headChildren.push(el) },
+          querySelector: (sel) => (sel === ".navbar-brand" ? brandEl : null),
+          documentElement: {},
+        },
+        window: { addEventListener: () => {} },
+      };
+      vm.createContext(context2);
+      vm.runInContext(bootstrapScript, context2);
+
+      assert.equal(navbarChildren.length, 1, "exactly one button must be appended into the navbar");
+      const btn = navbarChildren[0];
+      assert.equal(btn.href, "/", "the button must link back to the dashboard");
+      assert.equal(btn.textContent, "← Control Panel", "the button's label must match the dashboard's own wording");
+      assert.equal(btn.style.left, "188px", "left offset must be the brand's measured right edge, relative to the navbar, plus an 8px gap");
+      assert.equal(headChildren.length, 1, "the hover-style <style> tag must be injected once");
+      assert.match(headChildren[0].textContent, /auth-gate-back-btn:hover/);
+    }
 
     // a path with no matching static asset must 404, not fall through to some proxy
     const missingAssetRes = await fetch(`${base}/s/training/does/not/exist.js`, { headers: { Cookie: siteAdminCookie } });
