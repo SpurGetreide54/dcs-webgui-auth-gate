@@ -1,7 +1,7 @@
 # Configuration
 
-Both processes read their config from environment variables. The
-auth-gate also reads `.env` in its own working directory. See
+Both processes read their config from environment variables.<br>The
+auth-gate also reads `.env` in its own working directory.<br>See
 `.env.example` for a starting file.
 
 ## auth-gate (`src/server.js`)

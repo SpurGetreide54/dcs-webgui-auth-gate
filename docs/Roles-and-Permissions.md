@@ -14,7 +14,7 @@ is blocked.
 ## Per-server access
 
 A site admin grants each admin access to specific servers,
-individually. Access to one server says nothing about any other.
+individually.<br>Access to one server says nothing about any other.
 
 ## Mission permissions
 
@@ -28,10 +28,10 @@ Four separate grants, per admin, per server:
 | `delete` | Moving a mission to trash. See [FAQ](FAQ.md) for why this never actually deletes a file. |
 
 An admin with `upload` but not `view` still cannot reach the missions
-page. Grant `view` alongside any of the other three.
+page.<br>Grant `view` alongside any of the other three.
 
 ## Where this is managed
 
 All of the above is managed from a popup on each admin's row in
-`/admin/accounts`, not inline checkboxes. There are too many
+`/admin/accounts`, not inline checkboxes.<br>There are too many
 permissions for that to stay readable on one row.

@@ -20,7 +20,7 @@ or a page reload, from starting a second update on top of one still
 running.
 
 See [Architecture](Architecture.md#ab-self-update) for why the
-active-slot pointer is a flat file, not a database row. See
+active-slot pointer is a flat file, not a database row.<br>See
 `src/updateCheck.js`'s own top comment for the full design, including
 the Ed25519 signature check.
 
@@ -42,7 +42,7 @@ yet:
 
 This is not automated. It touches root-owned systemd config and
 restructures the app's own directory layout, so a human does it once,
-deliberately. Routine updates after this need no further manual
+deliberately.<br>Routine updates after this need no further manual
 steps.
 
 ### auth-gate side (on the VM)
@@ -62,7 +62,7 @@ steps.
    That unit runs as root, separately from the main service, and
    cannot read `.env`.
 
-2. Create both slot directories. Seed slot A with the code already
+2. Create both slot directories.<br>Seed slot A with the code already
    running, so the first real update has something to diff against:
    ```
    cd /var/www/dcs-webgui-auth-gate
@@ -89,7 +89,7 @@ steps.
    systemctl status dcs-webgui-auth-gate
    ```
    It should show active, and the app should still be reachable.
-   `/admin/update` now handles every future update. This setup never
+   `/admin/update` now handles every future update.<br>This setup never
    needs repeating.
 
 ### mission-agent side (on the physical host)
@@ -102,7 +102,7 @@ Re-run `install.ps1` once:
 
 The updated script copies `agent.exe` into `releases\a\` and points a
 `current` junction at it, instead of placing it directly in the
-install directory. NSSM's own config targets `current\agent.exe`, a
+install directory.<br>NSSM's own config targets `current\agent.exe`, a
 path that never changes again across future updates. Safe to re-run
-with the same parameters. See the script's own `.DESCRIPTION` for
+with the same parameters.<br>See the script's own `.DESCRIPTION` for
 exactly what changes.

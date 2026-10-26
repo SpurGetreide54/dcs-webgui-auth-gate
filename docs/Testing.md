@@ -10,7 +10,7 @@ This runs `node --test` against `test/`.
 
 ## What it covers
 
-Login, access checks, uploads, proxying, and the admin pages. Dummy
+Login, access checks, uploads, proxying, and the admin pages.<br>Dummy
 in-process HTTP servers stand in for the mission-agent.
 
 ## What it does not cover
@@ -19,5 +19,5 @@ in-process HTTP servers stand in for the mission-agent.
 - a real Windows host running `agent.exe`
 - a real reverse-proxy hop
 
-A real deployment is the only way to check those. See
+A real deployment is the only way to check those.<br>See
 [Installation](Installation.md).

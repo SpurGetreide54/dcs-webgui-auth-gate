@@ -1,8 +1,8 @@
 # Installation
 
-For what each process does, see [Architecture](Architecture.md). For
+For what each process does, see [Architecture](Architecture.md).<br>For
 where each process runs, see [Deployment Topology](Deployment-Topology.md)
-first. "VM" and "physical host" below refer to that topology.
+first.<br>"VM" and "physical host" below refer to that topology.
 
 Use a release build for both processes. Building from source is a
 maintainer concern, not a normal install step.
@@ -49,9 +49,8 @@ maintainer concern, not a normal install step.
 
 ### Windows Firewall
 
-`current` is a directory junction, a symlink-style path. Windows
-Firewall does not match a program-path rule against a symlink path.
-Point each rule at the real resolved target instead. Keep two rules,
+`current` is a directory junction, a symlink-style path.<br>Windows
+Firewall does not match a program-path rule against a symlink path.<br>Point each rule at the real resolved target instead. Keep two rules,
 one per A/B slot, both always present:
 
 ```
@@ -60,7 +59,7 @@ releases\b\agent.exe
 ```
 
 Whichever slot `current` points at next, a matching rule is already
-there. A single port rule
+there.<br>A single port rule
 (`New-NetFirewallRule -Protocol TCP -LocalPort <AgentPort>`) avoids
 this entirely, at the cost of not scoping the hole to this one
 program.
