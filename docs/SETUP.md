@@ -134,8 +134,17 @@ supervised. Routine updates after that need no further manual steps.
    sudo cp -r node_modules releases/a/
    sudo chown -R dcs-webgui-auth-gate:dcs-webgui-auth-gate releases
    echo -n a | sudo tee active-slot
+   sudo chown dcs-webgui-auth-gate:dcs-webgui-auth-gate active-slot
    sudo cp scripts/systemd/dcs-webgui-auth-gate.service scripts/systemd/dcs-webgui-auth-gate-rollback.service /tmp/
    ```
+   The `chown` on `active-slot` matters -- `sudo tee` creates the file as
+   root, but the running service (and `applyUpdate()`'s own flip step) is
+   the unprivileged `dcs-webgui-auth-gate` account, not root. Miss this and
+   every real update stages successfully (auth-gate slot, agent relay, all
+   of it) and then fails at the very last step with `EACCES: permission
+   denied, open '.../active-slot'` -- silently leaving the idle slot fully
+   built and the agent already flipped, but the auth-gate itself stuck on
+   the old version.
 3. Copy `launcher.js` to the top level (it's not part of either slot --
    see its own top comment for why) and install the two unit files from
    this repo (`scripts/systemd/dcs-webgui-auth-gate.service` replaces the
