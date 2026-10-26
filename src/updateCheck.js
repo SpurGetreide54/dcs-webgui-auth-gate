@@ -173,6 +173,14 @@ function runNpmInstall(cwd) {
   });
 }
 
+// How long the agent relay below will wait for each of its two requests
+// before giving up. Without this, a stalled upload to a real remote host
+// (unlike this function's own local/CI test coverage, which never crosses
+// a real network) can hang indefinitely with no error at all -- the
+// in-flight applyUpdate() call just sits there forever, never reaching
+// its own success or failure path, and never logging anything either way.
+const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 5 * 60 * 1000;
+
 // Relays the agent's new build through the existing internal auth-gate <->
 // agent channel -- the agent has no internet access of its own by design
 // (kept off the host's internet-facing side, see SETUP.md), so the
@@ -180,18 +188,23 @@ function runNpmInstall(cwd) {
 async function relayAgentUpdate(archivePath, sha256) {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured; cannot relay its update.");
   const fileBuffer = await fsp.readFile(archivePath);
+  console.log(`Update: uploading agent build to the mission agent (${fileBuffer.length} bytes)...`);
   const stageRes = await fetch(new URL("/self-update/stage", MISSION_AGENT_URL), {
     method: "POST",
     headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/octet-stream", "X-Sha256": sha256 },
     body: fileBuffer,
+    signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
   });
   if (!stageRes.ok) throw new Error(`Agent rejected the staged update: ${await stageRes.text().catch(() => stageRes.status)}`);
+  console.log("Update: agent build staged, committing...");
 
   const commitRes = await fetch(new URL("/self-update/commit", MISSION_AGENT_URL), {
     method: "POST",
     headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` },
+    signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
   });
   if (!commitRes.ok) throw new Error(`Agent rejected committing the staged update: ${await commitRes.text().catch(() => commitRes.status)}`);
+  console.log("Update: agent committed and is restarting.");
 }
 
 // The whole update, start to finish: re-verify, download both artifacts,
@@ -201,12 +214,15 @@ async function relayAgentUpdate(archivePath, sha256) {
 // is what actually brings the new slot up -- this process doesn't call
 // systemctl itself, since the service account has no sudo for that.
 async function applyUpdate() {
+  console.log(`Update: starting applyUpdate()...`);
   const manifest = await fetchVerifiedManifest();
+  console.log(`Update: verified manifest for version ${manifest.version}.`);
   const scratchDir = await fsp.mkdtemp(path.join(os.tmpdir(), "dcs-auth-gate-update-"));
   try {
     const authGateDownload = findDownload(manifest, "auth-gate");
     const authGateArchive = path.join(scratchDir, "auth-gate.tar.gz");
     await downloadAndVerify(authGateDownload.url, authGateDownload.sha256, authGateArchive);
+    console.log("Update: downloaded and verified the auth-gate archive.");
 
     const idleSlot = activeSlot.otherSlot(activeSlot.readActiveSlot());
     // __dirname here is releases/<active-slot>/src -- three levels up is
@@ -215,11 +231,14 @@ async function applyUpdate() {
     const appRoot = path.join(__dirname, "..", "..", "..");
     const slotDir = path.join(appRoot, "releases", idleSlot);
     await stageAuthGateSlot(authGateArchive, slotDir);
+    console.log(`Update: staged into slot ${idleSlot}, running npm install...`);
     await runNpmInstall(slotDir);
+    console.log("Update: npm install finished.");
 
     const agentDownload = findDownload(manifest, "agent");
     const agentExe = path.join(scratchDir, "agent.exe");
     await downloadAndVerify(agentDownload.url, agentDownload.sha256, agentExe);
+    console.log("Update: downloaded and verified the agent build.");
     await relayAgentUpdate(agentExe, agentDownload.sha256);
 
     activeSlot.writeActiveSlot(idleSlot);
@@ -229,6 +248,7 @@ async function applyUpdate() {
       changelogUrl: null,
       needsServiceUpdate: Boolean(manifest.needs_service_update),
     });
+    console.log(`Update: flipped active slot to ${idleSlot}. Exiting for the supervisor to restart into it.`);
   } finally {
     await fsp.rm(scratchDir, { recursive: true, force: true });
   }
