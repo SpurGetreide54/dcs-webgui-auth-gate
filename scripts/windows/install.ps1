@@ -166,10 +166,16 @@ Write-Host "==> Registering service $ServiceName"
 # left behind in the old slot. Pinning it to the stable top-level
 # InstallDir keeps one token file shared across both slots, the same way
 # .env is shared (not duplicated) on the auth-gate side.
+#
+# AGENT_LOG_FILE is pinned here for the identical reason, and to the exact
+# same path AppStdout/AppStderr already write to below -- the GET /logs
+# route the auth-gate's /admin/logs page relays through reads this file
+# back, so it has to agree with where NSSM is actually writing it.
 $envLines = @(
     "DCS_SAVED_GAMES_ROOT=$DcsSavedGamesRoot",
     "AGENT_PORT=$AgentPort",
-    "MISSION_AGENT_TOKEN_FILE=$InstallDir\agent-token.txt"
+    "MISSION_AGENT_TOKEN_FILE=$InstallDir\agent-token.txt",
+    "AGENT_LOG_FILE=$InstallDir\agent.log"
 )
 if ($MissionAgentToken) {
     $envLines += "MISSION_AGENT_TOKEN=$MissionAgentToken"

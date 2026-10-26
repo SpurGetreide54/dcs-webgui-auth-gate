@@ -11,10 +11,12 @@ const TOKEN = "agent-test-token";
 const savedGamesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mission-agent-test-"));
 const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "mission-agent-outside-"));
 const dcsInstallRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mission-agent-dcs-install-"));
+const agentLogFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mission-agent-log-")), "agent.log");
 
 process.env.AGENT_PORT = "0";
 process.env.MISSION_AGENT_TOKEN = TOKEN;
 process.env.DCS_SAVED_GAMES_ROOT = savedGamesRoot;
+process.env.AGENT_LOG_FILE = agentLogFile;
 
 const app = require("../src/agent");
 
@@ -480,4 +482,53 @@ test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
   } finally {
     fs.rmSync(extractDir, { recursive: true, force: true });
   }
+});
+
+test("installConsoleCapture formats console.log as NDJSON", () => {
+  // console.log here is already the wrapped version -- installed once,
+  // automatically, when this file required ../src/agent above. Spying on
+  // process.stdout.write (not console.log itself) is what actually lets
+  // this see what the wrapper emits, since the wrapper closed over the
+  // real console.log *before* this test ever runs.
+  const originalWrite = process.stdout.write;
+  let captured = "";
+  process.stdout.write = (chunk) => {
+    captured += chunk;
+    return true;
+  };
+  try {
+    console.log("hello", 1);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+  const parsed = JSON.parse(captured.trim());
+  assert.equal(parsed.level, "log");
+  assert.equal(parsed.msg, "hello 1");
+  assert.match(parsed.t, /^\d{4}-\d{2}-\d{2}T/, "needs a real ISO timestamp");
+});
+
+test("logs rejects requests with no token", async () => {
+  const res = await fetch(`${base}/logs`);
+  assert.equal(res.status, 401);
+});
+
+test("logs returns empty text when AGENT_LOG_FILE doesn't exist yet", async () => {
+  fs.rmSync(agentLogFile, { force: true });
+  const res = await fetch(`${base}/logs`, { headers: authHeaders() });
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "");
+});
+
+test("logs returns the tail of AGENT_LOG_FILE", async () => {
+  const lines = [];
+  for (let i = 0; i < 5; i++) lines.push(JSON.stringify({ t: new Date().toISOString(), level: "log", msg: `line ${i}` }));
+  fs.writeFileSync(agentLogFile, lines.join("\n") + "\n");
+
+  const res = await fetch(`${base}/logs`, { headers: authHeaders() });
+  assert.equal(res.status, 200);
+  const got = (await res.text())
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l).msg);
+  assert.deepEqual(got, ["line 0", "line 1", "line 2", "line 3", "line 4"]);
 });

@@ -315,3 +315,30 @@ tr.pending-invite td { color: var(--text-muted); }
 .mission-select { width: 1.6rem; }
 .mission-actions { display: flex; gap: 0.6rem; margin-top: 0.75rem; }
 .mission-actions button { width: auto; }
+
+.log-filters { max-width: none; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 1.25rem; }
+.log-filters .log-filter-group { display: flex; align-items: center; gap: 0.6rem; }
+.log-filters label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
+.log-filters select { background: var(--bg-shell-alt); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 0.35rem; }
+.log-filters button { width: auto; }
+
+.log-entries {
+  margin-top: 1rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.log-row { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.9rem; }
+.log-time { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.log-badge { flex-shrink: 0; font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 999px; background: var(--bg-panel-alt); }
+.log-badge.source-app { color: var(--accent-blue); }
+.log-badge.source-agent { color: var(--accent-cyan); }
+.log-msg { word-break: break-word; }
+.log-row.level-error .log-msg { color: var(--accent-red); }
+.log-row.level-raw .log-msg { color: var(--text-muted); font-style: italic; }

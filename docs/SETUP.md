@@ -127,20 +127,30 @@ supervised. Routine updates after that need no further manual steps.
 
 ### auth-gate: one-time migration (on the VM, over SSH)
 
-1. Add the shared `WEBGUI_STATIC_PATH` and `ACTIVE_SLOT_PATH` lines to
-   `.env` if they aren't already there. Without the first, each A/B slot
-   would look for its own, empty `webgui-static/` instead of the real one
-   (see the "Values that must match" note above). Without the second, each
-   slot's own code defaults to looking for `active-slot` *inside itself*
-   (`src/activeSlot.js`'s own fallback, meant for a plain single-checkout
-   local dev setup) instead of the shared top-level file `launcher.js`
-   reads -- an update would stage and "flip" without error, but the flip
-   would land somewhere the launcher never looks, so it would keep
-   launching the old slot forever:
+1. Add the shared `WEBGUI_STATIC_PATH`, `ACTIVE_SLOT_PATH`, and
+   `AUTH_GATE_LOG_PATH` lines to `.env` if they aren't already there.
+   Without the first, each A/B slot would look for its own, empty
+   `webgui-static/` instead of the real one (see the "Values that must
+   match" note above). Without the second, each slot's own code defaults
+   to looking for `active-slot` *inside itself* (`src/activeSlot.js`'s own
+   fallback, meant for a plain single-checkout local dev setup) instead of
+   the shared top-level file `launcher.js` reads -- an update would stage
+   and "flip" without error, but the flip would land somewhere the
+   launcher never looks, so it would keep launching the old slot forever.
+   Without the third, `/admin/logs`' own log file defaults the same
+   slot-local way, so every A/B flip would silently start a fresh,
+   history-less log instead of the shared one surfacing it:
    ```
    echo 'WEBGUI_STATIC_PATH=/var/www/dcs-webgui-auth-gate/webgui-static' | sudo tee -a /var/www/dcs-webgui-auth-gate/.env
    echo 'ACTIVE_SLOT_PATH=/var/www/dcs-webgui-auth-gate/active-slot' | sudo tee -a /var/www/dcs-webgui-auth-gate/.env
+   echo 'AUTH_GATE_LOG_PATH=/var/www/dcs-webgui-auth-gate/auth-gate.log' | sudo tee -a /var/www/dcs-webgui-auth-gate/.env
    ```
+   `AUTH_GATE_LOG_PATH` must match the hardcoded `LOG_FILE` in
+   `scripts/systemd/dcs-webgui-auth-gate-rollback.service` exactly -- that
+   unit has no `EnvironmentFile` of its own (it's a separate root-run unit,
+   installed alongside the main one in step 3 below) and can't read `.env`,
+   so it carries its own copy of this path, the same way it already does
+   for `STATE_FILE`.
 2. Create the two slot directories and seed slot A with the code already
    running (so the very first update has something real to diff against,
    and the app keeps working if you stop here):

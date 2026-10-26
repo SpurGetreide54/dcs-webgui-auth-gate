@@ -37,6 +37,7 @@ function sidebarNav(admin, active) {
   );
   if (admin.can_manage_accounts) {
     items.push(navItem("servers", "/admin/servers", "icon-server.png", "Manage servers"));
+    items.push(navItem("logs", "/admin/logs#latest", "icon-logs.svg", "View logs"));
     const updateState = updateCheck.getUpdateState();
     if (updateState.available_version) {
       items.push(navItem("update", "/admin/update", "icon-update.svg", `Update available: ${updateState.available_version}`));
@@ -622,6 +623,59 @@ ${updateState.needs_service_update ? `<p class="error">This release needs a manu
   return layout("Update — DCS Control Panel", body, { admin, active: "update", pageTitle: "Software update" });
 }
 
+const LOG_WINDOW_LABELS = { "15m": "Last 15 minutes", "1h": "Last hour", "6h": "Last 6 hours", "24h": "Last 24 hours", all: "All" };
+
+// One merged, chat-style timeline -- oldest at top, newest at bottom, like
+// a real chat transcript -- rather than two separate auth-gate/agent
+// blocks. #latest (an empty anchor right after the newest entry) is what
+// every link to this page points at, so landing here always lands
+// scrolled to the newest entries without any client-side script; this app
+// has none anywhere else and this isn't worth being the first.
+function logsPage({ admin, entries, agentError, filters }) {
+  const { sources, since } = filters;
+
+  const filterForm = `<form method="get" action="/admin/logs#latest" class="log-filters">
+  <div class="log-filter-group">
+    <label><input type="checkbox" name="source" value="app" ${sources.has("app") ? "checked" : ""}> Auth-gate</label>
+    <label><input type="checkbox" name="source" value="agent" ${sources.has("agent") ? "checked" : ""}> Agent</label>
+  </div>
+  <div class="log-filter-group">
+    <label>Since
+      <select name="since">
+        ${Object.entries(LOG_WINDOW_LABELS)
+          .map(([key, label]) => `<option value="${key}" ${since === key ? "selected" : ""}>${escapeHtml(label)}</option>`)
+          .join("")}
+      </select>
+    </label>
+  </div>
+  <button type="submit">Apply filters</button>
+</form>`;
+
+  const rows = entries.length
+    ? entries
+        .map((e) => {
+          const time = e.t ? escapeHtml(e.t.replace("T", " ").slice(0, 19)) : "";
+          const sourceLabel = e.source === "agent" ? "agent" : "auth-gate";
+          return `<div class="log-row level-${escapeHtml(e.level)}">
+    <span class="log-time">${time}</span>
+    <span class="log-badge source-${escapeHtml(e.source)}">${escapeHtml(sourceLabel)}</span>
+    <span class="log-msg">${escapeHtml(e.msg)}</span>
+  </div>`;
+        })
+        .join("")
+    : `<p>No log entries match the current filters.</p>`;
+
+  const body = `${agentError ? `<p class="error">${escapeHtml(agentError)}</p>` : ""}
+${filterForm}
+<div class="log-entries">
+  ${rows}
+  <a id="latest"></a>
+</div>
+<p><a href="/admin/logs#latest">Refresh</a></p>`;
+
+  return layout("Logs — DCS Control Panel", body, { admin, active: "logs", pageTitle: "Logs" });
+}
+
 module.exports = {
   escapeHtml,
   loginPage,
@@ -635,4 +689,5 @@ module.exports = {
   webguiSyncPage,
   missionsPage,
   updatePage,
+  logsPage,
 };

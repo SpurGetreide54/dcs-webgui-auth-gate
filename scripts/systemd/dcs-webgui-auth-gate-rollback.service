@@ -22,11 +22,19 @@ Description=Roll dcs-webgui-auth-gate back to its other A/B slot after repeated 
 
 [Service]
 Type=oneshot
+# LOG_FILE here must match whatever AUTH_GATE_LOG_PATH is set to in the
+# shared .env (see docs/SETUP.md's A/B migration section) -- this is a
+# separate root-run unit, with no EnvironmentFile of its own, so it can't
+# read that value and has its own hardcoded copy instead, same as
+# STATE_FILE already is. A rollback is exactly the kind of event
+# /admin/logs exists to surface, so it's worth logging here too.
 ExecStart=/bin/sh -c '\
   STATE_FILE=/var/www/dcs-webgui-auth-gate/active-slot; \
+  LOG_FILE=/var/www/dcs-webgui-auth-gate/auth-gate.log; \
   CURRENT=$(cat "$STATE_FILE" 2>/dev/null || echo a); \
   if [ "$CURRENT" = "a" ]; then NEW=b; else NEW=a; fi; \
   printf %s "$NEW" > "$STATE_FILE"; \
   echo "Rolled back: active-slot $CURRENT -> $NEW"; \
+  printf "{\"t\":\"%s\",\"level\":\"warn\",\"msg\":\"Rolled back: active-slot %s -> %s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$CURRENT" "$NEW" >> "$LOG_FILE"; \
   systemctl start dcs-webgui-auth-gate \
 '

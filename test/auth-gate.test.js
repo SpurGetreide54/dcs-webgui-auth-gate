@@ -64,7 +64,13 @@ function lastAgentCall(method, pathPrefix) {
   return dummyAgentCalls.filter((c) => c.method === method && c.url.startsWith(pathPrefix)).pop();
 }
 let sqlitePath;
+let authGateLogPath;
 const AGENT_TOKEN = "test-agent-token";
+
+// Controls dummyAgent's GET /logs response -- set per test, same pattern
+// as dummyGithubRespond above.
+let dummyAgentLogText = "";
+let dummyAgentLogsShouldFail = false;
 
 // Stands in for the real GitHub API that src/updateCheck.js's
 // checkForUpdate() reaches -- set per test via dummyGithubRespond, so the
@@ -82,6 +88,14 @@ test.before(async () => {
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
       dummyAgentCalls.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: Buffer.concat(chunks) });
+      if (req.method === "GET" && req.url === "/logs") {
+        if (dummyAgentLogsShouldFail) {
+          res.writeHead(502, { "Content-Type": "text/plain" });
+          return res.end("simulated agent log failure");
+        }
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        return res.end(dummyAgentLogText);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       // A list GET needs a real { missions: [...] } shape, not the generic
       // { ok: true } every other stubbed endpoint here returns.
@@ -100,6 +114,8 @@ test.before(async () => {
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
   process.env.GITHUB_API_BASE_OVERRIDE = dummyGithubBase;
+  authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
+  process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
 
   app = require("../src/server");
   db = require("../src/db");
@@ -113,6 +129,7 @@ test.after(async () => {
   await new Promise((resolve) => dummyGithub.close(resolve));
   db.close();
   cleanupSqlite(sqlitePath);
+  for (const suffix of ["", ".1"]) fs.rmSync(authGateLogPath + suffix, { force: true });
 });
 
 test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, logout", async () => {
@@ -748,6 +765,52 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
 
     db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
+
+    // --- logs: auth-gate's own + agent's, merged into one timeline (site admin only) ---
+    const forbiddenLogsPage = await fetch(`${base}/admin/logs`, { headers: { Cookie: serverAdminCookie } });
+    assert.equal(forbiddenLogsPage.status, 403, "a non-site-admin must not reach the logs page");
+
+    // console.log/warn here are already the real wrapped versions --
+    // appLog.installConsoleCapture() ran when `app = require("../src/
+    // server")` happened in test.before(), same as production.
+    console.log("AUTH_GATE_LOG_MARKER app-side entry");
+    console.error("AUTH_GATE_LOG_MARKER app-side error");
+    dummyAgentLogText = JSON.stringify({ t: new Date().toISOString(), level: "log", msg: "AUTH_GATE_LOG_MARKER agent-side entry" });
+
+    const logsRes = await fetch(`${base}/admin/logs`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(logsRes.status, 200);
+    const logsHtml = await logsRes.text();
+    assert.match(logsHtml, /AUTH_GATE_LOG_MARKER app-side entry/);
+    assert.match(logsHtml, /AUTH_GATE_LOG_MARKER app-side error/);
+    assert.match(logsHtml, /AUTH_GATE_LOG_MARKER agent-side entry/, "the agent's own log must be merged in too");
+    assert.match(logsHtml, /id="latest"/, "needs a scroll anchor for landing at the newest entry");
+    assert.match(logsHtml, /<form method="get" action="\/admin\/logs#latest" class="log-filters">/);
+    assert.match(logsHtml, />agent</, "the agent entry needs its source badge");
+    assert.match(logsHtml, />auth-gate</, "the app entries need their source badge");
+
+    // --- filter by source: app-only must exclude the agent's entry ---
+    const appOnlyHtml = await (await fetch(`${base}/admin/logs?source=app`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(appOnlyHtml, /AUTH_GATE_LOG_MARKER app-side entry/);
+    assert.doesNotMatch(appOnlyHtml, /AUTH_GATE_LOG_MARKER agent-side entry/, "source=app must exclude agent entries");
+
+    // --- filter by timespan: an old entry is excluded by a short window ---
+    const oldTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    fs.appendFileSync(authGateLogPath, JSON.stringify({ t: oldTimestamp, level: "log", msg: "AUTH_GATE_LOG_MARKER old entry" }) + "\n");
+
+    const allTimeHtml = await (await fetch(`${base}/admin/logs?since=all`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(allTimeHtml, /AUTH_GATE_LOG_MARKER old entry/, "since=all must include the old entry");
+    const recentOnlyHtml = await (await fetch(`${base}/admin/logs?since=15m`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(recentOnlyHtml, /AUTH_GATE_LOG_MARKER old entry/, "since=15m must exclude a 2h-old entry");
+
+    // --- agent unreachable: the auth-gate's own entries still render,
+    // with a clear error instead of silently dropping the agent section ---
+    dummyAgentLogsShouldFail = true;
+    const degradedRes = await fetch(`${base}/admin/logs`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(degradedRes.status, 200, "an unreachable agent must not fail the whole page");
+    const degradedHtml = await degradedRes.text();
+    assert.match(degradedHtml, /Could not reach the mission agent/);
+    assert.match(degradedHtml, /AUTH_GATE_LOG_MARKER app-side entry/, "the auth-gate's own entries must still render");
+    dummyAgentLogsShouldFail = false;
 
     // --- logout is a destructive-styled navbar button, POST only ---
     const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();

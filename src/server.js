@@ -15,6 +15,9 @@ const views = require("./views");
 const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
 const updateCheck = require("./updateCheck");
+const appLog = require("./appLog");
+
+appLog.installConsoleCapture();
 
 const PORT = Number(process.env.PORT || 3000);
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
@@ -617,6 +620,71 @@ updateRouter.post("/", (req, res) => {
 });
 
 app.use("/admin/update", updateRouter);
+
+// ---- logs: the auth-gate's own + the mission-agent's, merged into one
+// timeline (site admins only) ----
+
+const logsRouter = express.Router();
+logsRouter.use(auth.requireAccountManager);
+
+const LOG_WINDOWS_MS = { "15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000, "6h": 6 * 60 * 60 * 1000, "24h": 24 * 60 * 60 * 1000 };
+
+function parseLogLines(text) {
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && typeof parsed.t === "string" && typeof parsed.msg === "string") return parsed;
+      } catch {
+        // fall through to the raw case below
+      }
+      return { t: null, level: "raw", msg: line };
+    });
+}
+
+async function fetchAgentLogEntries() {
+  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured.");
+  const url = new URL("/logs", MISSION_AGENT_URL);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  if (!res.ok) throw new Error(`agent returned ${res.status}`);
+  return parseLogLines(await res.text());
+}
+
+logsRouter.get("/", async (req, res) => {
+  const requested = Array.isArray(req.query.source) ? req.query.source : req.query.source ? [req.query.source] : ["app", "agent"];
+  const sources = new Set(requested.filter((s) => s === "app" || s === "agent"));
+  if (sources.size === 0) {
+    sources.add("app");
+    sources.add("agent");
+  }
+  const since = typeof req.query.since === "string" && req.query.since in LOG_WINDOWS_MS ? req.query.since : "all";
+
+  let entries = [];
+  if (sources.has("app")) {
+    entries = entries.concat(appLog.readRecentEntries(1000).map((e) => ({ ...e, source: "app" })));
+  }
+  let agentError = null;
+  if (sources.has("agent")) {
+    try {
+      entries = entries.concat((await fetchAgentLogEntries()).map((e) => ({ ...e, source: "agent" })));
+    } catch (err) {
+      agentError = `Could not reach the mission agent: ${err.message}`;
+    }
+  }
+
+  entries.sort((a, b) => (a.t || "").localeCompare(b.t || ""));
+  if (since !== "all") {
+    const cutoff = Date.now() - LOG_WINDOWS_MS[since];
+    entries = entries.filter((e) => e.t && new Date(e.t).getTime() >= cutoff);
+  }
+  entries = entries.slice(-300);
+
+  res.send(views.logsPage({ admin: req.admin, entries, agentError, filters: { sources, since } }));
+});
+
+app.use("/admin/logs", logsRouter);
 
 // ---- per-server: access check, mission upload, then generic proxy ----
 

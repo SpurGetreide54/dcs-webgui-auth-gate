@@ -21,14 +21,43 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const crypto = require("node:crypto");
+const util = require("node:util");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const tar = require("tar");
 const archiver = require("archiver");
+
+// Mirrors src/appLog.js's NDJSON line shape (one JSON object per line: t,
+// level, msg) so the auth-gate's /admin/logs can merge both sources into
+// one timeline. Duplicated here rather than required from src/ -- this
+// file builds standalone into agent.exe with zero dependency on src/ (see
+// resolveAgentToken()'s own comment below on why that isolation matters).
+// This only changes what gets printed; NSSM's own AppStdout/AppStderr
+// redirection (install.ps1) still does the actual writing-to-agent.log
+// and rotation, unchanged.
+function installConsoleCapture() {
+  const original = { log: console.log, warn: console.warn, error: console.error };
+  function emit(write, level, args) {
+    const msg = args.map((a) => (typeof a === "string" ? a : util.inspect(a))).join(" ");
+    write(JSON.stringify({ t: new Date().toISOString(), level, msg }));
+  }
+  console.log = (...args) => emit(original.log, "log", args);
+  console.warn = (...args) => emit(original.warn, "warn", args);
+  console.error = (...args) => emit(original.error, "error", args);
+}
+installConsoleCapture();
 
 const PORT = Number(process.env.AGENT_PORT || 4000);
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
 const SAVED_GAMES_ROOT = process.env.DCS_SAVED_GAMES_ROOT;
 const DEFAULT_WEBGUI_PORT = 8088;
+
+// Same naive-default-is-dev-only-correct shape as MISSION_AGENT_TOKEN_FILE
+// below -- process.execPath, through the "current" junction, resolves to
+// whichever slot is actually running, not the stable top-level InstallDir.
+// install.ps1 pins this explicitly to $InstallDir\agent.log, the same
+// path AppStdout/AppStderr already write to.
+const AGENT_LOG_FILE = process.env.AGENT_LOG_FILE || path.join(path.dirname(process.execPath), "agent.log");
+const MAX_LOG_READ_LINES = 1000;
 
 // MISSION_AGENT_TOKEN authenticates the auth-gate to this agent. An
 // explicit env value always wins. Otherwise this agent is the source of
@@ -435,6 +464,22 @@ app.post("/self-update/commit", checkToken, async (req, res) => {
   // own process -- same spirit as AGENT_SELF_UPDATE_ROOT above.
   if (!process.env.AGENT_SELF_UPDATE_SKIP_EXIT) res.on("finish", () => process.exit(1));
   res.json({ ok: true, activeSlot: idleSlot });
+});
+
+// ---- logs: tail of this agent's own log file. NSSM's AppStdout/AppStderr
+// redirection (install.ps1) is what actually writes AGENT_LOG_FILE and
+// rotates it -- this just reads it back. ----
+
+app.get("/logs", checkToken, async (req, res) => {
+  let raw;
+  try {
+    raw = await fs.readFile(AGENT_LOG_FILE, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return res.type("text/plain").send("");
+    return res.status(500).send(`Could not read ${AGENT_LOG_FILE}: ${err.message}`);
+  }
+  const lines = raw.split("\n").filter(Boolean).slice(-MAX_LOG_READ_LINES);
+  res.type("text/plain").send(lines.join("\n"));
 });
 
 app.use((req, res) => res.status(404).send("Not found."));
