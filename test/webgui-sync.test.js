@@ -20,6 +20,19 @@ function extractCookie(res) {
   return setCookie ? setCookie.split(";")[0] : null;
 }
 
+// node's fetch() has no cookie jar, so it won't carry a redirect's
+// Set-Cookie (the flash message) into the request it auto-follows --
+// capture it by hand and refetch the Location with it attached, same as
+// a real browser does.
+async function postAndFollowFlash(url, options) {
+  const res = await fetch(url, { ...options, redirect: "manual" });
+  assert.equal(res.status, 302, `expected a redirect (PRG) from ${url}, got ${res.status}`);
+  const flashCookie = extractCookie(res);
+  const location = res.headers.get("location");
+  const cookieHeader = [options.headers?.Cookie, flashCookie].filter(Boolean).join("; ");
+  return fetch(new URL(location, url), { headers: { Cookie: cookieHeader } });
+}
+
 async function packDirToBuffer(dir) {
   const chunks = [];
   for await (const chunk of tar.c({ cwd: dir }, ["."])) chunks.push(chunk);
@@ -119,12 +132,11 @@ test("webgui-sync: syncs webgui-static/ from the selected server's DCS install",
     assert.match(reviewHtml, /Main Server/);
 
     // --- confirm: pulls the tar from the agent and replaces webgui-static/ ---
-    const syncRes = await fetch(`${base}/admin/servers/webgui-sync/confirm`, {
+    const syncRes = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `server_id=${serverId}`,
     });
-    assert.equal(syncRes.status, 200);
     const syncHtml = await syncRes.text();
     assert.match(syncHtml, /Synced webgui-static/);
     assert.deepEqual(bundleRequests, [GOOD_INSTALL_PATH]);
@@ -159,12 +171,11 @@ test("webgui-sync: a failed bundle fetch leaves the existing webgui-static/ unto
       .run("broken", "Broken Server", "Example_Broken", BAD_INSTALL_PATH);
     const serverId = insert.lastInsertRowid;
 
-    const syncRes = await fetch(`${base}/admin/servers/webgui-sync/confirm`, {
+    const syncRes = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `server_id=${serverId}`,
     });
-    assert.equal(syncRes.status, 502);
     const syncHtml = await syncRes.text();
     assert.match(syncHtml, /Sync failed/);
 
@@ -197,12 +208,12 @@ test("webgui-sync: rejects confirming without a server that has an install path 
       .prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)")
       .run("nopath", "No Path Server", "Example_NoPath");
 
-    const res = await fetch(`${base}/admin/servers/webgui-sync/confirm`, {
+    const res = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `server_id=${insert.lastInsertRowid}`,
     });
-    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Pick a server that has a DCS install path set/);
     assert.equal(bundleRequests.length, 0, "must not call the agent for a server with no install path");
   } finally {
     server.close();

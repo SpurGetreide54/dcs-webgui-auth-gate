@@ -43,6 +43,21 @@ function extractCookie(res) {
   return setCookie.split(";")[0];
 }
 
+// node's fetch() has no cookie jar -- unlike a real browser, it does NOT
+// carry a redirect response's Set-Cookie into the request it auto-follows.
+// So a POST that now does flash.setFlash()+redirect (PRG) needs this to
+// simulate what a browser does for real: capture the 302's flash cookie by
+// hand, then fetch the Location with it (plus whatever cookie the original
+// request already carried, e.g. the session) attached.
+async function postAndFollowFlash(url, options) {
+  const res = await fetch(url, { ...options, redirect: "manual" });
+  assert.equal(res.status, 302, `expected a redirect (PRG) from ${url}, got ${res.status}`);
+  const flashCookie = extractCookie(res);
+  const location = res.headers.get("location");
+  const cookieHeader = [options.headers?.Cookie, flashCookie].filter(Boolean).join("; ");
+  return fetch(new URL(location, url), { headers: { Cookie: cookieHeader } });
+}
+
 function tempSqlitePath(label) {
   return path.join(os.tmpdir(), `auth-gate-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
@@ -414,12 +429,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const uploadCallCountBefore = dummyAgentCalls.filter((c) => c.method === "POST" && c.url === "/upload").length;
     const badForm = new FormData();
     badForm.append("mission", new Blob([Buffer.from("not a mission")], { type: "text/plain" }), "not-a-mission.txt");
-    const badUploadRes = await fetch(`${base}/s/training/missions/upload`, {
+    const badUploadRes = await postAndFollowFlash(`${base}/s/training/missions/upload`, {
       method: "POST",
       headers: { Cookie: siteAdminCookie },
       body: badForm,
     });
-    assert.equal(badUploadRes.status, 400);
+    assert.match(await badUploadRes.text(), /No \.miz file provided/);
     const uploadCallCountAfter = dummyAgentCalls.filter((c) => c.method === "POST" && c.url === "/upload").length;
     assert.equal(uploadCallCountAfter, uploadCallCountBefore, "rejected file must never be forwarded to the mission agent's /upload endpoint");
 
@@ -453,28 +468,28 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     );
 
     // rejects a bad slug instead of silently accepting it
-    const badSlugRes = await fetch(`${base}/admin/servers`, {
+    const badSlugRes = await postAndFollowFlash(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `slug=${encodeURIComponent("not a slug!")}&name=X&instance_name=x`,
     });
-    assert.equal(badSlugRes.status, 400);
+    assert.match(await badSlugRes.text(), /Slug must be lowercase letters/);
 
     // rejects a duplicate slug
-    const dupSlugRes = await fetch(`${base}/admin/servers`, {
+    const dupSlugRes = await postAndFollowFlash(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `slug=community2&name=X&instance_name=x`,
     });
-    assert.equal(dupSlugRes.status, 400);
+    assert.match(await dupSlugRes.text(), /That slug is already in use/);
 
     // rejects an instance name with path-traversal characters
-    const badInstanceRes = await fetch(`${base}/admin/servers`, {
+    const badInstanceRes = await postAndFollowFlash(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `slug=community3&name=X&instance_name=${encodeURIComponent("../escape")}`,
     });
-    assert.equal(badInstanceRes.status, 400);
+    assert.match(await badInstanceRes.text(), /DCS instance name must be letters, numbers, underscores, and hyphens only/);
 
     // edit the server
     const editServerRes = await fetch(`${base}/admin/servers/${newServerRow.id}`, {
@@ -504,12 +519,11 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     // --- last-site-admin delete guard ---
     const soleSiteAdminId = db.prepare("SELECT id FROM admins WHERE username = 'siteadmin'").get().id;
-    const deleteSelfRes = await fetch(`${base}/admin/accounts/${soleSiteAdminId}/delete`, {
+    const deleteSelfRes = await postAndFollowFlash(`${base}/admin/accounts/${soleSiteAdminId}/delete`, {
       method: "POST",
       headers: { Cookie: siteAdminCookie },
-      redirect: "manual",
     });
-    assert.equal(deleteSelfRes.status, 400, "must refuse to delete the last remaining admin account");
+    assert.match(await deleteSelfRes.text(), /Can.{1,6}t delete the last site admin.{1,6}s account/, "must refuse to delete the last remaining admin account");
 
     // --- login rate limiting. A throwaway username on the same running
     // server avoids a second app/db instance -- better-sqlite3's native
@@ -517,13 +531,13 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // mid-process. ---
     let lastAttempt;
     for (let i = 0; i < 6; i++) {
-      lastAttempt = await fetch(`${base}/login`, {
+      lastAttempt = await postAndFollowFlash(`${base}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "username=rate-limit-probe&password=wrong-password",
       });
     }
-    assert.equal(lastAttempt.status, 429, "6th attempt within the window should be rate-limited");
+    assert.match(await lastAttempt.text(), /Too many attempts/, "6th attempt within the window should be rate-limited");
 
     // --- self-service password change: wrong current password rejected,
     // correct flow updates the hash and signs out every *other* session for
@@ -537,12 +551,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const serverAdminCookie2 = extractCookie(secondServerAdminLogin);
     assert.ok(serverAdminCookie2, "a second concurrent session for the same account must be possible");
 
-    const badCurrentPwRes = await fetch(`${base}/admin/accounts/change-password`, {
+    const badCurrentPwRes = await postAndFollowFlash(`${base}/admin/accounts/change-password`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: serverAdminCookie },
       body: "current_password=wrong-password&new_password=brand-new-password-1&confirm_password=brand-new-password-1",
     });
-    assert.equal(badCurrentPwRes.status, 400, "wrong current password must be rejected");
+    assert.match(await badCurrentPwRes.text(), /Current password is incorrect/, "wrong current password must be rejected");
 
     const changePwRes = await fetch(`${base}/admin/accounts/change-password`, {
       method: "POST",
@@ -566,12 +580,11 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(afterChangeOtherSession.status, 302, "changing the password must sign out every other session for that account");
 
     // --- invite-based account creation ---
-    const createInviteRes = await fetch(`${base}/admin/accounts/invite`, {
+    const createInviteRes = await postAndFollowFlash(`${base}/admin/accounts/invite`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: "",
     });
-    assert.equal(createInviteRes.status, 200);
     const createInviteHtml = await createInviteRes.text();
     const inviteLinkMatch = createInviteHtml.match(/\/invite\/([0-9a-f]{64})/);
     assert.ok(inviteLinkMatch, "creating an invite must display the full invite link");
@@ -629,7 +642,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // --- invite redemption: the invitee picks their own username/password,
     // permissions come from what the invite already had set via the
     // permissions-popup endpoint ---
-    const redeemInviteRes = await fetch(`${base}/admin/accounts/invite`, {
+    const redeemInviteRes = await postAndFollowFlash(`${base}/admin/accounts/invite`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: "",
@@ -738,9 +751,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       { version: "9.9.9-bad", changelog_url: "https://example.test/changelog", needs_service_update: false, downloads: [] },
       crypto.generateKeyPairSync("ed25519").privateKey
     );
-    const failedCheckRes = await fetch(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: siteAdminCookie } });
-    assert.equal(failedCheckRes.status, 502, "a check that fails signature verification must not report success");
-    assert.match(await failedCheckRes.text(), /Check failed/);
+    const failedCheckRes = await postAndFollowFlash(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+    assert.match(await failedCheckRes.text(), /Check failed/, "a check that fails signature verification must not report success");
 
     // A successful check with a genuinely newer, properly-signed release --
     // only runs where the real signing key exists on this machine

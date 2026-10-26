@@ -16,6 +16,7 @@ const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
 const updateCheck = require("./updateCheck");
 const appLog = require("./appLog");
+const flash = require("./flash");
 
 appLog.installConsoleCapture();
 
@@ -58,14 +59,15 @@ function setSessionCookie(res, token) {
 
 app.get("/setup", (req, res) => {
   if (adminCount() > 0) return res.status(404).send("Not found.");
-  res.send(views.setupPage({}));
+  res.send(views.setupPage(flash.readFlash(req, res)));
 });
 
 app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
   if (adminCount() > 0) return res.status(404).send("Not found.");
   const { username, password } = req.body;
   if (!username || !password || password.length < 12) {
-    return res.status(400).send(views.setupPage({ error: "Username required, password must be at least 12 characters." }));
+    flash.setFlash(res, { error: "Username required, password must be at least 12 characters." });
+    return res.redirect("/setup");
   }
   const info = db
     .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, 1)")
@@ -85,23 +87,26 @@ app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
 
 app.get("/login", (req, res) => {
   if (adminCount() === 0) return res.redirect("/setup");
-  res.send(views.loginPage({}));
+  res.send(views.loginPage(flash.readFlash(req, res)));
 });
 
 app.post("/login", express.urlencoded({ extended: false }), (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
-    return res.status(400).send(views.loginPage({ error: "Username and password required." }));
+    flash.setFlash(res, { error: "Username and password required." });
+    return res.redirect("/login");
   }
   if (auth.isRateLimited(req, username)) {
-    return res.status(429).send(views.loginPage({ error: "Too many attempts. Try again later." }));
+    flash.setFlash(res, { error: "Too many attempts. Try again later." });
+    return res.redirect("/login");
   }
   auth.pruneOldLoginAttempts();
   auth.recordLoginAttempt(req, username);
 
   const admin = db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
   if (!admin || !auth.verifyPassword(password, admin.password_hash)) {
-    return res.status(401).send(views.loginPage({ error: "Invalid username or password." }));
+    flash.setFlash(res, { error: "Invalid username or password." });
+    return res.redirect("/login");
   }
   const token = auth.createSession(admin.id);
   setSessionCookie(res, token);
@@ -121,7 +126,7 @@ app.post("/logout", express.urlencoded({ extended: false }), (req, res) => {
 app.get("/invite/:token", (req, res) => {
   const invite = invitesDb.getValidInviteByToken(req.params.token);
   if (!invite) return res.status(404).send(views.inviteExpiredPage());
-  res.send(views.invitePage({}));
+  res.send(views.invitePage(flash.readFlash(req, res)));
 });
 
 app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) => {
@@ -130,13 +135,16 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
 
   const { username, password, confirm_password } = req.body;
   if (!username || !password || !confirm_password) {
-    return res.status(400).send(views.invitePage({ error: "All fields are required." }));
+    flash.setFlash(res, { error: "All fields are required." });
+    return res.redirect(`/invite/${req.params.token}`);
   }
   if (password.length < 12) {
-    return res.status(400).send(views.invitePage({ error: "Password must be at least 12 characters." }));
+    flash.setFlash(res, { error: "Password must be at least 12 characters." });
+    return res.redirect(`/invite/${req.params.token}`);
   }
   if (password !== confirm_password) {
-    return res.status(400).send(views.invitePage({ error: "Password and confirmation do not match." }));
+    flash.setFlash(res, { error: "Password and confirmation do not match." });
+    return res.redirect(`/invite/${req.params.token}`);
   }
 
   let info;
@@ -145,7 +153,8 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
       .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
       .run(username, auth.hashPassword(password), invite.can_manage_accounts);
   } catch (err) {
-    return res.status(400).send(views.invitePage({ error: "That username is already taken." }));
+    flash.setFlash(res, { error: "That username is already taken." });
+    return res.redirect(`/invite/${req.params.token}`);
   }
   for (const grant of invitesDb.getInviteAccess(invite.id)) {
     serversDb.setAccess(info.lastInsertRowid, grant.server_id, {
@@ -197,7 +206,7 @@ function loadAccountsPageData(req, { error, notice, inviteUrl } = {}) {
 }
 
 accountsRouter.get("/", (req, res) => {
-  res.send(loadAccountsPageData(req));
+  res.send(loadAccountsPageData(req, flash.readFlash(req, res)));
 });
 
 // Self-service: change the logged-in admin's own password. Available to
@@ -208,21 +217,26 @@ accountsRouter.get("/", (req, res) => {
 accountsRouter.post("/change-password", express.urlencoded({ extended: false }), (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (!current_password || !new_password || !confirm_password) {
-    return res.status(400).send(loadAccountsPageData(req, { error: "All password fields are required." }));
+    flash.setFlash(res, { error: "All password fields are required." });
+    return res.redirect("/admin/accounts");
   }
   if (!auth.verifyPassword(current_password, req.admin.password_hash)) {
-    return res.status(400).send(loadAccountsPageData(req, { error: "Current password is incorrect." }));
+    flash.setFlash(res, { error: "Current password is incorrect." });
+    return res.redirect("/admin/accounts");
   }
   if (new_password.length < 12) {
-    return res.status(400).send(loadAccountsPageData(req, { error: "New password must be at least 12 characters." }));
+    flash.setFlash(res, { error: "New password must be at least 12 characters." });
+    return res.redirect("/admin/accounts");
   }
   if (new_password !== confirm_password) {
-    return res.status(400).send(loadAccountsPageData(req, { error: "New password and confirmation do not match." }));
+    flash.setFlash(res, { error: "New password and confirmation do not match." });
+    return res.redirect("/admin/accounts");
   }
   db.prepare("UPDATE admins SET password_hash = ? WHERE id = ?").run(auth.hashPassword(new_password), req.admin.id);
   const currentToken = req.cookies[auth.SESSION_COOKIE];
   db.prepare("DELETE FROM sessions WHERE admin_id = ? AND token_hash != ?").run(req.admin.id, auth.hashToken(currentToken));
-  res.send(loadAccountsPageData(req, { notice: "Password changed. You're still signed in here; any other sessions were signed out." }));
+  flash.setFlash(res, { notice: "Password changed. You're still signed in here; any other sessions were signed out." });
+  res.redirect("/admin/accounts");
 });
 
 // ---- everything below is site-admin only ----
@@ -265,13 +279,15 @@ accountsRouter.post("/invite", auth.requireAccountManager, express.urlencoded({ 
   // Starts with no server permissions -- granted afterward from the same
   // page, via the pending invite's own Permissions button/popup.
   const inviteUrl = `${req.protocol}://${req.get("host")}/invite/${token}`;
-  res.send(loadAccountsPageData(req, { inviteUrl }));
+  flash.setFlash(res, { inviteUrl });
+  res.redirect("/admin/accounts");
 });
 
 accountsRouter.post("/invites/:id", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const inviteId = Number(req.params.id);
   if (!invitesDb.getValidInviteById(inviteId)) {
-    return res.status(404).send(loadAccountsPageData(req, { error: "That invite has expired or no longer exists." }));
+    flash.setFlash(res, { error: "That invite has expired or no longer exists." });
+    return res.redirect("/admin/accounts");
   }
   invitesDb.setCanManageAccounts(inviteId, Boolean(req.body.can_manage_accounts));
   res.redirect("/admin/accounts");
@@ -285,13 +301,15 @@ accountsRouter.post("/invites/:id/revoke", auth.requireAccountManager, (req, res
 accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const { username, password, can_manage_accounts } = req.body;
   if (!username || !password || password.length < 12) {
-    return res.status(400).send(loadAccountsPageData(req, { error: "Username required, password must be at least 12 characters." }));
+    flash.setFlash(res, { error: "Username required, password must be at least 12 characters." });
+    return res.redirect("/admin/accounts");
   }
   try {
     db.prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
       .run(username, auth.hashPassword(password), can_manage_accounts ? 1 : 0);
   } catch (err) {
-    return res.status(400).send(loadAccountsPageData(req, { error: "That username is already taken." }));
+    flash.setFlash(res, { error: "That username is already taken." });
+    return res.redirect("/admin/accounts");
   }
   // Starts with no server permissions -- granted afterward from the same
   // page, via the new account's own Permissions button/popup.
@@ -307,7 +325,8 @@ accountsRouter.post("/:id", auth.requireAccountManager, express.urlencoded({ ext
       .prepare("SELECT COUNT(*) AS n FROM admins WHERE can_manage_accounts = 1 AND id != ?")
       .get(targetId).n;
     if (remainingManagers === 0) {
-      return res.status(400).send(loadAccountsPageData(req, { error: "Can't remove the last site admin's account-management access." }));
+      flash.setFlash(res, { error: "Can't remove the last site admin's account-management access." });
+      return res.redirect("/admin/accounts");
     }
   }
   db.prepare("UPDATE admins SET can_manage_accounts = ? WHERE id = ?").run(canManage ? 1 : 0, targetId);
@@ -317,14 +336,18 @@ accountsRouter.post("/:id", auth.requireAccountManager, express.urlencoded({ ext
 accountsRouter.post("/:id/delete", auth.requireAccountManager, (req, res) => {
   const targetId = Number(req.params.id);
   const target = db.prepare("SELECT * FROM admins WHERE id = ?").get(targetId);
-  if (!target) return res.status(404).send(loadAccountsPageData(req, { error: "No such account." }));
+  if (!target) {
+    flash.setFlash(res, { error: "No such account." });
+    return res.redirect("/admin/accounts");
+  }
 
   if (target.can_manage_accounts) {
     const remainingManagers = db
       .prepare("SELECT COUNT(*) AS n FROM admins WHERE can_manage_accounts = 1 AND id != ?")
       .get(targetId).n;
     if (remainingManagers === 0) {
-      return res.status(400).send(loadAccountsPageData(req, { error: "Can't delete the last site admin's account." }));
+      flash.setFlash(res, { error: "Can't delete the last site admin's account." });
+      return res.redirect("/admin/accounts");
     }
   }
   db.prepare("DELETE FROM admins WHERE id = ?").run(targetId);
@@ -352,42 +375,47 @@ function loadServersPageData(req, { error, notice } = {}) {
 }
 
 serversRouter.get("/", (req, res) => {
-  res.send(loadServersPageData(req));
+  res.send(loadServersPageData(req, flash.readFlash(req, res)));
 });
 
 serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
   const { slug, name, instance_name, dcs_install_path } = req.body;
   if (!slug || !name || !instance_name) {
-    return res.status(400).send(loadServersPageData(req, { error: "All fields are required." }));
+    flash.setFlash(res, { error: "All fields are required." });
+    return res.redirect("/admin/servers");
   }
   if (!SLUG_RE.test(slug)) {
-    return res.status(400).send(loadServersPageData(req, { error: "Slug must be lowercase letters, numbers, and hyphens only (it becomes part of the URL: /s/<slug>/)." }));
+    flash.setFlash(res, { error: "Slug must be lowercase letters, numbers, and hyphens only (it becomes part of the URL: /s/<slug>/)." });
+    return res.redirect("/admin/servers");
   }
   if (!INSTANCE_NAME_RE.test(instance_name)) {
-    return res.status(400).send(loadServersPageData(req, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." }));
+    flash.setFlash(res, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." });
+    return res.redirect("/admin/servers");
   }
   const installPath = dcs_install_path && dcs_install_path.trim() ? dcs_install_path.trim() : null;
 
   try {
     db.prepare("INSERT INTO servers (slug, name, instance_name, dcs_install_path) VALUES (?, ?, ?, ?)").run(slug, name, instance_name, installPath);
   } catch (err) {
-    return res.status(400).send(loadServersPageData(req, { error: "That slug is already in use." }));
+    flash.setFlash(res, { error: "That slug is already in use." });
+    return res.redirect("/admin/servers");
   }
-  res.send(
-    loadServersPageData(req, {
-      notice: `Created "${name}". No admin has access to it yet — grant access from Manage accounts. "${instance_name}" must match the real DCS instance folder name under Saved Games on the host, or the webgui and mission uploads won't find it.`,
-    })
-  );
+  flash.setFlash(res, {
+    notice: `Created "${name}". No admin has access to it yet — grant access from Manage accounts. "${instance_name}" must match the real DCS instance folder name under Saved Games on the host, or the webgui and mission uploads won't find it.`,
+  });
+  res.redirect("/admin/servers");
 });
 
 serversRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) => {
   const targetId = Number(req.params.id);
   const { name, instance_name, dcs_install_path } = req.body;
   if (!name || !instance_name) {
-    return res.status(400).send(loadServersPageData(req, { error: "All fields are required." }));
+    flash.setFlash(res, { error: "All fields are required." });
+    return res.redirect("/admin/servers");
   }
   if (!INSTANCE_NAME_RE.test(instance_name)) {
-    return res.status(400).send(loadServersPageData(req, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." }));
+    flash.setFlash(res, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." });
+    return res.redirect("/admin/servers");
   }
   const installPath = dcs_install_path && dcs_install_path.trim() ? dcs_install_path.trim() : null;
 
@@ -446,7 +474,8 @@ serversRouter.get("/webgui-ports", async (req, res) => {
 
 serversRouter.post("/webgui-ports/confirm", async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
-    return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
+    flash.setFlash(res, { error: "Mission agent is not configured." });
+    return res.redirect("/admin/servers");
   }
   try {
     const { proposals } = await buildWebguiPortProposal();
@@ -459,16 +488,16 @@ serversRouter.post("/webgui-ports/confirm", async (req, res) => {
       });
       if (!agentRes.ok) throw new Error(`agent returned ${agentRes.status} for ${server.instance_name}`);
     }
-    res.send(
-      loadServersPageData(req, {
-        notice:
-          proposals.length === 0
-            ? "No servers needed a webgui port assigned."
-            : `Assigned webgui ports for: ${proposals.map((p) => `${p.server.name} (${p.proposedPort})`).join(", ")}.`,
-      })
-    );
+    flash.setFlash(res, {
+      notice:
+        proposals.length === 0
+          ? "No servers needed a webgui port assigned."
+          : `Assigned webgui ports for: ${proposals.map((p) => `${p.server.name} (${p.proposedPort})`).join(", ")}.`,
+    });
+    res.redirect("/admin/servers");
   } catch (err) {
-    res.status(502).send(loadServersPageData(req, { error: `Could not reach the mission agent: ${err.message}` }));
+    flash.setFlash(res, { error: `Could not reach the mission agent: ${err.message}` });
+    res.redirect("/admin/servers");
   }
 });
 
@@ -495,7 +524,7 @@ serversRouter.get("/webgui-sync", (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
     return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
   }
-  res.send(views.webguiSyncPage({ admin: req.admin, servers: serversDb.getAllServers() }));
+  res.send(views.webguiSyncPage({ admin: req.admin, servers: serversDb.getAllServers(), ...flash.readFlash(req, res) }));
 });
 
 // Two path segments deliberately. A single-segment "/webgui-sync" would be
@@ -505,17 +534,17 @@ serversRouter.get("/webgui-sync", (req, res) => {
 // "/webgui-ports".
 serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
-    return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
+    // Matches the original direct-render target: this check used
+    // loadServersPageData (the servers page), not webguiSyncPage, unlike
+    // the validation check right below it -- preserved as-is rather than
+    // "fixed" into consistency, since that's a separate UX question.
+    flash.setFlash(res, { error: "Mission agent is not configured." });
+    return res.redirect("/admin/servers");
   }
   const server = serversDb.getServerById(Number(req.body.server_id));
   if (!server || !server.dcs_install_path) {
-    return res.status(400).send(
-      views.webguiSyncPage({
-        admin: req.admin,
-        servers: serversDb.getAllServers(),
-        error: "Pick a server that has a DCS install path set.",
-      })
-    );
+    flash.setFlash(res, { error: "Pick a server that has a DCS install path set." });
+    return res.redirect("/admin/servers/webgui-sync");
   }
 
   // Extract into a scratch dir first and validate it before touching the
@@ -548,22 +577,12 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
 
     webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 
-    res.send(
-      views.webguiSyncPage({
-        admin: req.admin,
-        servers: serversDb.getAllServers(),
-        notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).`,
-      })
-    );
+    flash.setFlash(res, { notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).` });
+    res.redirect("/admin/servers/webgui-sync");
   } catch (err) {
     await fs.rm(tmpDir, { recursive: true, force: true });
-    res.status(502).send(
-      views.webguiSyncPage({
-        admin: req.admin,
-        servers: serversDb.getAllServers(),
-        error: `Sync failed: ${err.message}`,
-      })
-    );
+    flash.setFlash(res, { error: `Sync failed: ${err.message}` });
+    res.redirect("/admin/servers/webgui-sync");
   }
 });
 
@@ -575,48 +594,39 @@ const updateRouter = express.Router();
 updateRouter.use(auth.requireAccountManager);
 
 updateRouter.get("/", (req, res) => {
-  res.send(views.updatePage({ admin: req.admin, currentVersion: updateCheck.getCurrentVersion(), updateState: updateCheck.getUpdateState() }));
+  res.send(
+    views.updatePage({
+      admin: req.admin,
+      currentVersion: updateCheck.getCurrentVersion(),
+      updateState: updateCheck.getUpdateState(),
+      ...flash.readFlash(req, res),
+    })
+  );
 });
 
 updateRouter.post("/check", async (req, res) => {
   try {
     const hasUpdate = await updateCheck.checkForUpdate();
     const updateState = updateCheck.getUpdateState();
-    res.send(
-      views.updatePage({
-        admin: req.admin,
-        currentVersion: updateCheck.getCurrentVersion(),
-        updateState,
-        notice: hasUpdate ? `Checked now: version ${updateState.available_version} is available.` : "Checked now: you're already running the latest version.",
-      })
-    );
+    flash.setFlash(res, {
+      notice: hasUpdate ? `Checked now: version ${updateState.available_version} is available.` : "Checked now: you're already running the latest version.",
+    });
   } catch (err) {
-    res.status(502).send(
-      views.updatePage({
-        admin: req.admin,
-        currentVersion: updateCheck.getCurrentVersion(),
-        updateState: updateCheck.getUpdateState(),
-        error: `Check failed: ${err.message}`,
-      })
-    );
+    flash.setFlash(res, { error: `Check failed: ${err.message}` });
   }
+  res.redirect("/admin/update");
 });
 
 updateRouter.post("/", (req, res) => {
   // Responds first, then kicks applyUpdate() off only once that response
   // has actually finished sending -- it ends in process.exit() on
-  // success, which must never race the admin's own page load.
+  // success, which must never race the admin's own page load. res.on
+  // ("finish") still fires normally on a redirect response.
   res.on("finish", () => {
     updateCheck.applyUpdate().catch((err) => console.error(`Update failed: ${err.message}`));
   });
-  res.send(
-    views.updatePage({
-      admin: req.admin,
-      currentVersion: updateCheck.getCurrentVersion(),
-      updateState: updateCheck.getUpdateState(),
-      notice: "Update started. Staging the new release and restarting both services -- this can take a minute; refresh afterward.",
-    })
-  );
+  flash.setFlash(res, { notice: "Update started. Staging the new release and restarting both services -- this can take a minute; refresh afterward." });
+  res.redirect("/admin/update");
 });
 
 app.use("/admin/update", updateRouter);
@@ -751,21 +761,36 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
 }
 
 app.get("/s/:slug/missions", requireServerAccess({ permission: "view" }), (req, res) => {
-  renderMissionsPage(req, res);
+  renderMissionsPage(req, res, flash.readFlash(req, res));
 });
 
+// Redirects after every outcome (not the direct-render renderMissionsPage()
+// uses elsewhere) so reloading the result page never resubmits the same
+// file a second time -- download/trash below stay as they are: download
+// streams a file directly (can't redirect binary content), and a
+// reloaded trash request is harmless (the file's already moved).
 app.post(
   "/s/:slug/missions/upload",
   requireServerAccess({ permission: "upload" }),
   (req, res, next) => {
     upload.single("mission")(req, res, (err) => {
-      if (err) return renderMissionsPage(req, res, { status: 400, error: err.message });
+      if (err) {
+        flash.setFlash(res, { error: err.message });
+        return res.redirect(`/s/${encodeURIComponent(req.params.slug)}/missions`);
+      }
       next();
     });
   },
   async (req, res) => {
-    if (!req.file) return renderMissionsPage(req, res, { status: 400, error: "No .miz file provided." });
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    const missionsUrl = `/s/${encodeURIComponent(req.params.slug)}/missions`;
+    if (!req.file) {
+      flash.setFlash(res, { error: "No .miz file provided." });
+      return res.redirect(missionsUrl);
+    }
+    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+      flash.setFlash(res, { error: "Mission agent is not configured." });
+      return res.redirect(missionsUrl);
+    }
     try {
       const form = new FormData();
       form.append("instance_name", req.dcsServer.instance_name);
@@ -781,12 +806,15 @@ app.post(
       });
       if (!agentRes.ok) {
         const detail = await agentRes.text().catch(() => "");
-        return renderMissionsPage(req, res, { status: 502, error: `Mission agent rejected the upload: ${detail || agentRes.status}` });
+        flash.setFlash(res, { error: `Mission agent rejected the upload: ${detail || agentRes.status}` });
+        return res.redirect(missionsUrl);
       }
     } catch (err) {
-      return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
+      flash.setFlash(res, { error: `Could not reach the mission agent: ${err.message}` });
+      return res.redirect(missionsUrl);
     }
-    renderMissionsPage(req, res, { notice: `Uploaded ${req.file.originalname}.` });
+    flash.setFlash(res, { notice: `Uploaded ${req.file.originalname}.` });
+    res.redirect(missionsUrl);
   }
 );
 
