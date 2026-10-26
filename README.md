@@ -66,12 +66,12 @@ release hourly; a site admin triggers the actual update from
 whichever A/B slot isn't currently running, then flipped to — a version
 that fails to start rolls back automatically. See
 [`docs/SETUP.md`](docs/SETUP.md#ab-self-update) for the one-time migration
-this needs and the release process.
+this needs.
 
 ## More docs
 
-- [`docs/SETUP.md`](docs/SETUP.md) — install, configure, and run this, for
-  local development and for production.
+- [`docs/SETUP.md`](docs/SETUP.md) — install and configure this for
+  production.
 - [`docs/TESTING.md`](docs/TESTING.md) — run the tests, and troubleshoot a
   deployment.
 
