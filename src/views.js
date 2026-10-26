@@ -1,3 +1,6 @@
+const fs = require("node:fs");
+const path = require("node:path");
+
 const BRAND_NAME = process.env.BRAND_NAME || "DCS Auth Gate";
 // A small, deliberate exception to "views.js never touches the DB":
 // unlike every other piece of page data (loaded by server.js and passed
@@ -19,25 +22,50 @@ function escapeHtml(str) {
   }[c]));
 }
 
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
+const ICONS_DIR = path.join(PUBLIC_DIR, "icons");
+const iconCache = new Map();
+
+// Inlined directly into the page, not referenced via <img src>: an <img>
+// is a separate network+decode step after the HTML itself has already
+// painted, which is exactly what showed up as a visible placeholder flash
+// on every navigation (this app has no client-side JS to hide the page
+// behind a "wait until images are loaded" gate, by deliberate house
+// style -- inlining sidesteps the problem instead of needing one).
+// aria-hidden since these are decorative; the accessible label is
+// carried separately (see navItem()'s sr-only span, or alt="" for the
+// logo, same as before).
+function inlineIcon(filename, dir = ICONS_DIR) {
+  const key = `${dir}/${filename}`;
+  if (!iconCache.has(key)) {
+    const raw = fs.readFileSync(path.join(dir, filename), "utf8").trim();
+    iconCache.set(key, raw.replace("<svg ", '<svg aria-hidden="true" focusable="false" '));
+  }
+  return iconCache.get(key);
+}
+
 // Mirrors the real DCS webgui's own left-sidebar. Icon-only nav. Active
 // item gets a blue left border.
 function sidebarNav(admin, active) {
+  // The sr-only span carries the accessible name explicitly, rather than
+  // relying solely on the title="..." tooltip (inconsistently exposed to
+  // screen readers across browsers) -- this is a public project.
   const navItem = (key, href, icon, label) =>
     `<li><a href="${href}" class="${key === active ? "active" : ""}" title="${escapeHtml(label)}">
-      <img src="/assets/icons/${icon}" alt="${escapeHtml(label)}">
+      ${inlineIcon(icon)}<span class="sr-only">${escapeHtml(label)}</span>
     </a></li>`;
 
-  const items = [navItem("dashboard", "/", "icon-dashboard.png", "Dashboard")];
+  const items = [navItem("dashboard", "/", "icon-dashboard.svg", "Dashboard")];
   // Every admin gets a link here now, not just site admins -- it's either
   // the full "Manage accounts" page or the read-only "My account" page,
   // see accountsPage(). Icon/label tell the two apart at a glance.
   items.push(
     admin.can_manage_accounts
-      ? navItem("accounts", "/admin/accounts", "icon-manage-accounts.png", "Manage accounts")
-      : navItem("accounts", "/admin/accounts", "icon-user.png", "My account")
+      ? navItem("accounts", "/admin/accounts", "icon-manage-accounts.svg", "Manage accounts")
+      : navItem("accounts", "/admin/accounts", "icon-user.svg", "My account")
   );
   if (admin.can_manage_accounts) {
-    items.push(navItem("servers", "/admin/servers", "icon-server.png", "Manage servers"));
+    items.push(navItem("servers", "/admin/servers", "icon-server.svg", "Manage servers"));
     items.push(navItem("logs", "/admin/logs#latest", "icon-logs.svg", "View logs"));
     items.push(navItem("settings", "/admin/settings", "icon-settings.svg", "Settings"));
     const updateState = updateCheck.getUpdateState();
@@ -56,7 +84,7 @@ function sidebarNav(admin, active) {
 function layout(title, body, { admin, active, pageTitle } = {}) {
   const navbar = `<div class="navbar">
     <div class="navbar-brand">
-      <img src="/assets/logo.png" alt="">
+      ${inlineIcon("logo.svg", PUBLIC_DIR)}
       <span class="brand-name">${escapeHtml(BRAND_NAME)}<span class="brand-tagline">Control Panel</span></span>
     </div>
     ${admin ? `<div class="navbar-right">

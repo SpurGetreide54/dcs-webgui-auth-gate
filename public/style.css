@@ -68,7 +68,7 @@ a { color: var(--accent-cyan); }
   gap: 0.6rem;
   padding: 0 12px;
 }
-.navbar-brand img { width: 32px; height: 32px; border-radius: 50%; }
+.navbar-brand svg { width: 32px; height: 32px; border-radius: 50%; }
 .navbar-brand .brand-name {
   font-family: OpenSansRegular;
   font-size: 1.1em;
@@ -125,7 +125,20 @@ a { color: var(--accent-cyan); }
   border-left: 3px solid var(--accent-blue);
   box-shadow: inset 8px 0 6px -6px var(--accent-blue);
 }
-.left-sidebar .menu-items li a img { width: 22px; height: 22px; object-fit: contain; }
+.left-sidebar .menu-items li a svg { width: 22px; height: 22px; }
+
+/* Visually hidden but still readable by screen readers -- carries each
+   nav link's accessible name explicitly, since its icon is aria-hidden
+   and title="..." tooltips aren't consistently exposed as accessible
+   names across browsers/screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
 
 .content {
   flex: 1;

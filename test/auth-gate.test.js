@@ -708,7 +708,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(forbiddenUpdatePage.status, 403, "a non-site-admin must not reach the update page");
 
     const dashBeforeUpdate = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
-    assert.doesNotMatch(dashBeforeUpdate, /icon-update\.svg/, "no update icon when update_state has no available version");
+    assert.doesNotMatch(dashBeforeUpdate, /href="\/admin\/update"/, "no update nav item when update_state has no available version");
 
     const updatePageRes = await fetch(`${base}/admin/update`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(updatePageRes.status, 200);
@@ -718,8 +718,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     db.prepare("UPDATE update_state SET available_version = ?, changelog_url = ? WHERE id = 1").run("9.9.9", "https://example.test/changelog");
     const dashAfterUpdate = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
-    assert.match(dashAfterUpdate, /icon-update\.svg/, "sidebar icon must appear once update_state has an available version");
-    assert.match(dashAfterUpdate, /href="\/admin\/update"/);
+    assert.match(dashAfterUpdate, /href="\/admin\/update"/, "update nav item must appear once update_state has an available version");
 
     const updatePageWithUpdateHtml = await (await fetch(`${base}/admin/update`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(updatePageWithUpdateHtml, /9\.9\.9/);
@@ -774,7 +773,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       assert.equal(foundCheckRes.status, 200);
       assert.match(await foundCheckRes.text(), /9\.9\.9-found/);
       const dashAfterCheckNow = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
-      assert.match(dashAfterCheckNow, /icon-update\.svg/, "sidebar icon must appear after a manual check finds an update");
+      assert.match(dashAfterCheckNow, /href="\/admin\/update"/, "update nav item must appear after a manual check finds an update");
     }
 
     db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
@@ -829,7 +828,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // available_version is null here (reset above), so the dashboard's
     // Update icon is hidden until the setting is turned on.
     const dashBeforePin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
-    assert.doesNotMatch(dashBeforePin, /icon-update\.svg/);
+    assert.doesNotMatch(dashBeforePin, /href="\/admin\/update"/);
 
     const pinOnRes = await postAndFollowFlash(`${base}/admin/settings`, {
       method: "POST",
@@ -839,7 +838,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(await pinOnRes.text(), /Settings saved/);
 
     const dashAfterPin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
-    assert.match(dashAfterPin, /icon-update\.svg/, "the Update nav item must appear once pinned, even with no update pending");
+    assert.match(dashAfterPin, /href="\/admin\/update"/, "the Update nav item must appear once pinned, even with no update pending");
     assert.match(dashAfterPin, /Software update/, "the pinned-but-up-to-date label must not be the usual \"Update available: ...\" text");
 
     const settingsPageCheckedRes = await fetch(`${base}/admin/settings`, { headers: { Cookie: siteAdminCookie } });
@@ -855,7 +854,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(await pinOffRes.text(), /Settings saved/);
 
     const dashAfterUnpin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
-    assert.doesNotMatch(dashAfterUnpin, /icon-update\.svg/, "the Update nav item must disappear again once un-pinned, with no update pending");
+    assert.doesNotMatch(dashAfterUnpin, /href="\/admin\/update"/, "the Update nav item must disappear again once un-pinned, with no update pending");
 
     // --- logs: auth-gate's own + agent's, merged into one timeline (site admin only) ---
     const forbiddenLogsPage = await fetch(`${base}/admin/logs`, { headers: { Cookie: serverAdminCookie } });
