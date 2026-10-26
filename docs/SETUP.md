@@ -195,11 +195,12 @@ Safe to re-run with the same parameters as before; see the script's own
 
 ### Release process (cutting a new version)
 
-1. Bump `package.json`'s (and `VERSION`'s) version, build both artifacts
-   as usual (`scripts/build-agent-exe.sh` for the agent; the auth-gate's
-   own artifact is a `tar.gz` of the repo, `node_modules` included, matching
-   what `src/updateCheck.js` extracts with the `tar` package already a
-   dependency).
+1. Bump `package.json`'s (and `VERSION`'s) version -- see
+   [`versioning.md`](../versioning.md) for how to pick the number -- build
+   both artifacts as usual (`scripts/build-agent-exe.sh` for the agent;
+   the auth-gate's own artifact is a `tar.gz` of the repo, `node_modules`
+   included, matching what `src/updateCheck.js` extracts with the `tar`
+   package already a dependency).
 2. Sign the release:
    ```
    node scripts/release/sign-updates.js \
