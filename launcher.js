@@ -11,7 +11,7 @@
 //
 // Sits at the top level, a sibling of releases/a/ and releases/b/, not
 // under src/ -- systemd's ExecStart targets this file directly and never
-// needs to change across updates (see docs/SETUP.md's A/B section).
+// needs to change across updates (see docs/A-B-Self-Update.md).
 
 const fs = require("node:fs");
 const path = require("node:path");

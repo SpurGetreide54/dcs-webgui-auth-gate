@@ -68,15 +68,13 @@ slot isn't currently running, then flipped to — a version that fails to
 start rolls back automatically. A 60-second cooldown after each trigger
 stops a double-click or a page reload from starting a second update on
 top of one still in flight. See
-[`docs/SETUP.md`](docs/SETUP.md#ab-self-update) for the one-time migration
-this needs.
+[`docs/A-B-Self-Update.md`](docs/A-B-Self-Update.md) for the one-time
+setup this needs.
 
 ## More docs
 
-- [`docs/SETUP.md`](docs/SETUP.md) — install and configure this for
-  production.
-- [`docs/TESTING.md`](docs/TESTING.md) — run the tests, and troubleshoot a
-  deployment.
+- [`docs/Home.md`](docs/Home.md) — the full wiki: architecture,
+  deployment, configuration, testing, troubleshooting, and an FAQ.
 
 ## License
 

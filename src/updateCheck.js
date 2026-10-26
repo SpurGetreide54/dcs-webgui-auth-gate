@@ -199,16 +199,18 @@ function runNpmInstall(cwd) {
 // its own success or failure path, and never logging anything either way.
 // Kept short deliberately: the auth-gate and mission-agent only ever talk
 // over the internal network between the control-panel VM and the DCS
-// host (see SETUP.md), never the open internet, so even the ~96MB agent
-// build should move in single-digit seconds. Anything still running
-// after a minute already means something's broken, not just slow --
-// failing fast beats an admin waiting minutes to find that out.
+// host (see docs/Deployment-Topology.md), never the open internet, so
+// even the ~96MB agent build should move in single-digit seconds.
+// Anything still running after a minute already means something's
+// broken, not just slow -- failing fast beats an admin waiting minutes
+// to find that out.
 const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 60 * 1000;
 
 // Relays the agent's new build through the existing internal auth-gate <->
 // agent channel -- the agent has no internet access of its own by design
-// (kept off the host's internet-facing side, see SETUP.md), so the
-// auth-gate is the one that reaches GitHub and hands the bytes onward.
+// (kept off the host's internet-facing side, see
+// docs/Deployment-Topology.md), so the auth-gate is the one that reaches
+// GitHub and hands the bytes onward.
 async function relayAgentUpdate(archivePath, sha256) {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured; cannot relay its update.");
   const fileBuffer = await fsp.readFile(archivePath);

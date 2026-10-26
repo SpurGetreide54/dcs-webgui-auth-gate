@@ -391,8 +391,9 @@ app.get("/dcs-install/webgui-bundle", checkToken, async (req, res) => {
 // ---- self-update: stage + commit ----
 // Relayed through the auth-gate (see src/updateCheck.js) since this host
 // has no internet access of its own by design (kept off the internet-
-// facing side, per SETUP.md). "current" is a directory junction NSSM's
-// ExecStart always targets (...\current\agent.exe) -- flipping it, not
+// facing side, per docs/Deployment-Topology.md). "current" is a
+// directory junction NSSM's ExecStart always targets
+// (...\current\agent.exe) -- flipping it, not
 // NSSM's own config, is what switches versions between restarts.
 //
 // AGENT_SELF_UPDATE_ROOT overrides the root for local dev/tests, where
