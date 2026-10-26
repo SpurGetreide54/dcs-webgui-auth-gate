@@ -35,7 +35,15 @@ app.disable("x-powered-by");
 // req.ip with their own header and dodge the login rate limiter.
 app.set("trust proxy", 1);
 app.use(cookieParser());
-app.use("/assets", express.static(path.join(__dirname, "..", "public")));
+// maxAge matters here, not just defaults to serve-static's own: without
+// it every page load/reload sends a fresh conditional request for every
+// sidebar icon before the browser's allowed to reuse what it already has,
+// which is exactly what shows up as a visible placeholder flash on each
+// reload. These are small, rarely-changed icons with no content-hashed
+// filename to cache-bust on, so a short-ish lifetime (not a year) is the
+// right trade-off -- long enough to kill the flash, short enough that an
+// icon swap shows up again within a day without a hard refresh.
+app.use("/assets", express.static(path.join(__dirname, "..", "public"), { maxAge: "1d" }));
 // Browsers request /favicon.ico at the domain root as a fallback whenever
 // a page has no <link rel="icon"> of its own -- true of the real DCS
 // webgui's index.html, which we don't control. Answering it here avoids
