@@ -1,34 +1,7 @@
 # Setup
 
-This covers local development and production deployment. For what this
-project is and why it exists, see the main [README](../README.md).
-
-## Local development
-
-1. Run `npm install`.
-2. Copy `.env.example` to your own env file, and fill in real values.
-
-This app reads config only from `process.env`. It does not load an env
-file on its own. Whatever starts the process must export those variables
-first. For example, in a POSIX shell:
-
-```
-set -a
-. ./my.env
-set +a
-npm start
-```
-
-3. Start the auth-gate: `npm start`. It listens on `PORT` (default 3000).
-4. Start the mission-agent separately, with its own env vars:
-   ```
-   AGENT_PORT=4000 MISSION_AGENT_TOKEN=... DCS_SAVED_GAMES_ROOT=/tmp/saved-games npm run agent
-   ```
-5. Open `/setup` to create the first admin account. Then use
-   `/admin/servers` to add servers.
-6. Copy a real DCS webgui bundle into `webgui-static/`, or use
-   `/admin/servers/webgui-sync` to pull one from a configured server's
-   real DCS install.
+This covers production deployment. For what this project is and why it
+exists, see the main [README](../README.md).
 
 ## Production deployment
 
