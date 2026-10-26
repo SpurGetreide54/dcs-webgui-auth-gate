@@ -7,6 +7,7 @@ const BRAND_NAME = process.env.BRAND_NAME || "DCS Auth Gate";
 // read isn't worth it. updateCheck.js's own DB read is a single-row
 // SELECT, not network I/O, so this stays fast.
 const updateCheck = require("./updateCheck");
+const settings = require("./settings");
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -38,9 +39,12 @@ function sidebarNav(admin, active) {
   if (admin.can_manage_accounts) {
     items.push(navItem("servers", "/admin/servers", "icon-server.png", "Manage servers"));
     items.push(navItem("logs", "/admin/logs#latest", "icon-logs.svg", "View logs"));
+    items.push(navItem("settings", "/admin/settings", "icon-settings.svg", "Settings"));
     const updateState = updateCheck.getUpdateState();
-    if (updateState.available_version) {
-      items.push(navItem("update", "/admin/update", "icon-update.svg", `Update available: ${updateState.available_version}`));
+    const pinUpdateNav = settings.getSetting("pin_update_nav") === "1";
+    if (updateState.available_version || pinUpdateNav) {
+      const label = updateState.available_version ? `Update available: ${updateState.available_version}` : "Software update";
+      items.push(navItem("update", "/admin/update", "icon-update.svg", label));
     }
   }
 
@@ -623,6 +627,17 @@ ${updateState.needs_service_update ? `<p class="error">This release needs a manu
   return layout("Update — DCS Control Panel", body, { admin, active: "update", pageTitle: "Software update" });
 }
 
+function settingsPage({ admin, pinUpdateNav, error, notice }) {
+  const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+<form method="post" action="/admin/settings">
+  <label><input type="checkbox" name="pin_update_nav" value="1" ${pinUpdateNav ? "checked" : ""}> Always show Update in the sidebar</label>
+  <button type="submit">Save</button>
+</form>`;
+
+  return layout("Settings — DCS Control Panel", body, { admin, active: "settings", pageTitle: "Settings" });
+}
+
 const LOG_WINDOW_LABELS = { "15m": "Last 15 minutes", "1h": "Last hour", "6h": "Last 6 hours", "24h": "Last 24 hours", all: "All" };
 
 // One merged, chat-style timeline -- oldest at top, newest at bottom, like
@@ -694,5 +709,6 @@ module.exports = {
   webguiSyncPage,
   missionsPage,
   updatePage,
+  settingsPage,
   logsPage,
 };

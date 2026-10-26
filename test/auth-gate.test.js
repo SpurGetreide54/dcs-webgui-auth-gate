@@ -816,6 +816,47 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       db.prepare("UPDATE update_state SET update_triggered_at = NULL WHERE id = 1").run();
     }
 
+    // --- settings: site-wide "always show Update nav" toggle ---
+    const forbiddenSettingsPage = await fetch(`${base}/admin/settings`, { headers: { Cookie: serverAdminCookie } });
+    assert.equal(forbiddenSettingsPage.status, 403, "a non-site-admin must not reach the settings page");
+
+    const settingsPageRes = await fetch(`${base}/admin/settings`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(settingsPageRes.status, 200);
+    const settingsHtml = await settingsPageRes.text();
+    assert.match(settingsHtml, /<form method="post" action="\/admin\/settings">/);
+    assert.doesNotMatch(settingsHtml, /name="pin_update_nav"[^>]*checked/, "the toggle must start unchecked by default");
+
+    // available_version is null here (reset above), so the dashboard's
+    // Update icon is hidden until the setting is turned on.
+    const dashBeforePin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(dashBeforePin, /icon-update\.svg/);
+
+    const pinOnRes = await postAndFollowFlash(`${base}/admin/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: "pin_update_nav=1",
+    });
+    assert.match(await pinOnRes.text(), /Settings saved/);
+
+    const dashAfterPin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(dashAfterPin, /icon-update\.svg/, "the Update nav item must appear once pinned, even with no update pending");
+    assert.match(dashAfterPin, /Software update/, "the pinned-but-up-to-date label must not be the usual \"Update available: ...\" text");
+
+    const settingsPageCheckedRes = await fetch(`${base}/admin/settings`, { headers: { Cookie: siteAdminCookie } });
+    assert.match(await settingsPageCheckedRes.text(), /name="pin_update_nav"[^>]*checked/, "the settings page must reflect the persisted on state");
+
+    // Unchecking a checkbox sends no field at all -- simulate that by
+    // posting an empty body, not pin_update_nav=0.
+    const pinOffRes = await postAndFollowFlash(`${base}/admin/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: "",
+    });
+    assert.match(await pinOffRes.text(), /Settings saved/);
+
+    const dashAfterUnpin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(dashAfterUnpin, /icon-update\.svg/, "the Update nav item must disappear again once un-pinned, with no update pending");
+
     // --- logs: auth-gate's own + agent's, merged into one timeline (site admin only) ---
     const forbiddenLogsPage = await fetch(`${base}/admin/logs`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenLogsPage.status, 403, "a non-site-admin must not reach the logs page");

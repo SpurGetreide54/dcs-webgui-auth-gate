@@ -82,6 +82,16 @@ db.exec(`
     changelog_url TEXT,
     needs_service_update INTEGER NOT NULL DEFAULT 0
   );
+
+  -- Generic site-wide key/value settings, independent of any one
+  -- subsystem's own state (e.g. update_state is specifically about
+  -- update-checking) -- the home for this and any future site-wide
+  -- toggle, instead of accumulating one-off columns on unrelated
+  -- tables.
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
 
 db.prepare("INSERT OR IGNORE INTO update_state (id) VALUES (1)").run();

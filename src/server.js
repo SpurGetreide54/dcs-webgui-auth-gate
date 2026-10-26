@@ -15,6 +15,7 @@ const views = require("./views");
 const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
 const updateCheck = require("./updateCheck");
+const settings = require("./settings");
 const appLog = require("./appLog");
 const flash = require("./flash");
 
@@ -640,6 +641,29 @@ updateRouter.post("/", (req, res) => {
 });
 
 app.use("/admin/update", updateRouter);
+
+// ---- site-wide settings (site admins only) ----
+
+const settingsRouter = express.Router();
+settingsRouter.use(auth.requireAccountManager);
+
+settingsRouter.get("/", (req, res) => {
+  res.send(
+    views.settingsPage({
+      admin: req.admin,
+      pinUpdateNav: settings.getSetting("pin_update_nav") === "1",
+      ...flash.readFlash(req, res),
+    })
+  );
+});
+
+settingsRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
+  settings.setSetting("pin_update_nav", req.body.pin_update_nav === "1" ? "1" : "0");
+  flash.setFlash(res, { notice: "Settings saved." });
+  res.redirect("/admin/settings");
+});
+
+app.use("/admin/settings", settingsRouter);
 
 // ---- logs: the auth-gate's own + the mission-agent's, merged into one
 // timeline (site admins only) ----
