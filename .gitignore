@@ -1,4 +1,3 @@
 node_modules/
 local-only/
 webgui-static/*
-auth-gate.log*

@@ -69,8 +69,8 @@ test.before(async () => {
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
   // Requiring ../src/server installs appLog's console capture, which
-  // defaults to writing auth-gate.log at the repo root if this isn't set
-  // -- same reasoning as SQLITE_PATH above, just for the log file.
+  // defaults to local-only/auth-gate.log if this isn't set -- same
+  // reasoning as SQLITE_PATH above, just for the log file.
   authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
   process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
 

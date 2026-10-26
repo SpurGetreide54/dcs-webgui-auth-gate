@@ -3,12 +3,21 @@ const path = require("node:path");
 
 // Under the A/B layout this file lives at the shared top level (releases/a/
 // and releases/b/ are siblings of it, not parents) -- same reasoning as
-// src/activeSlot.js's ACTIVE_SLOT_PATH. The default here (repo-root-
-// relative) is right for a plain single-checkout local dev setup and wrong
+// src/activeSlot.js's ACTIVE_SLOT_PATH. The default here is right only for
+// a plain single-checkout local dev setup (same as src/db.js's own
+// SQLITE_PATH default, under local-only/ for the same reason: something
+// created on every run shouldn't need its own .gitignore entry) and wrong
 // in production, where AUTH_GATE_LOG_PATH must be set once during the A/B
 // migration, same as ACTIVE_SLOT_PATH/WEBGUI_STATIC_PATH.
-const LOG_PATH = process.env.AUTH_GATE_LOG_PATH || path.join(__dirname, "..", "auth-gate.log");
+const LOG_PATH = process.env.AUTH_GATE_LOG_PATH || path.join(__dirname, "..", "local-only", "auth-gate.log");
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
+
+// A fresh clone has no local-only/ on disk at all (purely gitignored, no
+// tracked placeholder) -- same reasoning as src/db.js's own mkdirSync for
+// SQLITE_PATH. Without this, the first-ever appendLine() would silently
+// no-op (errors here are swallowed, never crash the app) instead of
+// actually logging anything.
+fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
 
 // One JSON object per line -- see /admin/logs for why: it's what makes a
 // structured, chat-style rendering possible without scraping free text,
