@@ -72,9 +72,12 @@ hardcoded `PUBLIC_KEY_PEM` in `src/updateCheck.js` doesn't match the key
 **Clicking "Update now" does nothing visible, or the service never comes
 back.** The update itself runs in the background after the page responds
 (see the `/admin/update` POST route) and ends in a deliberate
-`process.exit(1)` on success -- `systemctl status dcs-webgui-auth-gate`
-and its journal are the real source of truth, not the browser. If it
-crash-loops 3 times within 60 seconds, the rollback unit
-(`dcs-webgui-auth-gate-rollback.service`) should fire automatically; check
-`journalctl -u dcs-webgui-auth-gate-rollback` to confirm it ran. See
-SETUP.md's A/B migration section if that unit was never installed.
+`process.exit(0)` on success -- `systemctl status dcs-webgui-auth-gate`
+and its journal are the real source of truth, not the browser. If the new
+slot genuinely fails to start, the rollback unit
+(`dcs-webgui-auth-gate-rollback.service`) should fire; check
+`journalctl -u dcs-webgui-auth-gate-rollback` to confirm it ran -- it
+should *not* fire after an update that completed and restarted cleanly
+(if it does, that's the exit(0)/Restart=always fix not being live yet;
+see dcs-webgui-auth-gate.service's own comment). See SETUP.md's A/B
+migration section if that unit was never installed.

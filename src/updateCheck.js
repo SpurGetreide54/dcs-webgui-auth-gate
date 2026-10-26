@@ -259,8 +259,14 @@ async function applyUpdate() {
     await fsp.rm(scratchDir, { recursive: true, force: true });
   }
 
-  process.exitCode = 1;
-  process.exit(1);
+  // A clean exit(0), not exit(1) -- see the unit file's own comment for
+  // why this isn't the "obvious" choice. Confirmed the hard way in
+  // production: exit(1) made this deliberate, successful handoff look
+  // like a failure to systemd, which fired OnFailure= (the rollback
+  // unit) on literally every successful update, undoing it before the
+  // new slot ever got a real chance.
+  process.exitCode = 0;
+  process.exit(0);
 }
 
 module.exports = {

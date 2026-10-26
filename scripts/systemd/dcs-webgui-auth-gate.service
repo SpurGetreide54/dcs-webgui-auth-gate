@@ -10,15 +10,29 @@
 #   - ExecStart now runs launcher.js (the stable, never-swapped bootstrap
 #     that reads active-slot and loads whichever slot it names), not
 #     src/server.js directly.
-#   - StartLimitIntervalSec/StartLimitBurst/OnFailure are new: once
-#     Restart=on-failure has retried 3 times within 60 seconds and given
-#     up, OnFailure runs the rollback unit, which flips active-slot back
-#     to the other slot and restarts -- this is what makes "a bad update
-#     rolls back automatically" work without the service account (which
-#     has no sudo) ever calling systemctl itself.
-# Unchanged: User/Group, WorkingDirectory, EnvironmentFile, Restart,
-# RestartSec -- the service account's own restart behavior for an
-# ordinary crash is exactly as it was before.
+#   - StartLimitIntervalSec/StartLimitBurst/OnFailure are new: OnFailure
+#     runs the rollback unit, which flips active-slot back to the other
+#     slot and restarts -- this is what makes "a bad update rolls back
+#     automatically" work without the service account (which has no
+#     sudo) ever calling systemctl itself.
+#   - Restart=always, not Restart=on-failure (as it was when this unit
+#     was first written for the A/B migration). Confirmed the hard way
+#     in production: OnFailure= fires on *every* failed exit of this
+#     unit, not only once Restart= has exhausted StartLimitBurst and
+#     given up -- applyUpdate() (src/updateCheck.js) used to end every
+#     *successful* update with exit(1) to hand off to the supervisor,
+#     which made it look like a failure to systemd and fired the
+#     rollback unit immediately, undoing the update before the new slot
+#     ever got a real chance. applyUpdate() now ends with exit(0)
+#     instead -- a clean exit isn't a "failure", so OnFailure won't fire
+#     for it -- but exit(0) alone would never restart under
+#     Restart=on-failure (which only restarts on a failing exit), so
+#     Restart=always is what still brings the new slot up either way. A
+#     genuine crash is still a non-zero/signal exit, so real bad-update
+#     detection via OnFailure is unaffected.
+# Unchanged: User/Group, WorkingDirectory, EnvironmentFile, RestartSec --
+# the service account's own restart behavior for an ordinary crash is
+# exactly as it was before.
 
 [Unit]
 Description=dcs-webgui-auth-gate
@@ -34,7 +48,7 @@ Group=dcs-webgui-auth-gate
 WorkingDirectory=/var/www/dcs-webgui-auth-gate
 EnvironmentFile=/var/www/dcs-webgui-auth-gate/.env
 ExecStart=/usr/bin/node launcher.js
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]
