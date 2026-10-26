@@ -28,13 +28,22 @@ Type=oneshot
 # read that value and has its own hardcoded copy instead, same as
 # STATE_FILE already is. A rollback is exactly the kind of event
 # /admin/logs exists to surface, so it's worth logging here too.
+# Every %s below is doubled to %%s -- systemd expands a bare % as its own
+# unit-file specifier syntax *before* the shell ever sees this line (e.g.
+# %s alone means "the invoking user's default shell"), not just inside the
+# shell's own printf. Confirmed the hard way in production: a bare %s here
+# silently turned "printf %s "$NEW"" into "printf /usr/bin/bash "$NEW"",
+# writing the literal text "/usr/bin/bash" into active-slot instead of
+# "a"/"b" -- corrupting the one thing this unit exists to fix, the first
+# time it ever actually fired. %% is the escape for a literal % in any
+# ExecStart= line, same as it would be for %i, %n, or any other specifier.
 ExecStart=/bin/sh -c '\
   STATE_FILE=/var/www/dcs-webgui-auth-gate/active-slot; \
   LOG_FILE=/var/www/dcs-webgui-auth-gate/auth-gate.log; \
   CURRENT=$(cat "$STATE_FILE" 2>/dev/null || echo a); \
   if [ "$CURRENT" = "a" ]; then NEW=b; else NEW=a; fi; \
-  printf %s "$NEW" > "$STATE_FILE"; \
+  printf %%s "$NEW" > "$STATE_FILE"; \
   echo "Rolled back: active-slot $CURRENT -> $NEW"; \
-  printf "{\"t\":\"%s\",\"level\":\"warn\",\"msg\":\"Rolled back: active-slot %s -> %s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$CURRENT" "$NEW" >> "$LOG_FILE"; \
+  printf "{\"t\":\"%%s\",\"level\":\"warn\",\"msg\":\"Rolled back: active-slot %%s -> %%s\"}\n" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000Z)" "$CURRENT" "$NEW" >> "$LOG_FILE"; \
   systemctl start dcs-webgui-auth-gate \
 '
