@@ -194,7 +194,7 @@ const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 60 
 async function relayAgentUpdate(archivePath, sha256) {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured; cannot relay its update.");
   const fileBuffer = await fsp.readFile(archivePath);
-  console.log(`Update: uploading agent build to the mission agent (${fileBuffer.length} bytes)...`);
+  console.debug(`Update: uploading agent build to the mission agent (${fileBuffer.length} bytes)...`);
   const stageRes = await fetch(new URL("/self-update/stage", MISSION_AGENT_URL), {
     method: "POST",
     headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/octet-stream", "X-Sha256": sha256 },
@@ -202,7 +202,7 @@ async function relayAgentUpdate(archivePath, sha256) {
     signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
   });
   if (!stageRes.ok) throw new Error(`Agent rejected the staged update: ${await stageRes.text().catch(() => stageRes.status)}`);
-  console.log("Update: agent build staged, committing...");
+  console.debug("Update: agent build staged, committing...");
 
   const commitRes = await fetch(new URL("/self-update/commit", MISSION_AGENT_URL), {
     method: "POST",
@@ -210,7 +210,7 @@ async function relayAgentUpdate(archivePath, sha256) {
     signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
   });
   if (!commitRes.ok) throw new Error(`Agent rejected committing the staged update: ${await commitRes.text().catch(() => commitRes.status)}`);
-  console.log("Update: agent committed and is restarting.");
+  console.debug("Update: agent committed and is restarting.");
 }
 
 // The whole update, start to finish: re-verify, download both artifacts,
@@ -220,15 +220,15 @@ async function relayAgentUpdate(archivePath, sha256) {
 // is what actually brings the new slot up -- this process doesn't call
 // systemctl itself, since the service account has no sudo for that.
 async function applyUpdate() {
-  console.log(`Update: starting applyUpdate()...`);
+  console.debug(`Update: starting applyUpdate()...`);
   const manifest = await fetchVerifiedManifest();
-  console.log(`Update: verified manifest for version ${manifest.version}.`);
+  console.debug(`Update: verified manifest for version ${manifest.version}.`);
   const scratchDir = await fsp.mkdtemp(path.join(os.tmpdir(), "dcs-auth-gate-update-"));
   try {
     const authGateDownload = findDownload(manifest, "auth-gate");
     const authGateArchive = path.join(scratchDir, "auth-gate.tar.gz");
     await downloadAndVerify(authGateDownload.url, authGateDownload.sha256, authGateArchive);
-    console.log("Update: downloaded and verified the auth-gate archive.");
+    console.debug("Update: downloaded and verified the auth-gate archive.");
 
     const idleSlot = activeSlot.otherSlot(activeSlot.readActiveSlot());
     // __dirname here is releases/<active-slot>/src -- three levels up is
@@ -237,14 +237,14 @@ async function applyUpdate() {
     const appRoot = path.join(__dirname, "..", "..", "..");
     const slotDir = path.join(appRoot, "releases", idleSlot);
     await stageAuthGateSlot(authGateArchive, slotDir);
-    console.log(`Update: staged into slot ${idleSlot}, running npm install...`);
+    console.debug(`Update: staged into slot ${idleSlot}, running npm install...`);
     await runNpmInstall(slotDir);
-    console.log("Update: npm install finished.");
+    console.debug("Update: npm install finished.");
 
     const agentDownload = findDownload(manifest, "agent");
     const agentExe = path.join(scratchDir, "agent.exe");
     await downloadAndVerify(agentDownload.url, agentDownload.sha256, agentExe);
-    console.log("Update: downloaded and verified the agent build.");
+    console.debug("Update: downloaded and verified the agent build.");
     await relayAgentUpdate(agentExe, agentDownload.sha256);
 
     activeSlot.writeActiveSlot(idleSlot);
