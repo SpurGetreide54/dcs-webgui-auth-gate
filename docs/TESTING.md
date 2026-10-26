@@ -61,13 +61,24 @@ than assuming a fix to one covers the other.
 `<install path>\WebGUI`.
 
 **The update sidebar icon never appears, even after a real release.**
-Check `update_state.last_checked_at` in the SQLite DB -- `NULL` means the
+If you just want to reach `/admin/update` regardless of whether a new
+version was actually detected, pin it visible from `/admin/settings`
+instead of debugging this. Otherwise: check
+`update_state.last_checked_at` in the SQLite DB -- `NULL` means the
 hourly check hasn't run or keeps failing. Failures are logged (not
 thrown), so check the service's own log/journal for `Update check
 failed: ...`. Common causes: the GitHub release has no
 `signed_updates.json` asset, or it failed Ed25519 verification (the
 hardcoded `PUBLIC_KEY_PEM` in `src/updateCheck.js` doesn't match the key
 `sign-updates.js` signed with).
+
+**Clicking "Update now" a second time shows "try again after HH:MM:SS
+UTC" instead of starting another update.** That's the 60-second cooldown
+working as designed (`updateRouter.post("/")` in `src/server.js`), not a
+bug -- it exists specifically to stop a double-click or a page reload
+from firing a second `applyUpdate()` on top of one still running. Wait
+for the window to pass, or check `update_state.update_triggered_at` in
+the SQLite DB to see when it last fired.
 
 **Clicking "Update now" does nothing visible, or the service never comes
 back.** The update itself runs in the background after the page responds

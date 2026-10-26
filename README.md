@@ -62,9 +62,12 @@ install through `/admin/servers/webgui-sync`.
 
 Both pieces can update themselves. The auth-gate checks a signed GitHub
 release hourly; a site admin triggers the actual update from
-`/admin/update` once a sidebar icon shows one's available. Staged into
-whichever A/B slot isn't currently running, then flipped to — a version
-that fails to start rolls back automatically. See
+`/admin/update` once a sidebar icon shows one's available (or always,
+if pinned visible from `/admin/settings`). Staged into whichever A/B
+slot isn't currently running, then flipped to — a version that fails to
+start rolls back automatically. A 60-second cooldown after each trigger
+stops a double-click or a page reload from starting a second update on
+top of one still in flight. See
 [`docs/SETUP.md`](docs/SETUP.md#ab-self-update) for the one-time migration
 this needs.
 

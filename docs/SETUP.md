@@ -88,10 +88,11 @@ Deploy on the physical Windows host running the DCS gameservers.
 
 Both pieces can update themselves: the auth-gate checks GitHub hourly for
 a new signed release, and a site admin triggers the actual update from
-`/admin/update` (a sidebar icon lights up when one's available). Updating
-stages the new version into whichever "slot" (A or B) isn't currently
-running, then restarts into it; a version that fails to start gets rolled
-back automatically. See `src/updateCheck.js`'s top comment for the full
+`/admin/update` (a sidebar icon lights up when one's available, or can
+be pinned always-visible from `/admin/settings`). Updating stages the
+new version into whichever "slot" (A or B) isn't currently running,
+then restarts into it; a version that fails to start gets rolled back
+automatically. See `src/updateCheck.js`'s top comment for the full
 design.
 
 This needs a one-time manual migration on each side before it works --
