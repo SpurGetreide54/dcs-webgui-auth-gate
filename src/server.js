@@ -660,6 +660,7 @@ logsRouter.get("/", async (req, res) => {
     sources.add("agent");
   }
   const since = typeof req.query.since === "string" && req.query.since in LOG_WINDOWS_MS ? req.query.since : "all";
+  const verbose = req.query.verbose === "1";
 
   let entries = [];
   if (sources.has("app")) {
@@ -675,13 +676,14 @@ logsRouter.get("/", async (req, res) => {
   }
 
   entries.sort((a, b) => (a.t || "").localeCompare(b.t || ""));
+  if (!verbose) entries = entries.filter((e) => e.level !== "debug");
   if (since !== "all") {
     const cutoff = Date.now() - LOG_WINDOWS_MS[since];
     entries = entries.filter((e) => e.t && new Date(e.t).getTime() >= cutoff);
   }
   entries = entries.slice(-300);
 
-  res.send(views.logsPage({ admin: req.admin, entries, agentError, filters: { sources, since } }));
+  res.send(views.logsPage({ admin: req.admin, entries, agentError, filters: { sources, since, verbose } }));
 });
 
 app.use("/admin/logs", logsRouter);

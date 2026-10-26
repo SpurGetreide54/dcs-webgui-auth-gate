@@ -632,7 +632,7 @@ const LOG_WINDOW_LABELS = { "15m": "Last 15 minutes", "1h": "Last hour", "6h": "
 // scrolled to the newest entries without any client-side script; this app
 // has none anywhere else and this isn't worth being the first.
 function logsPage({ admin, entries, agentError, filters }) {
-  const { sources, since } = filters;
+  const { sources, since, verbose } = filters;
 
   const filterForm = `<form method="get" action="/admin/logs#latest" class="log-filters">
   <div class="log-filter-group">
@@ -646,6 +646,11 @@ function logsPage({ admin, entries, agentError, filters }) {
           .map(([key, label]) => `<option value="${key}" ${since === key ? "selected" : ""}>${escapeHtml(label)}</option>`)
           .join("")}
       </select>
+    </label>
+  </div>
+  <div class="log-filter-group">
+    <label title="Step-by-step detail, e.g. each stage of a self-update -- hidden by default, since it's only useful when something's actually stuck.">
+      <input type="checkbox" name="verbose" value="1" ${verbose ? "checked" : ""}> Verbose
     </label>
   </div>
   <button type="submit">Apply filters</button>

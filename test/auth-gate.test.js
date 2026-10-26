@@ -802,6 +802,13 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const recentOnlyHtml = await (await fetch(`${base}/admin/logs?since=15m`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(recentOnlyHtml, /AUTH_GATE_LOG_MARKER old entry/, "since=15m must exclude a 2h-old entry");
 
+    // --- verbose filter: debug-level entries are hidden by default, shown with verbose=1 ---
+    console.debug("AUTH_GATE_LOG_MARKER debug entry");
+    const nonVerboseHtml = await (await fetch(`${base}/admin/logs`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(nonVerboseHtml, /AUTH_GATE_LOG_MARKER debug entry/, "debug-level entries must be hidden by default");
+    const verboseHtml = await (await fetch(`${base}/admin/logs?verbose=1`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(verboseHtml, /AUTH_GATE_LOG_MARKER debug entry/, "verbose=1 must reveal debug-level entries");
+
     // --- agent unreachable: the auth-gate's own entries still render,
     // with a clear error instead of silently dropping the agent section ---
     dummyAgentLogsShouldFail = true;

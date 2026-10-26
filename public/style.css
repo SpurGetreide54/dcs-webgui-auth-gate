@@ -342,3 +342,4 @@ tr.pending-invite td { color: var(--text-muted); }
 .log-msg { word-break: break-word; }
 .log-row.level-error .log-msg { color: var(--accent-red); }
 .log-row.level-raw .log-msg { color: var(--text-muted); font-style: italic; }
+.log-row.level-debug .log-msg { color: var(--text-muted); }
