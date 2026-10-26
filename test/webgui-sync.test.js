@@ -30,7 +30,7 @@ const AGENT_TOKEN = "webgui-sync-agent-token";
 const GOOD_INSTALL_PATH = "C:\\DCS\\install-with-webgui";
 const BAD_INSTALL_PATH = "C:\\DCS\\install-missing-webgui";
 
-let app, db, sqlitePath, webguiStaticPath;
+let app, db, sqlitePath, webguiStaticPath, authGateLogPath;
 let dummyAgent, dummyAgentPort;
 let bundleTar, bundleRequests;
 
@@ -74,6 +74,11 @@ test.before(async () => {
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
   process.env.WEBGUI_STATIC_PATH = webguiStaticPath;
+  // Requiring ../src/server installs appLog's console capture, which
+  // defaults to writing auth-gate.log at the repo root if this isn't set
+  // -- same reasoning as SQLITE_PATH above, just for the log file.
+  authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
+  process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
 
   app = require("../src/server");
   db = require("../src/db");
@@ -84,6 +89,7 @@ test.after(async () => {
   db.close();
   cleanupSqlite(sqlitePath);
   fs.rmSync(webguiStaticPath, { recursive: true, force: true });
+  for (const suffix of ["", ".1"]) fs.rmSync(authGateLogPath + suffix, { force: true });
 });
 
 test("webgui-sync: syncs webgui-static/ from the selected server's DCS install", async () => {

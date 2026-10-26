@@ -21,7 +21,7 @@ function extractCookie(res) {
 
 const AGENT_TOKEN = "webgui-ports-agent-token";
 
-let app, db, sqlitePath;
+let app, db, sqlitePath, authGateLogPath;
 let dummyAgent, dummyAgentPort;
 let instancePorts; // instanceName -> port|null
 let ensureCalls;
@@ -68,6 +68,11 @@ test.before(async () => {
   process.env.COOKIE_SECURE = "false";
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
+  // Requiring ../src/server installs appLog's console capture, which
+  // defaults to writing auth-gate.log at the repo root if this isn't set
+  // -- same reasoning as SQLITE_PATH above, just for the log file.
+  authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
+  process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
 
   app = require("../src/server");
   db = require("../src/db");
@@ -77,6 +82,7 @@ test.after(async () => {
   await new Promise((resolve) => dummyAgent.close(resolve));
   db.close();
   cleanupSqlite(sqlitePath);
+  for (const suffix of ["", ".1"]) fs.rmSync(authGateLogPath + suffix, { force: true });
 });
 
 test("webgui-ports: proposes non-colliding ports for missing instances, writes nothing until confirm", async () => {
