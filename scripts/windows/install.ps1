@@ -88,6 +88,19 @@ if (-not (Test-Path $DcsSavedGamesRoot)) {
 Write-Host "==> Creating install directory $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
+# Stop (not yet remove -- NSSM isn't resolved until below) any existing
+# service before touching releases\a: on a host that's already installed
+# and running, releases\a holds the currently-executing agent.exe
+# (current\ points there by default), and Windows refuses to overwrite a
+# locked, running executable. Doing this here, before the copy below, is
+# what actually makes re-running this script safe, not just the comment
+# above claiming it is. The full stop+remove-via-nssm teardown still runs
+# again further down, right before re-registering the service.
+if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+    Write-Host "==> Existing service found, stopping before reinstall"
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host "==> Copying agent.exe into releases\a"
 $SlotADir = "$InstallDir\releases\a"
 New-Item -ItemType Directory -Force -Path $SlotADir | Out-Null
