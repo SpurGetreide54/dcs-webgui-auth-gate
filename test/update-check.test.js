@@ -2,10 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-
-const updateCheck = require("../src/updateCheck");
 
 // A throwaway keypair, generated fresh per test -- distinct from the real
 // one at local-only/keys/, used to prove verifyManifest() rejects a
@@ -20,6 +19,53 @@ function signManifest(privateKey, signed) {
   return { ...signed, signature };
 }
 
+function startDummyHttpServer(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function tempSqlitePath(label) {
+  return path.join(os.tmpdir(), `update-check-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
+}
+
+function cleanupSqlite(sqlitePath) {
+  for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
+}
+
+// checkForUpdate() reaches https://api.github.com by default -- overridden
+// via GITHUB_API_BASE_OVERRIDE, same pattern this app already uses for
+// MISSION_AGENT_URL/WEBGUI_CONTROL_PORT, so these tests hit a local dummy
+// server instead of the real GitHub API. The env var has to be set, and
+// SQLITE_PATH pointed at a throwaway DB (default SQLITE_PATH is the real
+// local dev database -- getUpdateState()/setUpdateState() must never
+// touch that), before src/updateCheck.js is first required, so both
+// happen in test.before() rather than at module load.
+let updateCheck;
+let dummyGithub, dummyGithubBase;
+let dummyGithubRespond; // set per test to control what the dummy "GitHub API" returns
+let sqlitePath;
+
+const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "update-signing-key.pem");
+
+test.before(async () => {
+  dummyGithub = await startDummyHttpServer((req, res) => dummyGithubRespond(req, res));
+  dummyGithubBase = `http://127.0.0.1:${dummyGithub.address().port}`;
+  process.env.GITHUB_API_BASE_OVERRIDE = dummyGithubBase;
+
+  sqlitePath = tempSqlitePath("update-check");
+  process.env.SQLITE_PATH = sqlitePath;
+
+  updateCheck = require("../src/updateCheck");
+});
+
+test.after(async () => {
+  await new Promise((resolve) => dummyGithub.close(resolve));
+  require("../src/db").close();
+  cleanupSqlite(sqlitePath);
+});
+
 test("getCurrentVersion reads package.json's own version", () => {
   const pkg = require("../package.json");
   assert.equal(updateCheck.getCurrentVersion(), pkg.version);
@@ -33,7 +79,6 @@ test("getCurrentVersion reads package.json's own version", () => {
 // their own throwaway keypairs. Only runs where that private key exists
 // (gitignored, so not on a fresh clone) -- skipped rather than failed
 // elsewhere, same as this repo's other real-infra-only checks.
-const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "update-signing-key.pem");
 test(
   "verifyManifest accepts a manifest signed with the real local-only/keys/ private key",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
@@ -142,4 +187,84 @@ test("sign-updates.js produces a manifest the real verifyManifest() accepts, end
   } finally {
     fs.rmSync(scratchDir, { recursive: true, force: true });
   }
+});
+
+function sendJson(res, status, obj) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(obj));
+}
+
+// Serves `manifest` as the dummy GitHub API's "latest release" asset --
+// fetchVerifiedManifest() makes two requests (release info, then the
+// asset itself), this answers both from one handler, keyed on path.
+function serveManifest(manifest) {
+  dummyGithubRespond = (req, res) => {
+    if (req.url.includes("/releases/latest")) {
+      sendJson(res, 200, { assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] });
+    } else {
+      sendJson(res, 200, manifest);
+    }
+  };
+}
+
+test(
+  "checkForUpdate resolves true and records the new version when a newer signed release is available",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: "9.9.9-test",
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "d".repeat(64) }],
+    });
+    serveManifest(manifest);
+
+    const hasUpdate = await updateCheck.checkForUpdate();
+    assert.equal(hasUpdate, true);
+    const state = updateCheck.getUpdateState();
+    assert.equal(state.available_version, "9.9.9-test");
+    assert.equal(state.changelog_url, "https://example.test/changelog");
+    assert.ok(state.last_checked_at);
+  }
+);
+
+test(
+  "checkForUpdate resolves false when the latest release matches the current version",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: updateCheck.getCurrentVersion(),
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "e".repeat(64) }],
+    });
+    serveManifest(manifest);
+
+    const hasUpdate = await updateCheck.checkForUpdate();
+    assert.equal(hasUpdate, false);
+    const state = updateCheck.getUpdateState();
+    assert.equal(state.available_version, null);
+  }
+);
+
+test("checkForUpdate rejects and still records the attempt when the check fails", async () => {
+  // No real key needed -- signed with a throwaway key the app's hardcoded
+  // public key will never accept, so verifyManifest() rejects it
+  // regardless of whether local-only/keys/ exists on this machine. Runs
+  // unconditionally, unlike the two tests above.
+  const { privateKey } = freshKeypair();
+  const manifest = signManifest(privateKey, {
+    version: "9.9.9-bad",
+    changelog_url: "https://example.test/changelog",
+    needs_service_update: false,
+    downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "f".repeat(64) }],
+  });
+  serveManifest(manifest);
+
+  await assert.rejects(() => updateCheck.checkForUpdate(), /signature verification/);
+  const after = updateCheck.getUpdateState();
+  assert.ok(after.last_checked_at, "a failed check must still record that an attempt was made");
+  assert.equal(after.available_version, null);
 });

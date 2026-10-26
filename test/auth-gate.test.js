@@ -66,6 +66,16 @@ function lastAgentCall(method, pathPrefix) {
 let sqlitePath;
 const AGENT_TOKEN = "test-agent-token";
 
+// Stands in for the real GitHub API that src/updateCheck.js's
+// checkForUpdate() reaches -- set per test via dummyGithubRespond, so the
+// "check now" route can be exercised through the real app without a real
+// network dependency, same reasoning as dummyAgent above.
+let dummyGithub, dummyGithubBase;
+let dummyGithubRespond = (req, res) => {
+  res.writeHead(500);
+  res.end("dummyGithubRespond not set for this test");
+};
+
 test.before(async () => {
   dummyAgent = await startDummyHttpServer((req, res) => {
     const chunks = [];
@@ -81,11 +91,15 @@ test.before(async () => {
   dummyAgentPort = dummyAgent.address().port;
   dummyAgentCalls = [];
 
+  dummyGithub = await startDummyHttpServer((req, res) => dummyGithubRespond(req, res));
+  dummyGithubBase = `http://127.0.0.1:${dummyGithub.address().port}`;
+
   sqlitePath = tempSqlitePath("main");
   process.env.SQLITE_PATH = sqlitePath;
   process.env.COOKIE_SECURE = "false"; // plain http in tests, no TLS
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
+  process.env.GITHUB_API_BASE_OVERRIDE = dummyGithubBase;
 
   app = require("../src/server");
   db = require("../src/db");
@@ -96,6 +110,7 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise((resolve) => dummyAgent.close(resolve));
+  await new Promise((resolve) => dummyGithub.close(resolve));
   db.close();
   cleanupSqlite(sqlitePath);
 });
@@ -666,7 +681,9 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     const updatePageRes = await fetch(`${base}/admin/update`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(updatePageRes.status, 200);
-    assert.match(await updatePageRes.text(), /latest version/i);
+    const updatePageHtml = await updatePageRes.text();
+    assert.match(updatePageHtml, /latest version/i);
+    assert.match(updatePageHtml, /<form method="post" action="\/admin\/update\/check">/, "the update page must offer a manual check button");
 
     db.prepare("UPDATE update_state SET available_version = ?, changelog_url = ? WHERE id = 1").run("9.9.9", "https://example.test/changelog");
     const dashAfterUpdate = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
@@ -676,6 +693,59 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const updatePageWithUpdateHtml = await (await fetch(`${base}/admin/update`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(updatePageWithUpdateHtml, /9\.9\.9/);
     assert.match(updatePageWithUpdateHtml, /Update now/);
+
+    db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
+
+    // --- "check now": manual trigger for checkForUpdate(), against the
+    // dummy GitHub API above instead of the real one ---
+    const forbiddenCheckNow = await fetch(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: serverAdminCookie } });
+    assert.equal(forbiddenCheckNow.status, 403, "a non-site-admin must not be able to trigger a check either");
+
+    function serveDummyManifest(signed, privateKey) {
+      dummyGithubRespond = (req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (req.url.includes("/releases/latest")) {
+          res.end(JSON.stringify({ assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] }));
+        } else {
+          const signature = crypto.sign(null, Buffer.from(JSON.stringify(signed)), privateKey).toString("hex");
+          res.end(JSON.stringify({ ...signed, signature }));
+        }
+      };
+    }
+
+    // A failed check (signed with a throwaway key the app's hardcoded
+    // public key never accepts -- deterministic regardless of whether the
+    // real local-only/keys/ private key exists on this machine) must
+    // surface as an error, not a false "up to date".
+    serveDummyManifest(
+      { version: "9.9.9-bad", changelog_url: "https://example.test/changelog", needs_service_update: false, downloads: [] },
+      crypto.generateKeyPairSync("ed25519").privateKey
+    );
+    const failedCheckRes = await fetch(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+    assert.equal(failedCheckRes.status, 502, "a check that fails signature verification must not report success");
+    assert.match(await failedCheckRes.text(), /Check failed/);
+
+    // A successful check with a genuinely newer, properly-signed release --
+    // only runs where the real signing key exists on this machine
+    // (gitignored, not present on a fresh clone), same gating convention
+    // test/update-check.test.js already uses.
+    const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "update-signing-key.pem");
+    if (fs.existsSync(REAL_PRIVATE_KEY_PATH)) {
+      serveDummyManifest(
+        {
+          version: "9.9.9-found",
+          changelog_url: "https://example.test/changelog",
+          needs_service_update: false,
+          downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "a".repeat(64) }],
+        },
+        crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"))
+      );
+      const foundCheckRes = await fetch(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+      assert.equal(foundCheckRes.status, 200);
+      assert.match(await foundCheckRes.text(), /9\.9\.9-found/);
+      const dashAfterCheckNow = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+      assert.match(dashAfterCheckNow, /icon-update\.svg/, "sidebar icon must appear after a manual check finds an update");
+    }
 
     db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
 

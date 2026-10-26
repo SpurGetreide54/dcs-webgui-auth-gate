@@ -575,6 +575,30 @@ updateRouter.get("/", (req, res) => {
   res.send(views.updatePage({ admin: req.admin, currentVersion: updateCheck.getCurrentVersion(), updateState: updateCheck.getUpdateState() }));
 });
 
+updateRouter.post("/check", async (req, res) => {
+  try {
+    const hasUpdate = await updateCheck.checkForUpdate();
+    const updateState = updateCheck.getUpdateState();
+    res.send(
+      views.updatePage({
+        admin: req.admin,
+        currentVersion: updateCheck.getCurrentVersion(),
+        updateState,
+        notice: hasUpdate ? `Checked now: version ${updateState.available_version} is available.` : "Checked now: you're already running the latest version.",
+      })
+    );
+  } catch (err) {
+    res.status(502).send(
+      views.updatePage({
+        admin: req.admin,
+        currentVersion: updateCheck.getCurrentVersion(),
+        updateState: updateCheck.getUpdateState(),
+        error: `Check failed: ${err.message}`,
+      })
+    );
+  }
+});
+
 updateRouter.post("/", (req, res) => {
   // Responds first, then kicks applyUpdate() off only once that response
   // has actually finished sending -- it ends in process.exit() on

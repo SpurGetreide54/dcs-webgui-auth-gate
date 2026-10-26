@@ -605,6 +605,9 @@ function updatePage({ admin, currentVersion, updateState, error, notice }) {
   const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 <p>Running version <strong>${escapeHtml(currentVersion)}</strong>. Last checked: ${escapeHtml(checkedLabel)}.</p>
+<form method="post" action="/admin/update/check">
+  <button type="submit">Check now</button>
+</form>
 ${
   hasUpdate
     ? `<p>A new version is available: <strong>${escapeHtml(updateState.available_version)}</strong>. <a href="${escapeHtml(updateState.changelog_url || "")}" target="_blank" rel="noopener">Changelog</a></p>

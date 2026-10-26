@@ -23,6 +23,10 @@ const db = require("./db");
 const activeSlot = require("./activeSlot");
 
 const GITHUB_REPO = "SpurGetreide54/dcs-webgui-auth-gate";
+// Overridable so tests can point this at a local dummy server instead of
+// the real GitHub API, same as MISSION_AGENT_URL/WEBGUI_CONTROL_PORT are
+// already configured elsewhere in this app.
+const GITHUB_API_BASE = process.env.GITHUB_API_BASE_OVERRIDE || "https://api.github.com";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
 const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
@@ -60,7 +64,7 @@ async function fetchJson(url) {
 // applyUpdate both call this), never trusted from a cache: the DB's own
 // cached fields exist for display only, not as something to act on.
 async function fetchVerifiedManifest() {
-  const release = await fetchJson(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+  const release = await fetchJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/latest`);
   const asset = (release.assets || []).find((a) => a.name === "signed_updates.json");
   if (!asset) throw new Error("Latest GitHub release has no signed_updates.json asset.");
   const manifest = await fetchJson(asset.browser_download_url);
@@ -102,6 +106,12 @@ function setUpdateState({ lastCheckedAt, availableVersion, changelogUrl, needsSe
 // now"). Only ever updates update_state for display -- never stages or
 // applies anything itself. That's applyUpdate()'s job, run explicitly by
 // a site admin clicking the update button.
+//
+// A failure (network, bad signature, GitHub down) still records that a
+// check was attempted, but is re-thrown rather than swallowed -- an admin
+// who just clicked "check now" needs to know the check itself failed,
+// not see a false "you're up to date". startHourlyCheck()'s own silent
+// background-poll behavior comes from catching it there instead.
 async function checkForUpdate() {
   const now = new Date().toISOString();
   try {
@@ -115,15 +125,15 @@ async function checkForUpdate() {
     });
     return hasUpdate;
   } catch (err) {
-    console.warn(`Update check failed: ${err.message}`);
     setUpdateState({ lastCheckedAt: now, availableVersion: null, changelogUrl: null, needsServiceUpdate: false });
-    return false;
+    throw err;
   }
 }
 
 function startHourlyCheck() {
-  checkForUpdate();
-  const timer = setInterval(checkForUpdate, CHECK_INTERVAL_MS);
+  const swallowed = () => checkForUpdate().catch((err) => console.warn(`Update check failed: ${err.message}`));
+  swallowed();
+  const timer = setInterval(swallowed, CHECK_INTERVAL_MS);
   timer.unref(); // never keeps the process alive on its own
   return timer;
 }
