@@ -66,7 +66,7 @@ function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
-let app, db, serversDb, invitesDb, serverProxy;
+let app, db, updateCheck, serversDb, invitesDb, serverProxy;
 let dummyAgent, dummyAgentPort;
 // The app now makes more than one agent call per page render (e.g. an
 // upload POST followed by a list GET to refresh the page), so a single
@@ -134,6 +134,7 @@ test.before(async () => {
 
   app = require("../src/server");
   db = require("../src/db");
+  updateCheck = require("../src/updateCheck");
   serversDb = require("../src/servers");
   invitesDb = require("../src/invites");
   serverProxy = require("../src/serverProxy");
@@ -777,6 +778,43 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
 
     db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
+
+    // --- "Update now" cooldown: a double-click or rapid re-click must
+    // not fire a second applyUpdate() while one is still in flight ---
+    // real applyUpdate() is never invoked here (network downloads, npm
+    // install, process.exit()) -- stub the shared, already-required
+    // module object so server.js's own reference sees the stub too.
+    const realApplyUpdate = updateCheck.applyUpdate;
+    let applyUpdateCalls = 0;
+    updateCheck.applyUpdate = async () => {
+      applyUpdateCalls++;
+    };
+    try {
+      const forbiddenTriggerUpdate = await fetch(`${base}/admin/update`, {
+        method: "POST",
+        headers: { Cookie: serverAdminCookie },
+      });
+      assert.equal(forbiddenTriggerUpdate.status, 403, "a non-site-admin must not be able to trigger an update either");
+      assert.equal(applyUpdateCalls, 0);
+
+      const firstTrigger = await postAndFollowFlash(`${base}/admin/update`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+      assert.match(await firstTrigger.text(), /Update started/);
+      assert.equal(applyUpdateCalls, 1);
+      assert.ok(db.prepare("SELECT update_triggered_at FROM update_state WHERE id = 1").get().update_triggered_at, "update_triggered_at must be set after triggering");
+
+      const secondTrigger = await postAndFollowFlash(`${base}/admin/update`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+      assert.match(await secondTrigger.text(), /try again after \d\d:\d\d:\d\d UTC/, "an update triggered within the cooldown window must be rejected, not started again");
+      assert.equal(applyUpdateCalls, 1, "a rejected trigger must not call applyUpdate() a second time");
+
+      // Back-date past the 60s cooldown window -- a third trigger must succeed.
+      db.prepare("UPDATE update_state SET update_triggered_at = ? WHERE id = 1").run(new Date(Date.now() - 61_000).toISOString());
+      const thirdTrigger = await postAndFollowFlash(`${base}/admin/update`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+      assert.match(await thirdTrigger.text(), /Update started/);
+      assert.equal(applyUpdateCalls, 2, "a trigger after the cooldown has elapsed must call applyUpdate() again");
+    } finally {
+      updateCheck.applyUpdate = realApplyUpdate;
+      db.prepare("UPDATE update_state SET update_triggered_at = NULL WHERE id = 1").run();
+    }
 
     // --- logs: auth-gate's own + agent's, merged into one timeline (site admin only) ---
     const forbiddenLogsPage = await fetch(`${base}/admin/logs`, { headers: { Cookie: serverAdminCookie } });

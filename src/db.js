@@ -128,4 +128,15 @@ for (const table of ["admin_server_access", "invite_server_access"]) {
   }
 }
 
+// Guarded migration: update_state didn't originally track when an
+// update was last triggered -- needed for the cooldown guard against
+// double-triggering applyUpdate() (confirmed in production: a
+// double-click fired two full update cycles 24 seconds apart).
+{
+  const columns = db.prepare("PRAGMA table_info(update_state)").all().map((c) => c.name);
+  if (!columns.includes("update_triggered_at")) {
+    db.exec("ALTER TABLE update_state ADD COLUMN update_triggered_at TEXT");
+  }
+}
+
 module.exports = db;

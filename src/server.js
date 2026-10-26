@@ -618,6 +618,16 @@ updateRouter.post("/check", async (req, res) => {
 });
 
 updateRouter.post("/", (req, res) => {
+  // Guards against a double-click or rapid re-click firing a second
+  // applyUpdate() while one is already in flight -- confirmed in
+  // production as a real risk (two full update cycles 24 seconds
+  // apart), not theoretical.
+  const cooldownUntil = updateCheck.getUpdateCooldownUntil();
+  if (cooldownUntil) {
+    flash.setFlash(res, { error: `An update was just started -- try again after ${cooldownUntil.toISOString().slice(11, 19)} UTC.` });
+    return res.redirect("/admin/update");
+  }
+  updateCheck.recordUpdateTriggered();
   // Responds first, then kicks applyUpdate() off only once that response
   // has actually finished sending -- it ends in process.exit() on
   // success, which must never race the admin's own page load. res.on

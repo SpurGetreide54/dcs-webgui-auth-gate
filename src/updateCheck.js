@@ -130,6 +130,24 @@ async function checkForUpdate() {
   }
 }
 
+// Guards against two overlapping applyUpdate() runs -- confirmed in
+// production as a real risk, not theoretical: a double-click fired two
+// full update cycles 24 seconds apart, each staging into the idle slot
+// and racing the agent relay.
+const UPDATE_COOLDOWN_MS = 60 * 1000;
+
+function recordUpdateTriggered() {
+  db.prepare("UPDATE update_state SET update_triggered_at = ? WHERE id = 1").run(new Date().toISOString());
+}
+
+// null when no cooldown is active; otherwise a Date for when it lifts.
+function getUpdateCooldownUntil() {
+  const { update_triggered_at } = getUpdateState();
+  if (!update_triggered_at) return null;
+  const until = new Date(update_triggered_at).getTime() + UPDATE_COOLDOWN_MS;
+  return until > Date.now() ? new Date(until) : null;
+}
+
 function startHourlyCheck() {
   const swallowed = () => checkForUpdate().catch((err) => console.warn(`Update check failed: ${err.message}`));
   swallowed();
@@ -279,4 +297,6 @@ module.exports = {
   startHourlyCheck,
   applyUpdate,
   getUpdateState,
+  recordUpdateTriggered,
+  getUpdateCooldownUntil,
 };
