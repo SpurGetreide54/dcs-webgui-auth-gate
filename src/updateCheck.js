@@ -179,7 +179,13 @@ function runNpmInstall(cwd) {
 // a real network) can hang indefinitely with no error at all -- the
 // in-flight applyUpdate() call just sits there forever, never reaching
 // its own success or failure path, and never logging anything either way.
-const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 5 * 60 * 1000;
+// Kept short deliberately: the auth-gate and mission-agent only ever talk
+// over the internal network between the control-panel VM and the DCS
+// host (see SETUP.md), never the open internet, so even the ~96MB agent
+// build should move in single-digit seconds. Anything still running
+// after a minute already means something's broken, not just slow --
+// failing fast beats an admin waiting minutes to find that out.
+const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 60 * 1000;
 
 // Relays the agent's new build through the existing internal auth-gate <->
 // agent channel -- the agent has no internet access of its own by design
