@@ -8,12 +8,12 @@
 //
 // Usage:
 //   node scripts/release/sign-updates.js \
-//     --version 1.4.0-alpha \
-//     --changelog-url https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases/tag/1.4.0-alpha \
-//     --auth-gate local-only/release/auth-gate/auth-gate-1.4.0-alpha.tar.gz \
-//     --agent local-only/release/agent/agent-1.4.0-alpha.exe \
+//     --version 1.4.1-alpha \
+//     --changelog-url https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases/tag/1.4.1-alpha \
+//     --auth-gate local-only/release/auth-gate/auth-gate-1.4.1-alpha.tar.gz \
+//     --agent local-only/release/agent/agent-1.4.1-alpha.exe \
 //     [--needs-service-update] \
-//     [--tag 1.4.0-alpha] \
+//     [--tag 1.4.1-alpha] \
 //     [--key local-only/keys/update-signing-key.pem]
 //
 // The private key never leaves this machine -- local-only/ is gitignored.
