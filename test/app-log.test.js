@@ -22,38 +22,43 @@ test.after(() => {
   for (const suffix of ["", ".1"]) fs.rmSync(logPath + suffix, { force: true });
 });
 
-test("installConsoleCapture wraps console.log/warn/error: original still runs, and a structured line is appended", (t) => {
-  const original = { log: console.log, warn: console.warn, error: console.error };
+test("installConsoleCapture wraps console.log/warn/error/debug: original still runs, and a structured line is appended", (t) => {
+  const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
   const calls = [];
   console.log = (...args) => calls.push(["log", args]);
   console.warn = (...args) => calls.push(["warn", args]);
   console.error = (...args) => calls.push(["error", args]);
+  console.debug = (...args) => calls.push(["debug", args]);
   t.after(() => Object.assign(console, original));
 
   appLog.installConsoleCapture();
-  // installConsoleCapture() wraps whatever console.log/warn/error are at
-  // call time -- which are now the test's own stub functions above, so
+  // installConsoleCapture() wraps whatever console.log/warn/error/debug are
+  // at call time -- which are now the test's own stub functions above, so
   // the "original still runs" half of this test is exercised through
   // those stubs rather than the real stdout.
   console.log("hello", 1);
   console.warn("careful");
   console.error("boom");
+  console.debug("step 1 of 3");
 
   assert.deepEqual(calls, [
     ["log", ["hello", 1]],
     ["warn", ["careful"]],
     ["error", ["boom"]],
+    ["debug", ["step 1 of 3"]],
   ]);
 
   const entries = appLog.readRecentEntries(10);
-  const last3 = entries.slice(-3);
-  assert.equal(last3[0].level, "log");
-  assert.equal(last3[0].msg, "hello 1");
-  assert.equal(last3[1].level, "warn");
-  assert.equal(last3[1].msg, "careful");
-  assert.equal(last3[2].level, "error");
-  assert.equal(last3[2].msg, "boom");
-  for (const entry of last3) assert.match(entry.t, /^\d{4}-\d{2}-\d{2}T/, "each entry needs a real ISO timestamp");
+  const last4 = entries.slice(-4);
+  assert.equal(last4[0].level, "log");
+  assert.equal(last4[0].msg, "hello 1");
+  assert.equal(last4[1].level, "warn");
+  assert.equal(last4[1].msg, "careful");
+  assert.equal(last4[2].level, "error");
+  assert.equal(last4[2].msg, "boom");
+  assert.equal(last4[3].level, "debug");
+  assert.equal(last4[3].msg, "step 1 of 3");
+  for (const entry of last4) assert.match(entry.t, /^\d{4}-\d{2}-\d{2}T/, "each entry needs a real ISO timestamp");
 });
 
 test("readRecentEntries returns only the last maxLines, most recent last", () => {

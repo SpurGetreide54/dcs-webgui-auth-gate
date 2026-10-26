@@ -35,7 +35,7 @@ const archiver = require("archiver");
 // redirection (install.ps1) still does the actual writing-to-agent.log
 // and rotation, unchanged.
 function installConsoleCapture() {
-  const original = { log: console.log, warn: console.warn, error: console.error };
+  const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
   function emit(write, level, args) {
     const msg = args.map((a) => (typeof a === "string" ? a : util.inspect(a))).join(" ");
     write(JSON.stringify({ t: new Date().toISOString(), level, msg }));
@@ -43,6 +43,9 @@ function installConsoleCapture() {
   console.log = (...args) => emit(original.log, "log", args);
   console.warn = (...args) => emit(original.warn, "warn", args);
   console.error = (...args) => emit(original.error, "error", args);
+  // See src/appLog.js's own console.debug wrapper for why this is its own
+  // level -- kept in sync here since this file can't require that one.
+  console.debug = (...args) => emit(original.debug, "debug", args);
 }
 installConsoleCapture();
 

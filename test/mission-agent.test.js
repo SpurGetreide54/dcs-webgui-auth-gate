@@ -507,6 +507,23 @@ test("installConsoleCapture formats console.log as NDJSON", () => {
   assert.match(parsed.t, /^\d{4}-\d{2}-\d{2}T/, "needs a real ISO timestamp");
 });
 
+test("installConsoleCapture formats console.debug as NDJSON with level 'debug'", () => {
+  const originalWrite = process.stdout.write;
+  let captured = "";
+  process.stdout.write = (chunk) => {
+    captured += chunk;
+    return true;
+  };
+  try {
+    console.debug("step 1 of 3");
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+  const parsed = JSON.parse(captured.trim());
+  assert.equal(parsed.level, "debug");
+  assert.equal(parsed.msg, "step 1 of 3");
+});
+
 test("logs rejects requests with no token", async () => {
   const res = await fetch(`${base}/logs`);
   assert.equal(res.status, 401);

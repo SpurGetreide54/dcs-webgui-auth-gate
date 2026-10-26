@@ -59,7 +59,7 @@ function appendLine(level, args) {
 // this: its own top comment states a zero-dependency-surface boundary an
 // update should never need to cross.
 function installConsoleCapture() {
-  const original = { log: console.log, warn: console.warn, error: console.error };
+  const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
   console.log = (...args) => {
     original.log(...args);
     appendLine("log", args);
@@ -71,6 +71,15 @@ function installConsoleCapture() {
   console.error = (...args) => {
     original.error(...args);
     appendLine("error", args);
+  };
+  // Step-by-step detail (e.g. src/updateCheck.js's applyUpdate() progress
+  // trail) that's noise during normal operation but genuinely useful when
+  // something's stuck -- console.debug keeps it out of the plain "log"
+  // level, so /admin/logs can hide it behind its own "Verbose" filter
+  // instead of mixing it into every other line.
+  console.debug = (...args) => {
+    original.debug(...args);
+    appendLine("debug", args);
   };
 }
 
