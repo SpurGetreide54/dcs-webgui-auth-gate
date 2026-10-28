@@ -1,10 +1,8 @@
 const db = require("./db");
 
-// "access" isn't a real column -- it's just "the row exists at all". The
-// other four map straight onto admin_server_access's own columns. Keeping
-// this as the single lookup table means a column name is never built from
-// anything other than this fixed set, regardless of what a request handler
-// passes through.
+// the fixed lookup from a permission name to its real column
+// "access" isn't a real column, it's just "the row exists at all"
+// a column name is never built from anything but this fixed set
 const PERMISSION_COLUMNS = {
   upload: "can_upload_missions",
   view: "can_view_missions",
@@ -12,27 +10,27 @@ const PERMISSION_COLUMNS = {
   delete: "can_delete_missions",
 };
 
+// look up a server by its url slug
 function getServerBySlug(slug) {
   return db.prepare("SELECT * FROM servers WHERE slug = ?").get(slug);
 }
 
+// look up a server by its row id
 function getServerById(id) {
   return db.prepare("SELECT * FROM servers WHERE id = ?").get(id);
 }
 
+// list every configured server
 function getAllServers() {
   return db.prepare("SELECT * FROM servers ORDER BY id").all();
 }
 
+// list every server this admin has access to, permissions attached
 function getAccessibleServers(adminId) {
   return db
     .prepare(
-      // servers.* alone gives a bare `id` -- the server's own id -- with no
-      // way to tell it apart from an admin_server_access row's id. Callers
-      // checking "does this admin have access to server X" via
-      // `.server_id` would get `undefined` and never match. Left unfixed,
-      // the accounts page renders every checkbox as unchecked, regardless
-      // of the real grant.
+      // server_id is selected explicitly, not left to servers.*'s own id
+      // see docs/Why.md#why-does-getaccessibleservers-select-server-id-explicitly
       `SELECT servers.*, admin_server_access.server_id, admin_server_access.can_upload_missions,
               admin_server_access.can_view_missions, admin_server_access.can_download_missions,
               admin_server_access.can_delete_missions
@@ -44,21 +42,25 @@ function getAccessibleServers(adminId) {
     .all(adminId);
 }
 
+// read one admin's raw access row for one server, or undefined
 function getAccess(adminId, serverId) {
   return db
     .prepare("SELECT * FROM admin_server_access WHERE admin_id = ? AND server_id = ?")
     .get(adminId, serverId);
 }
 
+// true if this admin has any access row at all for this server
 function hasServerAccess(adminId, serverId) {
   return Boolean(getAccess(adminId, serverId));
 }
 
+// true if this admin can upload missions to this server specifically
 function canUploadMissions(adminId, serverId) {
   const access = getAccess(adminId, serverId);
   return Boolean(access && access.can_upload_missions);
 }
 
+// true if this admin holds the named permission on this server
 function hasPermission(adminId, serverId, permission) {
   const access = getAccess(adminId, serverId);
   if (!access) return false;
@@ -68,11 +70,8 @@ function hasPermission(adminId, serverId, permission) {
   return Boolean(access[column]);
 }
 
-// Full replace of a row's permission set -- used only where every flag is
-// decided together (initial grant at account/invite creation, the
-// bootstrap site admin). Any flag left out of `grants` is explicitly
-// cleared, not left alone. The one-cell-at-a-time matrix popup uses
-// setPermission below instead, which never touches the other columns.
+// replace an admin's whole permission set for one server at once
+// see docs/Why.md#why-are-there-two-ways-to-set-an-admins-permissions
 function setAccess(adminId, serverId, grants = {}) {
   const { canUploadMissions = false, canViewMissions = false, canDownloadMissions = false, canDeleteMissions = false } = grants;
   db.prepare(
@@ -87,10 +86,12 @@ function setAccess(adminId, serverId, grants = {}) {
   ).run(adminId, serverId, canUploadMissions ? 1 : 0, canViewMissions ? 1 : 0, canDownloadMissions ? 1 : 0, canDeleteMissions ? 1 : 0);
 }
 
+// remove an admin's access row for one server entirely
 function revokeAccess(adminId, serverId) {
   db.prepare("DELETE FROM admin_server_access WHERE admin_id = ? AND server_id = ?").run(adminId, serverId);
 }
 
+// make sure an access row exists for this admin and server, all flags off
 function ensureAccessRow(adminId, serverId) {
   db.prepare(
     `INSERT INTO admin_server_access (admin_id, server_id) VALUES (?, ?)
@@ -98,12 +99,10 @@ function ensureAccessRow(adminId, serverId) {
   ).run(adminId, serverId);
 }
 
-// Toggles exactly one permission for one admin+server pair, leaving every
-// other column alone -- the matrix popup's per-cell click. "access" with no
-// grant removes the whole row (and so every permission with it, same as
-// revokeAccess); "access" with a grant creates a bare row if none exists
-// yet, defaulting every other permission to 0 rather than guessing.
+// toggle exactly one permission cell, leaving every other column alone
+// see docs/Why.md#why-are-there-two-ways-to-set-an-admins-permissions
 function setPermission(adminId, serverId, permission, granted) {
+  // "access" itself has no column, it's the row's own existence
   if (permission === "access") {
     if (granted) return ensureAccessRow(adminId, serverId);
     return revokeAccess(adminId, serverId);
@@ -114,12 +113,14 @@ function setPermission(adminId, serverId, permission, granted) {
   db.prepare(`UPDATE admin_server_access SET ${column} = ? WHERE admin_id = ? AND server_id = ?`).run(granted ? 1 : 0, adminId, serverId);
 }
 
+// grant the same permission set to this admin on every server at once
 function grantAllServers(adminId, grants) {
   for (const server of getAllServers()) {
     setAccess(adminId, server.id, grants);
   }
 }
 
+// expose the lookup table and every function above to callers
 module.exports = {
   PERMISSION_COLUMNS,
   getServerBySlug,

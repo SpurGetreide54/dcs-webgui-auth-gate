@@ -10,4 +10,5 @@
 - [Testing](Testing.md)
 - [Troubleshooting](Troubleshooting.md)
 - [FAQ](FAQ.md)
+- [Why](Why.md)
 - [Glossary](Glossary.md)

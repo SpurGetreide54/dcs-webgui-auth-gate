@@ -1,15 +1,21 @@
+// node's path and filesystem modules, and the sqlite driver
 const path = require("node:path");
 const fs = require("node:fs");
 const Database = require("better-sqlite3");
 
+// where the sqlite file lives, overridden in production via
+// sqlite_path in .env, same reasoning as activeSlot.js's path
 const SQLITE_PATH = process.env.SQLITE_PATH || path.join(__dirname, "..", "local-only", "data", "auth-gate.sqlite");
 
+// a fresh clone has no local-only/ on disk at all, make sure it exists
 fs.mkdirSync(path.dirname(SQLITE_PATH), { recursive: true });
 
+// open the database and turn on the two pragmas this app relies on
 const db = new Database(SQLITE_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+// create every table this app needs, each one a no-op once it exists
 db.exec(`
   CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,11 +76,9 @@ db.exec(`
     PRIMARY KEY (invite_id, server_id)
   );
 
-  -- Single row (id is always 1). Tracks what the hourly GitHub check last
-  -- found, for the update-tab UI. Deliberately does NOT hold the active
-  -- slot -- that lives in a plain flat file (see src/activeSlot.js) read by
-  -- launcher.js, which can't depend on better-sqlite3 or this schema
-  -- without breaking its own "no dependencies beyond Node itself" rule.
+  -- single row, id is always 1, tracks what the hourly github check
+  -- last found, for the update tab ui, active slot is not here
+  -- see docs/Why.md#why-is-the-active-slot-pointer-a-flat-file
   CREATE TABLE IF NOT EXISTS update_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_checked_at TEXT,
@@ -83,26 +87,21 @@ db.exec(`
     needs_service_update INTEGER NOT NULL DEFAULT 0
   );
 
-  -- Generic site-wide key/value settings, independent of any one
-  -- subsystem's own state (e.g. update_state is specifically about
-  -- update-checking) -- the home for this and any future site-wide
-  -- toggle, instead of accumulating one-off columns on unrelated
-  -- tables.
+  -- generic site wide key/value settings, independent of any one
+  -- subsystem's own state, the home for this and any future toggle
+  -- instead of accumulating one-off columns on unrelated tables
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
 `);
 
+// seed the single update_state row, once, on the very first run
 db.prepare("INSERT OR IGNORE INTO update_state (id) VALUES (1)").run();
 
-// Guarded migration for DBs created before the servers table dropped
-// upstream_url and renamed mission_folder_key to instance_name. Direct
-// reverse-proxying to a DCS host never actually worked -- its control port
-// only accepts 127.0.0.1. instance_name now also locates
-// Config/autoexec.cfg, not just the Missions folder. CREATE TABLE IF NOT
-// EXISTS above never alters an existing table, so this runs every startup
-// and is a no-op once migrated.
+// guarded migration from the old upstream_url/mission_folder_key
+// columns, see docs/FAQ.md#why-does-this-project-exist-at-all for why
+// a direct reverse proxy was dropped, a no-op once already migrated
 {
   const columns = db.prepare("PRAGMA table_info(servers)").all().map((c) => c.name);
   if (columns.includes("mission_folder_key") && !columns.includes("instance_name")) {
@@ -116,14 +115,8 @@ db.prepare("INSERT OR IGNORE INTO update_state (id) VALUES (1)").run();
   }
 }
 
-// Guarded migration for DBs created before view/download/delete mission
-// permissions existed as their own columns, independent of upload. Adding
-// the columns is harmless (they default to 0), but a DB that already had
-// upload-granted admins would otherwise lock every one of them out of the
-// now-view-gated /missions page the moment this ships -- so the one-time
-// backfill right after adding the columns carries their existing access
-// forward. Only runs the backfill in the same pass the columns are first
-// added; a later toggle of upload alone must never re-grant view.
+// guarded migration adding view/download/delete as their own columns
+// see docs/Why.md#why-does-the-permission-migration-backfill-from-upload
 for (const table of ["admin_server_access", "invite_server_access"]) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!columns.includes("can_view_missions")) {
@@ -138,10 +131,9 @@ for (const table of ["admin_server_access", "invite_server_access"]) {
   }
 }
 
-// Guarded migration: update_state didn't originally track when an
-// update was last triggered -- needed for the cooldown guard against
-// double-triggering applyUpdate() (confirmed in production: a
-// double-click fired two full update cycles 24 seconds apart).
+// guarded migration adding update_triggered_at, the cooldown guard's
+// own timestamp column
+// see docs/Why.md#why-does-update-state-track-when-an-update-was-triggered
 {
   const columns = db.prepare("PRAGMA table_info(update_state)").all().map((c) => c.name);
   if (!columns.includes("update_triggered_at")) {
@@ -149,4 +141,5 @@ for (const table of ["admin_server_access", "invite_server_access"]) {
   }
 }
 
+// expose the open, migrated database connection to every other module
 module.exports = db;

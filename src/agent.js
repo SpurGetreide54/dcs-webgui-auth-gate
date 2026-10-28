@@ -1,20 +1,9 @@
-// Runs on the physical Windows host, next to the DCS gameservers. This is
-// the only place that can reach a DCS server's control port -- that port
-// only accepts connections from 127.0.0.1 on its own machine.
-//
-// Small, and deliberately short of real delete access: a mission-upload
-// endpoint, a list/download pair, a soft-delete-to-trash (moves a file
-// aside, never unlinks it), a webgui control-port relay, and a
-// shared-token check. No accounts. No login -- the shared bearer token
-// can't tell admins apart, so nothing here can destroy a mission file
-// outright. A leaked token can add files and move files into Missions/
-// .trash/, never erase one for good.
-//
-// Deploy on Windows as a service, e.g. via NSSM or node-windows. This host
-// has no existing Node process supervisor. See scripts/build-agent-exe.sh
-// to package this as a standalone .exe -- the host then needs no Node.js
-// install.
+// runs on the physical windows host next to the dcs gameservers, the
+// only place that can reach a dcs server's control port, which only
+// accepts connections from 127.0.0.1 on its own machine
+// see docs/Why.md#why-does-the-mission-agent-have-no-accounts
 
+// express and the upload/proxy/archive libraries this agent needs
 const express = require("express");
 const multer = require("multer");
 const path = require("node:path");
@@ -26,14 +15,8 @@ const { createProxyMiddleware } = require("http-proxy-middleware");
 const tar = require("tar");
 const archiver = require("archiver");
 
-// Mirrors src/appLog.js's NDJSON line shape (one JSON object per line: t,
-// level, msg) so the auth-gate's /admin/logs can merge both sources into
-// one timeline. Duplicated here rather than required from src/ -- this
-// file builds standalone into agent.exe with zero dependency on src/ (see
-// resolveAgentToken()'s own comment below on why that isolation matters).
-// This only changes what gets printed; NSSM's own AppStdout/AppStderr
-// redirection (install.ps1) still does the actual writing-to-agent.log
-// and rotation, unchanged.
+// wrap console.* into the same ndjson line shape as src/appLog.js
+// see docs/Why.md#why-does-agentjs-duplicate-applogjss-log-format
 function installConsoleCapture() {
   const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
   function emit(write, level, args) {
@@ -43,8 +26,7 @@ function installConsoleCapture() {
   console.log = (...args) => emit(original.log, "log", args);
   console.warn = (...args) => emit(original.warn, "warn", args);
   console.error = (...args) => emit(original.error, "error", args);
-  // See src/appLog.js's own console.debug wrapper for why this is its own
-  // level -- kept in sync here since this file can't require that one.
+  // its own level, kept in sync with appLog.js's console.debug wrapper
   console.debug = (...args) => emit(original.debug, "debug", args);
 }
 installConsoleCapture();
@@ -54,23 +36,15 @@ const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1
 const SAVED_GAMES_ROOT = process.env.DCS_SAVED_GAMES_ROOT;
 const DEFAULT_WEBGUI_PORT = 8088;
 
-// Same naive-default-is-dev-only-correct shape as MISSION_AGENT_TOKEN_FILE
-// below -- process.execPath, through the "current" junction, resolves to
-// whichever slot is actually running, not the stable top-level InstallDir.
-// install.ps1 pins this explicitly to $InstallDir\agent.log, the same
-// path AppStdout/AppStderr already write to.
+// process.execPath, through the "current" junction, resolves to
+// whichever slot is actually running, install.ps1 pins this to
+// installdir\agent.log explicitly, the same path nssm already writes to
 const AGENT_LOG_FILE = process.env.AGENT_LOG_FILE || path.join(path.dirname(process.execPath), "agent.log");
 const MAX_LOG_READ_LINES = 1000;
 
-// MISSION_AGENT_TOKEN authenticates the auth-gate to this agent. An
-// explicit env value always wins. Otherwise this agent is the source of
-// truth: it generates one on first start and persists it next to itself,
-// so a deployer never has to invent a value by hand for a headless
-// service with no interactive prompt. The value itself is never logged --
-// only which of these two cases happened -- since agent.log is easy to
-// end up pasted into a chat or a screen share. process.execPath, not
-// __dirname, is what resolves to a real on-disk path inside the packaged
-// SEA agent.exe.
+// resolve this agent's own bearer token, generating and persisting
+// one on first start if none was given
+// see docs/Why.md#why-does-the-agent-persist-its-own-generated-token
 function resolveAgentToken() {
   if (process.env.MISSION_AGENT_TOKEN) return process.env.MISSION_AGENT_TOKEN;
 
@@ -100,20 +74,18 @@ function resolveAgentToken() {
 
 const AGENT_TOKEN = resolveAgentToken();
 
+// nothing else here works without knowing where missions actually live
 if (!SAVED_GAMES_ROOT) {
   console.error("DCS_SAVED_GAMES_ROOT is not set. Refusing to start.");
   process.exit(1);
 }
 
-// Auth-gate admins pick this per server -- the DCS instance folder name
-// under Saved Games, e.g. "Example_Training", or the DCS default
-// "DCS.dcs_serverrelease". This is admin-typed input flowing straight into
-// filesystem paths, so it gets the same path-traversal guard as the upload
-// filename handling below. Dots are normal in real instance names. Only a
-// string of dots alone (".", "..") is rejected. Kept in sync with
-// server.js's copy of this pattern.
+// admin-typed dcs instance folder name under saved games, dots are
+// normal in real instance names, only a string of dots alone is
+// rejected, kept in sync with server.js's own copy of this pattern
 const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
 
+// turn an instance name into its real directory, or null if unsafe
 function resolveInstanceDir(instanceName) {
   if (!INSTANCE_NAME_RE.test(instanceName || "")) return null;
   const dir = path.join(SAVED_GAMES_ROOT, instanceName);
@@ -123,11 +95,12 @@ function resolveInstanceDir(instanceName) {
   return resolvedDir;
 }
 
+// the path autoexec.cfg lives at for a given instance directory
 function autoexecPath(instanceDir) {
   return path.join(instanceDir, "Config", "autoexec.cfg");
 }
 
-// Never guesses or writes. Reports only what's in the file today.
+// read today's webgui_port from autoexec.cfg, never guessing or writing
 async function readWebguiPort(instanceDir) {
   let contents;
   try {
@@ -141,21 +114,24 @@ async function readWebguiPort(instanceDir) {
 }
 
 const app = express();
+// drop the x-powered-by header, no need to advertise the framework
 app.disable("x-powered-by");
 
+// express middleware: require a valid bearer token on every request
 function checkToken(req, res, next) {
   const header = req.get("authorization") || "";
   const [scheme, token] = header.split(" ");
   if (scheme !== "Bearer" || !token) return res.status(401).send("Missing bearer token.");
   const expected = Buffer.from(AGENT_TOKEN);
   const got = Buffer.from(token);
-  // Constant-time comparison. A naive === leaks the token one byte at a
-  // time through timing differences, to anyone who can reach this port.
+  // constant time, a naive === leaks the token one byte at a time
+  // through timing differences to anyone who can reach this port
   const match = expected.length === got.length && crypto.timingSafeEqual(expected, got);
   if (!match) return res.status(401).send("Invalid bearer token.");
   next();
 }
 
+// express middleware: resolve :instanceName into req.instanceDir
 function requireInstanceDir(req, res, next) {
   const dir = resolveInstanceDir(req.params.instanceName);
   if (!dir) return res.status(400).send("Invalid instance name.");
@@ -163,18 +139,17 @@ function requireInstanceDir(req, res, next) {
   next();
 }
 
-// ---- mission upload, list, download, soft-delete ----
+// section: mission upload, list, download, soft-delete
 
+// the Missions folder under one instance's own directory
 function missionsDir(instanceDir) {
   return path.join(instanceDir, "Missions");
 }
 
-// path.basename strips any directory components. The resolve()-inside-
-// targetDir check is what actually stops a crafted filename, e.g.
-// "../../autoexec.cfg", from reaching outside targetDir. Shared by upload,
-// download, and trash -- every one of them turns admin-typed-adjacent
-// input into a path inside a mission folder.
+// turn admin-typed-adjacent input into a safe path inside targetDir
+// shared by upload, download, and trash below
 function safeMissionPath(targetDir, filename) {
+  // strips any directory components first
   const safeName = path.basename(filename || "");
   const finalPath = path.join(targetDir, safeName);
   const resolvedTarget = path.resolve(targetDir);
@@ -183,6 +158,7 @@ function safeMissionPath(targetDir, filename) {
   return { safeName, finalPath };
 }
 
+// missions arrive in memory, then get written to disk atomically
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_MISSION_BYTES, files: 1 },
@@ -206,7 +182,8 @@ app.post("/upload", checkToken, upload.single("mission"), async (req, res) => {
   try {
     await fs.mkdir(targetDir, { recursive: true });
     await fs.writeFile(tmpPath, req.file.buffer);
-    await fs.rename(tmpPath, finalPath); // Atomic write: DCS never sees a partial file.
+    // atomic write, dcs never sees a partial file
+    await fs.rename(tmpPath, finalPath);
   } catch (err) {
     await fs.rm(tmpPath, { force: true });
     return res.status(500).send(`Write failed: ${err.message}`);
@@ -249,11 +226,7 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
     resolvedPaths.push(resolved);
   }
 
-  // A .miz is already a zip archive (just renamed) -- one selected mission
-  // needs no wrapping at all, it's already exactly the file an admin
-  // wants. More than one gets bundled, unmodified, into one outer zip; the
-  // "nested zip" is just that a .miz inside it is itself a zip, not from
-  // double-zipping anything here.
+  // one .miz is already a zip, renamed, so it needs no wrapping at all
   if (resolvedPaths.length === 1) {
     const { safeName, finalPath } = resolvedPaths[0];
     res.set("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}"`);
@@ -261,9 +234,11 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
     return fsSync.createReadStream(finalPath).pipe(res);
   }
 
+  // more than one gets bundled, unmodified, into one outer zip
   res.set("Content-Disposition", `attachment; filename="missions.zip"`);
   res.set("Content-Type", "application/zip");
-  const archive = archiver("zip", { zlib: { level: 0 } }); // Already-compressed .miz files; re-compressing just burns CPU.
+  // already-compressed .miz files, re-compressing just burns cpu
+  const archive = archiver("zip", { zlib: { level: 0 } });
   archive.on("error", (err) => {
     if (!res.headersSent) res.status(500);
     res.end(`Failed to build zip: ${err.message}`);
@@ -288,8 +263,7 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
     resolvedPaths.push(resolved);
   }
 
-  // Move aside, never unlink -- see this file's top comment. A leaked
-  // shared token can misplace missions, never destroy one outright.
+  // move aside, never unlink, see docs/Why.md#why-does-the-mission-agent-have-no-accounts
   const trashDir = path.join(targetDir, ".trash");
   await fs.mkdir(trashDir, { recursive: true });
   try {
@@ -302,7 +276,7 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
   res.json({ ok: true });
 });
 
-// ---- webgui control port: status, config write, relay ----
+// section: webgui control port, status, config write, relay
 
 app.get("/webgui/:instanceName/status", checkToken, requireInstanceDir, async (req, res) => {
   const status = await readWebguiPort(req.instanceDir);
@@ -317,17 +291,14 @@ app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, ex
 
   const current = await readWebguiPort(req.instanceDir);
   if (current.webguiPort !== null) {
-    // Defensive no-op. The confirm flow on the auth-gate side should only
-    // call this for instances /status reported as missing a port. Never
-    // silently overwrite a value that's already there.
+    // defensive no-op, never silently overwrite a value already there
     return res.json({ ok: true, webguiPort: current.webguiPort, created: false });
   }
 
   const cfgPath = autoexecPath(req.instanceDir);
   const line = `webgui_port = ${port}`;
   if (current.configExists) {
-    // Append, never rewrite. autoexec.cfg is a normal editable config file
-    // and can already carry other key=value pairs. Those must survive.
+    // append, never rewrite, other key=value pairs must survive
     await fs.appendFile(cfgPath, `\n${line}\n`, "utf8");
   } else {
     await fs.mkdir(path.dirname(cfgPath), { recursive: true });
@@ -336,6 +307,7 @@ app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, ex
   res.json({ ok: true, webguiPort: port, created: true });
 });
 
+// the actual control-port proxy, routed per instance from above
 const webguiProxyMiddleware = createProxyMiddleware({
   router: async (req) => {
     const { webguiPort } = await readWebguiPort(req.instanceDir);
@@ -358,13 +330,11 @@ const webguiProxyMiddleware = createProxyMiddleware({
 
 app.use("/webgui/:instanceName", checkToken, requireInstanceDir, webguiProxyMiddleware);
 
-// ---- dcs install webgui bundle ----
-// Lets the auth-gate pull the real webgui SPA straight out of a DCS World
-// Server install already on this host, instead of an admin copying it into
-// webgui-static/ by hand. The install root is arbitrary admin-typed input.
-// Unlike instanceName, it isn't confined under a fixed root -- same trust
-// level an account-manager admin already has via instance_name/mission
-// uploads, not a new privilege boundary.
+// section: dcs install webgui bundle
+// lets the auth-gate pull the real webgui spa straight out of a dcs
+// world server install already on this host, instead of an admin
+// copying it into webgui-static/ by hand
+// see docs/Why.md#why-isnt-the-dcs-install-path-confined-to-a-fixed-root
 
 app.get("/dcs-install/webgui-bundle", checkToken, async (req, res) => {
   const installPath = req.query.path;
@@ -388,21 +358,19 @@ app.get("/dcs-install/webgui-bundle", checkToken, async (req, res) => {
   stream.pipe(res);
 });
 
-// ---- self-update: stage + commit ----
-// Relayed through the auth-gate (see src/updateCheck.js) since this host
-// has no internet access of its own by design (kept off the internet-
-// facing side, per docs/Deployment-Topology.md). "current" is a
-// directory junction NSSM's ExecStart always targets
-// (...\current\agent.exe) -- flipping it, not
-// NSSM's own config, is what switches versions between restarts.
-//
-// AGENT_SELF_UPDATE_ROOT overrides the root for local dev/tests, where
-// process.execPath points at node itself, not a packaged agent.exe
-// sitting next to a real "current" junction.
+// section: self-update, stage and commit
+// relayed through the auth-gate (see src/updateCheck.js) since this
+// host has no internet access of its own by design
+// see docs/Why.md#why-does-the-agent-use-a-current-junction
+
+// overrides the root for local dev/tests, where process.execPath
+// points at node itself, not a packaged agent.exe next to a real
+// "current" junction
 const SELF_UPDATE_ROOT = process.env.AGENT_SELF_UPDATE_ROOT || path.dirname(path.dirname(process.execPath));
 const CURRENT_LINK = path.join(SELF_UPDATE_ROOT, "current");
 const RELEASES_DIR = path.join(SELF_UPDATE_ROOT, "releases");
 
+// read which slot ("a" or "b") the current junction points at
 function readActiveAgentSlot() {
   try {
     return path.basename(fsSync.readlinkSync(CURRENT_LINK)) === "b" ? "b" : "a";
@@ -411,10 +379,12 @@ function readActiveAgentSlot() {
   }
 }
 
+// return whichever slot isn't the one passed in
 function otherAgentSlot(slot) {
   return slot === "a" ? "b" : "a";
 }
 
+// the staged build arrives as a raw binary body, not multipart
 const selfUpdateUpload = express.raw({ type: "application/octet-stream", limit: MAX_MISSION_BYTES });
 
 app.post("/self-update/stage", checkToken, selfUpdateUpload, async (req, res) => {
@@ -422,9 +392,8 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, async (req, res) =>
   if (!expectedSha256) return res.status(400).send("Missing X-Sha256 header.");
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).send("No file body received.");
 
-  // Re-hashes independently rather than trusting the header alone -- the
-  // real verification already happened against the signed manifest on the
-  // auth-gate side; this just catches corruption on this specific hop.
+  // re-hash independently, catches corruption on this specific hop,
+  // on top of the signature check already done on the auth-gate side
   const actualSha256 = crypto.createHash("sha256").update(req.body).digest("hex");
   if (actualSha256 !== expectedSha256) {
     return res.status(400).send(`sha256 mismatch (expected ${expectedSha256}, got ${actualSha256}).`);
@@ -437,7 +406,8 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, async (req, res) =>
   const tmpPath = `${finalPath}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   try {
     await fs.writeFile(tmpPath, req.body);
-    await fs.rename(tmpPath, finalPath); // Atomic write, same reasoning as the mission upload above.
+    // atomic write, same reasoning as the mission upload above
+    await fs.rename(tmpPath, finalPath);
   } catch (err) {
     await fs.rm(tmpPath, { force: true });
     return res.status(500).send(`Could not stage update: ${err.message}`);
@@ -459,20 +429,15 @@ app.post("/self-update/commit", checkToken, async (req, res) => {
     return res.status(500).send(`Could not flip to the new build: ${err.message}`);
   }
 
-  // Deliberate restart, not a crash: same reasoning as the auth-gate's own
-  // exit-based flip. No sc.exe/NSSM call needed here -- the Windows
-  // service's own restart-on-exit policy brings the process back up
-  // through the now-repointed "current" junction.
-  // AGENT_SELF_UPDATE_SKIP_EXIT exists only for tests, so a real HTTP
-  // round trip can exercise this route without killing the test runner's
-  // own process -- same spirit as AGENT_SELF_UPDATE_ROOT above.
+  // deliberate restart, not a crash, see docs/Why.md#why-does-the-agent-use-a-current-junction
+  // skip-exit exists only so a test's http round trip survives it
   if (!process.env.AGENT_SELF_UPDATE_SKIP_EXIT) res.on("finish", () => process.exit(1));
   res.json({ ok: true, activeSlot: idleSlot });
 });
 
-// ---- logs: tail of this agent's own log file. NSSM's AppStdout/AppStderr
-// redirection (install.ps1) is what actually writes AGENT_LOG_FILE and
-// rotates it -- this just reads it back. ----
+// section: logs, a tail of this agent's own log file
+// nssm's own appstdout/appstderr redirection (install.ps1) is what
+// actually writes and rotates agent_log_file, this just reads it back
 
 app.get("/logs", checkToken, async (req, res) => {
   let raw;
@@ -486,8 +451,10 @@ app.get("/logs", checkToken, async (req, res) => {
   res.type("text/plain").send(lines.join("\n"));
 });
 
+// anything not matched above is a plain 404
 app.use((req, res) => res.status(404).send("Not found."));
 
+// only listen when run directly, tests import the app instead
 if (require.main === module) {
   const httpServer = app.listen(PORT, () => {
     console.log(`mission-agent listening on :${PORT}`);
@@ -495,4 +462,5 @@ if (require.main === module) {
   httpServer.on("upgrade", webguiProxyMiddleware.upgrade);
 }
 
+// expose the express app itself, for both real use and tests
 module.exports = app;

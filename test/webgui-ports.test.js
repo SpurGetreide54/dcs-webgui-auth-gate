@@ -6,14 +6,17 @@ const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 
+// a fresh, unique sqlite path per test file, under the os temp dir
 function tempSqlitePath(label) {
   return path.join(os.tmpdir(), `auth-gate-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
 
+// delete a sqlite file and its wal/shm siblings
 function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
+// pull just the cookie's own name=value out of a set-cookie header
 function extractCookie(res) {
   const setCookie = res.headers.get("set-cookie");
   return setCookie ? setCookie.split(";")[0] : null;
@@ -26,6 +29,7 @@ let dummyAgent, dummyAgentPort;
 let instancePorts; // instanceName -> port|null
 let ensureCalls;
 
+// a minimal http server standing in for the real mission-agent
 function startDummyAgent() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -68,9 +72,8 @@ test.before(async () => {
   process.env.COOKIE_SECURE = "false";
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
-  // Requiring ../src/server installs appLog's console capture, which
-  // defaults to local-only/auth-gate.log if this isn't set -- same
-  // reasoning as SQLITE_PATH above, just for the log file.
+  // requiring ../src/server installs appLog's console capture, same
+  // reasoning as SQLITE_PATH above, just for the log file
   authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
   process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
 
@@ -110,7 +113,7 @@ test("webgui-ports: proposes non-colliding ports for missing instances, writes n
     db.prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)").run("b", "Server B", "B_missing");
     db.prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)").run("c", "Server C", "C_missing");
 
-    // --- review page: proposes 8088/8089 for B/C, skips A's already-used 8200, nothing written yet ---
+    // review page: proposes 8088/8089 for b/c, skips a's used 8200, writes nothing
     const checkRes = await fetch(`${base}/admin/servers/webgui-ports`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(checkRes.status, 200);
     const checkHtml = await checkRes.text();
@@ -121,7 +124,7 @@ test("webgui-ports: proposes non-colliding ports for missing instances, writes n
     assert.doesNotMatch(checkHtml, /Server A/, "already-configured servers must not appear in the proposal list");
     assert.equal(ensureCalls.length, 0, "reviewing the proposal must not write anything");
 
-    // --- confirm: writes exactly B and C, with the proposed ports ---
+    // confirm: writes exactly b and c, with the proposed ports
     const confirmRes = await fetch(`${base}/admin/servers/webgui-ports/confirm`, {
       method: "POST",
       headers: { Cookie: siteAdminCookie },
@@ -136,7 +139,7 @@ test("webgui-ports: proposes non-colliding ports for missing instances, writes n
       ]
     );
 
-    // --- re-checking afterward: nothing left to propose ---
+    // re-checking afterward, nothing left to propose
     const recheckRes = await fetch(`${base}/admin/servers/webgui-ports`, { headers: { Cookie: siteAdminCookie } });
     const recheckHtml = await recheckRes.text();
     assert.match(recheckHtml, /Every configured server already has/);
@@ -153,7 +156,7 @@ test("webgui-ports: a restricted (non-account-manager) admin can't reach the rev
   ensureCalls = [];
 
   try {
-    // Reuses the site admin created in the previous test -- same app/db instance for this file.
+    // reuses the site admin from the previous test, same app/db instance
     const loginRes = await fetch(`${base}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

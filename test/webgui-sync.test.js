@@ -7,23 +7,24 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const tar = require("tar");
 
+// a fresh, unique sqlite path per test file, under the os temp dir
 function tempSqlitePath(label) {
   return path.join(os.tmpdir(), `auth-gate-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
 
+// delete a sqlite file and its wal/shm siblings
 function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
+// pull just the cookie's own name=value out of a set-cookie header
 function extractCookie(res) {
   const setCookie = res.headers.get("set-cookie");
   return setCookie ? setCookie.split(";")[0] : null;
 }
 
-// node's fetch() has no cookie jar, so it won't carry a redirect's
-// Set-Cookie (the flash message) into the request it auto-follows --
-// capture it by hand and refetch the Location with it attached, same as
-// a real browser does.
+// node's fetch() has no cookie jar, so a redirect's flash cookie never
+// reaches the request it auto-follows, capture it and refetch by hand
 async function postAndFollowFlash(url, options) {
   const res = await fetch(url, { ...options, redirect: "manual" });
   assert.equal(res.status, 302, `expected a redirect (PRG) from ${url}, got ${res.status}`);
@@ -33,6 +34,7 @@ async function postAndFollowFlash(url, options) {
   return fetch(new URL(location, url), { headers: { Cookie: cookieHeader } });
 }
 
+// tar up a directory's contents into an in-memory buffer
 async function packDirToBuffer(dir) {
   const chunks = [];
   for await (const chunk of tar.c({ cwd: dir }, ["."])) chunks.push(chunk);
@@ -47,6 +49,7 @@ let app, db, sqlitePath, webguiStaticPath, authGateLogPath;
 let dummyAgent, dummyAgentPort;
 let bundleTar, bundleRequests;
 
+// a minimal http server standing in for the real mission-agent
 function startDummyAgent() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -87,9 +90,8 @@ test.before(async () => {
   process.env.MISSION_AGENT_URL = `http://127.0.0.1:${dummyAgentPort}`;
   process.env.MISSION_AGENT_TOKEN = AGENT_TOKEN;
   process.env.WEBGUI_STATIC_PATH = webguiStaticPath;
-  // Requiring ../src/server installs appLog's console capture, which
-  // defaults to local-only/auth-gate.log if this isn't set -- same
-  // reasoning as SQLITE_PATH above, just for the log file.
+  // requiring ../src/server installs appLog's console capture, same
+  // reasoning as SQLITE_PATH above, just for the log file
   authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
   process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
 
@@ -125,13 +127,13 @@ test("webgui-sync: syncs webgui-static/ from the selected server's DCS install",
       .run("main", "Main Server", "Example_Community", GOOD_INSTALL_PATH);
     const serverId = insert.lastInsertRowid;
 
-    // --- review page offers the server as a source ---
+    // review page offers the server as a source
     const reviewRes = await fetch(`${base}/admin/servers/webgui-sync`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(reviewRes.status, 200);
     const reviewHtml = await reviewRes.text();
     assert.match(reviewHtml, /Main Server/);
 
-    // --- confirm: pulls the tar from the agent and replaces webgui-static/ ---
+    // confirm: pulls the tar from the agent and replaces webgui-static/
     const syncRes = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
@@ -154,7 +156,7 @@ test("webgui-sync: a failed bundle fetch leaves the existing webgui-static/ unto
   const base = `http://127.0.0.1:${server.address().port}`;
   bundleRequests = [];
 
-  // Pre-existing bundle, as if a previous sync already ran.
+  // pre-existing bundle, as if a previous sync already ran
   fs.writeFileSync(path.join(webguiStaticPath, "index.html"), "<html>pre-existing bundle</html>");
 
   try {

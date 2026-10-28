@@ -33,6 +33,7 @@ Dynamics.<br>A deployer supplies their own legitimate copy.
 - [Testing](Testing.md): run the test suite.
 - [Troubleshooting](Troubleshooting.md): fix a specific symptom.
 - [FAQ](FAQ.md): why the app works the way it does.
+- [Why](Why.md): the reasoning behind specific coding decisions.
 - [Glossary](Glossary.md): every term, defined once.
 
 ## License

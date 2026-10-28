@@ -6,10 +6,9 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
-// A throwaway keypair, generated fresh per test -- distinct from the real
-// one at local-only/keys/, used to prove verifyManifest() rejects a
-// signature from any key other than the one matching its own hardcoded
-// public key, not just outright corrupted bytes.
+// a throwaway keypair, generated fresh per test, distinct from the
+// real one at local-only/keys/, proves verifyManifest() rejects any
+// key other than the one matching its own hardcoded public key
 function freshKeypair() {
   return crypto.generateKeyPairSync("ed25519");
 }
@@ -19,6 +18,7 @@ function signManifest(privateKey, signed) {
   return { ...signed, signature };
 }
 
+// a minimal http server, standing in for the real github api
 function startDummyHttpServer(handler) {
   return new Promise((resolve) => {
     const server = http.createServer(handler);
@@ -26,22 +26,18 @@ function startDummyHttpServer(handler) {
   });
 }
 
+// a fresh, unique sqlite path per test file, under the os temp dir
 function tempSqlitePath(label) {
   return path.join(os.tmpdir(), `update-check-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
 
+// delete a sqlite file and its wal/shm siblings
 function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
-// checkForUpdate() reaches https://api.github.com by default -- overridden
-// via GITHUB_API_BASE_OVERRIDE, same pattern this app already uses for
-// MISSION_AGENT_URL/WEBGUI_CONTROL_PORT, so these tests hit a local dummy
-// server instead of the real GitHub API. The env var has to be set, and
-// SQLITE_PATH pointed at a throwaway DB (default SQLITE_PATH is the real
-// local dev database -- getUpdateState()/setUpdateState() must never
-// touch that), before src/updateCheck.js is first required, so both
-// happen in test.before() rather than at module load.
+// GITHUB_API_BASE_OVERRIDE and SQLITE_PATH both have to be set before
+// src/updateCheck.js is first required, so both happen in test.before()
 let updateCheck;
 let dummyGithub, dummyGithubBase;
 let dummyGithubRespond; // set per test to control what the dummy "GitHub API" returns
@@ -71,14 +67,9 @@ test("getCurrentVersion reads package.json's own version", () => {
   assert.equal(updateCheck.getCurrentVersion(), pkg.version);
 });
 
-// The one test that can catch "the hardcoded public key in src/
-// updateCheck.js doesn't actually match the private key at local-only/
-// keys/" -- a real, easy-to-make mistake (pasting the wrong key, or the
-// key getting regenerated without updating the hardcoded copy) that every
-// other test here is structurally unable to catch, since they all use
-// their own throwaway keypairs. Only runs where that private key exists
-// (gitignored, so not on a fresh clone) -- skipped rather than failed
-// elsewhere, same as this repo's other real-infra-only checks.
+// the one test that can catch a mismatch between the hardcoded public
+// key and the real private key, skipped (not failed) where that
+// gitignored private key doesn't exist on this machine
 test(
   "verifyManifest accepts a manifest signed with the real local-only/keys/ private key",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
@@ -106,12 +97,8 @@ test("verifyManifest rejects a manifest signed with the wrong key", () => {
 });
 
 test("verifyManifest rejects a manifest whose content was tampered with after signing", () => {
-  // Signs with a fresh key, then separately re-points verifyManifest at
-  // that fresh key's own public half via a tiny stand-in module -- can't
-  // sign with the real app's private key here (it's not committed), so
-  // this test proves the *tamper-detection* property specifically: given
-  // a signature that WOULD verify against its own content, mutating the
-  // content after the fact must break verification.
+  // signs with a fresh key, verifies against that key's own public
+  // half directly, proving tamper-detection without the real app key
   const { publicKey, privateKey } = freshKeypair();
   const signed = {
     version: "1.2.3",
@@ -122,26 +109,21 @@ test("verifyManifest rejects a manifest whose content was tampered with after si
   const message = Buffer.from(JSON.stringify(signed));
   const signature = crypto.sign(null, message, privateKey).toString("hex");
 
-  // Same verification the real verifyManifest does, just against this
-  // test's own throwaway public key instead of the hardcoded app one.
+  // the same verification verifyManifest does, against this test's
+  // own throwaway public key instead of the hardcoded app one
   const tampered = { ...signed, downloads: [{ ...signed.downloads[0], sha256: "c".repeat(64) }] };
   const { signature: _unused, ...tamperedSigned } = { ...tampered, signature };
   const tamperedMessage = Buffer.from(JSON.stringify(tamperedSigned));
   assert.equal(crypto.verify(null, tamperedMessage, publicKey, Buffer.from(signature, "hex")), false);
 
-  // The untampered original, same signature, must still verify -- proves
-  // the failure above is really about the content changing, not a broken
-  // verify call.
+  // the untampered original, same signature, must still verify, so
+  // the failure above is really about the content, not a broken call
   assert.equal(crypto.verify(null, message, publicKey, Buffer.from(signature, "hex")), true);
 });
 
 test("sign-updates.js produces a manifest the real verifyManifest() accepts, end to end", () => {
-  // Generates a throwaway keypair and runs it through the actual CLI
-  // script's logic by invoking it as a subprocess with a temporary key
-  // file, then swaps in that keypair's public half to check against --
-  // the closest thing to a real release without touching the committed
-  // app key. If this passes, the manifest shape sign-updates.js writes is
-  // exactly what verifyManifest() expects.
+  // runs the real cli script as a subprocess with a throwaway key,
+  // the closest thing to a real release without touching the app key
   const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-updates-test-"));
   try {
     const { publicKey, privateKey } = freshKeypair();
@@ -179,8 +161,8 @@ test("sign-updates.js produces a manifest the real verifyManifest() accepts, end
     assert.equal(manifest.version, "1.2.3");
     assert.equal(manifest.downloads.length, 2);
 
-    // Re-verify using the throwaway public key directly (not the app's
-    // hardcoded one, which this manifest wasn't signed with).
+    // re-verify using the throwaway public key directly, not the
+    // app's hardcoded one, which this manifest wasn't signed with
     const { signature, ...signed } = manifest;
     const message = Buffer.from(JSON.stringify(signed));
     assert.equal(crypto.verify(null, message, publicKey, Buffer.from(signature, "hex")), true);
@@ -194,9 +176,8 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-// Serves `manifest` as the dummy GitHub API's "latest release" asset --
-// fetchVerifiedManifest() makes two requests (release info, then the
-// asset itself), this answers both from one handler, keyed on path.
+// serves manifest as the dummy github api's "latest release" asset,
+// answering fetchVerifiedManifest()'s two requests from one handler
 function serveManifest(manifest) {
   dummyGithubRespond = (req, res) => {
     if (req.url.includes("/releases/latest")) {
@@ -250,10 +231,8 @@ test(
 );
 
 test("checkForUpdate rejects and still records the attempt when the check fails", async () => {
-  // No real key needed -- signed with a throwaway key the app's hardcoded
-  // public key will never accept, so verifyManifest() rejects it
-  // regardless of whether local-only/keys/ exists on this machine. Runs
-  // unconditionally, unlike the two tests above.
+  // no real key needed, a throwaway key the hardcoded public key will
+  // never accept, so this runs unconditionally unlike the two tests above
   const { privateKey } = freshKeypair();
   const manifest = signManifest(privateKey, {
     version: "9.9.9-bad",

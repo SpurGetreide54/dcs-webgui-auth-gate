@@ -6,36 +6,23 @@
 .DESCRIPTION
   Copies agent.exe into releases\a\ under a fixed install directory, and
   points a "current" directory junction at it. Checksum-verifies a pinned
-  NSSM build to wrap current\agent.exe as a proper Windows Service --
-  starts before any login, restarts itself on crash -- using the nssm.exe
-  the release zip vendors next to this script when it matches, instead of
-  hitting nssm.cc (a small, flaky site) on every single install; only
-  falls back to downloading one from nssm.cc when the vendored copy is
-  missing or stale. Sets the required config as service-scoped
-  environment variables, and starts it. No UI. Status/output goes to a
-  plain rotating log file. Check Get-Service or the log instead.
+  NSSM build to wrap current\agent.exe as a proper Windows Service, using
+  the nssm.exe the release zip vendors next to this script when it
+  matches, falling back to downloading one from nssm.cc only when that
+  vendored copy is missing or stale. Sets the required config as
+  service-scoped environment variables, and starts it. No UI.
+  Status/output goes to a plain rotating log file.
 
-  The junction is what makes the A/B self-update system work on this side
-  (see src/agent.js's "self-update: stage + commit" section): NSSM always
-  points at current\agent.exe, a path that never changes, while an update
-  flips the junction between releases\a\ and releases\b\ and restarts.
-  This script only ever (re)creates the junction pointing at releases\a\
-  -- it never touches releases\b\ or an update already staged there.
-
-  Safe to re-run. An existing service with the same name is stopped and
-  removed first, so changing config is just running install.ps1 again with
-  new parameters, or uninstall.ps1 then install.ps1. Re-running always
-  resets the junction back to releases\a\, discarding any staged-but-not-
-  yet-active update in releases\b\ -- fine for a config change, but worth
-  knowing before re-running this right after an update was staged.
+  See docs/Why.md#why-does-installps1-only-ever-point-the-junction-at-slot-a
+  for why the junction always resets to releases\a\ on every run.
 
 .PARAMETER MissionAgentToken
   Shared bearer token the auth-gate uses to authenticate to this agent.
-  Optional -- omit it and the agent generates its own on first start,
-  saved to agent-token.txt in the install directory. Read that file to get
-  the value, then set MISSION_AGENT_TOKEN to match on the auth-gate side.
-  Pass this parameter only to pin a specific value instead (e.g.
-  restoring a known-good token).
+  Optional, omit it and the agent generates its own on first start, saved
+  to agent-token.txt in the install directory. Read that file to get the
+  value, then set MISSION_AGENT_TOKEN to match on the auth-gate side. Pass
+  this parameter only to pin a specific value instead (e.g. restoring a
+  known-good token).
 
 .PARAMETER DcsSavedGamesRoot
   Path to the Windows user's "Saved Games" folder that holds every DCS
@@ -52,10 +39,8 @@
 .PARAMETER NssmSourcePath
   Path to a vendored nssm.exe to install from, skipping the download from
   nssm.cc entirely when it's present and matches NssmExeSha256. Defaults
-  to nssm.exe sitting next to this script -- the release zip ships one
-  there (see scripts/windows/nssm.exe in the repo), reusing a copy we
-  already fetched and verified once instead of hitting nssm.cc -- a
-  small, flaky site that has 503'd on us before -- again on every install.
+  to nssm.exe sitting next to this script, the release zip ships one
+  there (see scripts/windows/nssm.exe in the repo).
 
 .EXAMPLE
   .\install.ps1 -DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"
@@ -88,14 +73,9 @@ if (-not (Test-Path $DcsSavedGamesRoot)) {
 Write-Host "==> Creating install directory $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-# Stop (not yet remove -- NSSM isn't resolved until below) any existing
-# service before touching releases\a: on a host that's already installed
-# and running, releases\a holds the currently-executing agent.exe
-# (current\ points there by default), and Windows refuses to overwrite a
-# locked, running executable. Doing this here, before the copy below, is
-# what actually makes re-running this script safe, not just the comment
-# above claiming it is. The full stop+remove-via-nssm teardown still runs
-# again further down, right before re-registering the service.
+# stop (not remove yet, nssm isn't resolved until below) any existing
+# service before touching releases\a, which a running install already
+# has locked, see docs/Why.md#why-does-installps1-stop-the-service-twice
 if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     Write-Host "==> Existing service found, stopping before reinstall"
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
@@ -111,14 +91,8 @@ $CurrentLink = "$InstallDir\current"
 if (Test-Path $CurrentLink) { Remove-Item -Path $CurrentLink -Force }
 New-Item -ItemType Junction -Path $CurrentLink -Target $SlotADir | Out-Null
 
-# NSSM pinned to the 2.24 stable release. Both checksums verified once
-# against the real nssm.cc download and pinned here, not trusted fresh on
-# every install run: NssmExeSha256 for the bare win64 binary the release
-# zip vendors at NssmSourcePath -- reusing a copy already fetched and
-# verified once, rather than hitting nssm.cc (small, flaky, has 503'd on
-# us) again on every single install -- and NssmSha256 for the nssm.cc zip
-# this falls back to downloading only when that vendored copy is missing
-# or stale.
+# nssm pinned to the 2.24 stable release, both checksums verified once
+# see docs/Why.md#why-are-both-nssm-checksums-pinned-instead-of-fetched-fresh
 $NssmExeSha256 = "F689EE9AF94B00E9E3F0BB072B34CAAF207F32DCB4F5782FC9CA351DF9A06C97"
 $NssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
 $NssmSha256 = "727D1E42275C605E0F04ABA98095C38A8E1E46DEF453CDFFCE42869428AA6743"
@@ -153,8 +127,7 @@ if (-not (Test-Path $NssmExePath)) {
     }
 }
 
-# Idempotent re-install. Tear down any prior registration under this name
-# first, so changing config is just re-running this script.
+# idempotent reinstall, tear down any prior registration first
 $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existingService) {
     Write-Host "==> Existing service found, stopping and removing before reinstall"
@@ -166,24 +139,11 @@ Write-Host "==> Registering service $ServiceName"
 & $NssmExePath install $ServiceName "$CurrentLink\agent.exe"
 & $NssmExePath set $ServiceName AppDirectory $InstallDir
 
-# NSSM's AppEnvironmentExtra takes one KEY=VALUE pair per line, as a single
-# parameter value -- not separate command-line arguments. MISSION_AGENT_TOKEN
-# is only included when explicitly passed in. Left out, agent.js generates
-# and persists its own on first start.
-#
-# MISSION_AGENT_TOKEN_FILE is pinned explicitly here, always -- agent.js's
-# own default (next to process.execPath) would otherwise resolve to
-# current\agent-token.txt, which the "current" junction makes slot-local
-# (releases\a\agent-token.txt today). An update flipping to releases\b\
-# would then look like the token got reset, when really the file just got
-# left behind in the old slot. Pinning it to the stable top-level
-# InstallDir keeps one token file shared across both slots, the same way
-# .env is shared (not duplicated) on the auth-gate side.
-#
-# AGENT_LOG_FILE is pinned here for the identical reason, and to the exact
-# same path AppStdout/AppStderr already write to below -- the GET /logs
-# route the auth-gate's /admin/logs page relays through reads this file
-# back, so it has to agree with where NSSM is actually writing it.
+# nssm's AppEnvironmentExtra takes one key=value pair per line, as a
+# single parameter value, not separate command-line arguments
+# MISSION_AGENT_TOKEN_FILE/AGENT_LOG_FILE are pinned to the stable
+# InstallDir, not agent.js's own slot-relative default, see
+# docs/Why.md#why-are-token-and-log-paths-pinned-to-installdir
 $envLines = @(
     "DCS_SAVED_GAMES_ROOT=$DcsSavedGamesRoot",
     "AGENT_PORT=$AgentPort",

@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+// a fresh, unique log path per test, under the os temp dir
 function tempLogPath(label) {
   return path.join(os.tmpdir(), `app-log-test-${label}-${crypto.randomBytes(6).toString("hex")}.log`);
 }
@@ -32,10 +33,8 @@ test("installConsoleCapture wraps console.log/warn/error/debug: original still r
   t.after(() => Object.assign(console, original));
 
   appLog.installConsoleCapture();
-  // installConsoleCapture() wraps whatever console.log/warn/error/debug are
-  // at call time -- which are now the test's own stub functions above, so
-  // the "original still runs" half of this test is exercised through
-  // those stubs rather than the real stdout.
+  // wraps whatever console.* is at call time, the stubs above, so
+  // "original still runs" is exercised through those, not real stdout
   console.log("hello", 1);
   console.warn("careful");
   console.error("boom");
@@ -102,13 +101,9 @@ test("exceeding the size cap rotates the current file to .1 and starts fresh", (
   fs.rmSync(logPath, { force: true });
   fs.rmSync(`${logPath}.1`, { force: true });
 
-  // A dedicated module instance with a tiny cap, so this doesn't need to
-  // actually write 5MB to exercise rotation. MAX_LOG_BYTES itself isn't
-  // exported/overridable, so this writes past the real default once
-  // instead -- small, but real: a ~40-byte line repeated until the total
-  // exceeds the cap would take forever to assert on, so this test instead
-  // confirms the *mechanism* (rename-then-fresh-append) by pre-seeding a
-  // file already past the cap and checking the next append rotates it.
+  // MAX_LOG_BYTES isn't overridable, so this pre-seeds a file already
+  // past the real cap and checks the next append rotates it, confirming
+  // the rename-then-fresh-append mechanism without writing 5mb for real
   const oversized = "x".repeat(6 * 1024 * 1024);
   fs.writeFileSync(logPath, oversized);
 

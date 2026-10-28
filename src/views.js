@@ -1,17 +1,14 @@
+// node's filesystem and path modules
 const fs = require("node:fs");
 const path = require("node:path");
 
 const BRAND_NAME = process.env.BRAND_NAME || "DCS Auth Gate";
-// A small, deliberate exception to "views.js never touches the DB":
-// unlike every other piece of page data (loaded by server.js and passed
-// in), the update-available sidebar icon has to show on every
-// authenticated page, and threading one more param through every single
-// page function's call site in server.js for a single cheap synchronous
-// read isn't worth it. updateCheck.js's own DB read is a single-row
-// SELECT, not network I/O, so this stays fast.
+// the one deliberate exception to "views.js never touches the db"
+// see docs/Why.md#why-does-viewsjs-read-the-db-for-the-update-icon
 const updateCheck = require("./updateCheck");
 const settings = require("./settings");
 
+// escape a value for safe interpolation into html
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;",
@@ -26,39 +23,31 @@ const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const ICONS_DIR = path.join(PUBLIC_DIR, "icons");
 const iconCache = new Map();
 
-// Inlined directly into the page, not referenced via <img src>: an <img>
-// is a separate network+decode step after the HTML itself has already
-// painted, which is exactly what showed up as a visible placeholder flash
-// on every navigation (this app has no client-side JS to hide the page
-// behind a "wait until images are loaded" gate, by deliberate house
-// style -- inlining sidesteps the problem instead of needing one).
-// aria-hidden since these are decorative; the accessible label is
-// carried separately (see navItem()'s sr-only span, or alt="" for the
-// logo, same as before).
+// read and cache one svg icon's markup, inlined rather than <img src>
+// see docs/Why.md#why-are-icons-inlined-instead-of-referenced-via-img
 function inlineIcon(filename, dir = ICONS_DIR) {
   const key = `${dir}/${filename}`;
   if (!iconCache.has(key)) {
     const raw = fs.readFileSync(path.join(dir, filename), "utf8").trim();
+    // decorative, the accessible label travels separately
     iconCache.set(key, raw.replace("<svg ", '<svg aria-hidden="true" focusable="false" '));
   }
   return iconCache.get(key);
 }
 
-// Mirrors the real DCS webgui's own left-sidebar. Icon-only nav. Active
-// item gets a blue left border.
+// render the real dcs webgui's own left-sidebar, icon-only nav
+// the active item gets a blue left border
 function sidebarNav(admin, active) {
-  // The sr-only span carries the accessible name explicitly, rather than
-  // relying solely on the title="..." tooltip (inconsistently exposed to
-  // screen readers across browsers) -- this is a public project.
+  // the sr-only span carries the accessible name explicitly, title=
+  // alone is inconsistently exposed to screen readers across browsers
   const navItem = (key, href, icon, label) =>
     `<li><a href="${href}" class="${key === active ? "active" : ""}" title="${escapeHtml(label)}">
       ${inlineIcon(icon)}<span class="sr-only">${escapeHtml(label)}</span>
     </a></li>`;
 
   const items = [navItem("dashboard", "/", "icon-dashboard.svg", "Dashboard")];
-  // Every admin gets a link here now, not just site admins -- it's either
-  // the full "Manage accounts" page or the read-only "My account" page,
-  // see accountsPage(). Icon/label tell the two apart at a glance.
+  // every admin gets a link here, either the full accounts page or
+  // the read-only my-account page, see accountsPage() below
   items.push(
     admin.can_manage_accounts
       ? navItem("accounts", "/admin/accounts", "icon-manage-accounts.svg", "Manage accounts")
@@ -81,6 +70,7 @@ function sidebarNav(admin, active) {
   </nav>`;
 }
 
+// wrap a page body in the shared navbar, sidebar, and html shell
 function layout(title, body, { admin, active, pageTitle } = {}) {
   const navbar = `<div class="navbar">
     <div class="navbar-brand">
@@ -121,6 +111,7 @@ ${main}
 </html>`;
 }
 
+// the sign-in page
 function loginPage({ error } = {}) {
   return layout(
     "Sign in — DCS Control Panel",
@@ -134,6 +125,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
   );
 }
 
+// the one-time first-admin setup page
 function setupPage({ error } = {}) {
   return layout(
     "First-time setup — DCS Control Panel",
@@ -148,6 +140,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
   );
 }
 
+// the logged-in admin's own list of accessible servers
 function dashboardPage({ admin, servers }) {
   const list = servers.length
     ? `<ul class="server-list">${servers
@@ -163,11 +156,9 @@ function dashboardPage({ admin, servers }) {
   return layout("Dashboard — DCS Control Panel", list, { admin, active: "dashboard", pageTitle: "Your servers" });
 }
 
-// ---- permissions matrix popup: one per admin/invite row, opened at the
-// click point (see public/style.css's .perm-* rules). Replaces inline
-// per-server checkboxes, which got unreadable once server access, upload,
-// view, download, and delete were five separate per-server toggles at
-// once instead of two.
+// section: the shared permissions matrix popup
+// one per admin/invite row, opened at the click point
+// see docs/Why.md#why-does-the-permissions-matrix-use-a-shared-popup
 
 const PERMISSION_CATEGORIES = [
   { key: "access", label: "Access" },
@@ -177,6 +168,7 @@ const PERMISSION_CATEGORIES = [
   { key: "delete", label: "Delete" },
 ];
 
+// turn a row's raw access grants into the popup's own flat shape
 function permRowData(servers, access) {
   return servers.map((s) => {
     const grant = access.find((x) => x.server_id === s.id);
@@ -191,18 +183,15 @@ function permRowData(servers, access) {
   });
 }
 
-// kind is "account" or "invite" -- which permissions endpoint the popup's
-// cell clicks post to. The row's full current state travels in the
-// button's own data-access attribute so opening the popup needs no extra
-// round trip; only a toggle itself calls the server.
+// render the button that opens the popup for one account or invite row
+// kind is "account" or "invite", picking which endpoint a toggle posts to
 function permButton(kind, id, servers, access) {
   const data = permRowData(servers, access);
   return `<button type="button" class="perm-btn" data-kind="${kind}" data-id="${id}" data-access="${escapeHtml(JSON.stringify(data))}">Permissions</button>`;
 }
 
-// Rendered once per page that uses permButton -- one shared popup element,
-// filled in by whichever row's button was last clicked, plus the page's
-// server list (just the bit the popup needs: id and name).
+// render the one shared popup element plus the client script driving it
+// filled in, each time, by whichever row's button was last clicked
 function permPopupMarkup(servers) {
   const serversJson = JSON.stringify(servers.map((s) => ({ id: s.id, name: s.name }))).replace(/</g, "\\u003c");
   const categoriesJson = JSON.stringify(PERMISSION_CATEGORIES).replace(/</g, "\\u003c");
@@ -255,10 +244,8 @@ function permPopupMarkup(servers) {
     var permission = cell.getAttribute("data-permission");
     var granted = !cell.classList.contains("granted");
     setCell(cell, granted);
-    // Turning server access off clears every other cell in that row too --
-    // the server deletes the whole row, taking every permission on it
-    // with it. Only a visual mirror of that; the server side is what's
-    // actually authoritative.
+    // turning access off visually clears every other cell in the row
+    // too, the server is what's actually authoritative, this just mirrors it
     if (permission === "access" && !granted) {
       Array.prototype.forEach.call(popup.querySelectorAll('.perm-cell[data-server-id="' + serverId + '"]'), function (c) { setCell(c, false); });
     }
@@ -298,6 +285,7 @@ function permPopupMarkup(servers) {
 </script>`;
 }
 
+// the change-password form, shared by the site-admin and my-account pages
 function changePasswordSection() {
   return `<h2>Change password</h2>
 <form method="post" action="/admin/accounts/change-password">
@@ -308,9 +296,7 @@ function changePasswordSection() {
 </form>`;
 }
 
-// Both the link text and the Copy button trigger the same
-// navigator.clipboard.writeText -- the only bit of client JS on this page
-// besides the fetch-rewrite bootstrap injected under /s/<slug>/.
+// the just-created invite link, with a copy button
 function inviteLinkNotice(inviteUrl) {
   if (!inviteUrl) return "";
   const safeUrl = escapeHtml(inviteUrl);
@@ -330,15 +316,11 @@ function inviteLinkNotice(inviteUrl) {
 </script>`;
 }
 
-// Site admins get the full roster (real accounts + pending invites, all
-// editable) plus account creation. Everyone else gets myAccountPage()
-// below instead -- see accountsPage()'s branch.
+// the full account roster plus creation, for admins who can manage accounts
+// everyone else gets myAccountPage() below instead, see accountsPage()
 function siteAdminAccountsPage({ admin, accounts, servers, invites, error, notice, inviteUrl }) {
-  // A <form> can't legally wrap a <tr>/<td>. Browsers silently relocate or
-  // drop it during HTML parsing, so checkboxes "inside" it never actually
-  // belong to it and don't get submitted. Fix: one empty <form id="..."> per
-  // row, placed outside the table, with every input/button in that row
-  // linked to it via the `form="..."` attribute instead of nesting.
+  // each row gets its own out-of-band form instead of wrapping the
+  // row, see docs/Why.md#why-does-each-table-row-get-its-own-out-of-band-form
   const acctForms = accounts
     .map((a) => `<form id="acct-${a.id}" class="row-form" method="post" action="/admin/accounts/${a.id}"></form>`)
     .join("");
@@ -364,8 +346,8 @@ function siteAdminAccountsPage({ admin, accounts, servers, invites, error, notic
   const inviteRows = invites
     .map((inv) => {
       const formId = `inv-${inv.id}`;
-      // expires_at is SQLite's own "YYYY-MM-DD HH:MM:SS" in UTC -- just the
-      // time portion is enough context for a 30-minute-lived row.
+      // expires_at is sqlite's own "yyyy-mm-dd hh:mm:ss" in utc, just
+      // the time is enough context for a 30 minute lived row
       const expiresLabel = inv.expires_at.slice(11, 16);
       return `<tr class="pending-invite">
         <td><em>${escapeHtml(inv.token_prefix)}&hellip; <span class="pending-label">(pending, expires ${escapeHtml(expiresLabel)} UTC)</span></em></td>
@@ -415,9 +397,7 @@ ${permPopupMarkup(servers)}`,
   );
 }
 
-// Everyone who isn't a site admin: their own row only, read-only, no
-// account-management actions -- just a look at their own permissions plus
-// the ability to change their own password.
+// a non-site-admin's own row only, read-only, plus their own password change
 function myAccountPage({ admin, own, servers, error, notice }) {
   const cells = servers
     .map((s) => {
@@ -446,10 +426,12 @@ ${changePasswordSection()}`,
   );
 }
 
+// pick the right accounts page for this admin's own role
 function accountsPage(data) {
   return data.admin.can_manage_accounts ? siteAdminAccountsPage(data) : myAccountPage(data);
 }
 
+// the invite-link landing page, where a new account is actually created
 function invitePage({ error } = {}) {
   return layout(
     "Accept invite — DCS Control Panel",
@@ -464,6 +446,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
   );
 }
 
+// shown when an invite link is unknown or past its 30 minute window
 function inviteExpiredPage() {
   return layout(
     "Invite expired — DCS Control Panel",
@@ -472,9 +455,10 @@ function inviteExpiredPage() {
   );
 }
 
+// the site-admin server roster, editable, plus server creation
 function serversPage({ admin, servers, error, notice }) {
-  // Same fix as accountsPage. A <form> can't legally wrap a <tr>, so each
-  // row gets an out-of-band empty <form> plus `form="..."` on its inputs.
+  // each row gets its own out-of-band form, same fix as accountsPage
+  // see docs/Why.md#why-does-each-table-row-get-its-own-out-of-band-form
   const forms = servers.map((s) => `<form id="srv-${s.id}" class="row-form" method="post" action="/admin/servers/${s.id}"></form>`).join("");
   const rows = servers
     .map((s) => {
@@ -515,6 +499,7 @@ ${forms}
   );
 }
 
+// confirm-before-write page for assigning missing webgui control ports
 function webguiPortsPage({ admin, proposals }) {
   const rows = proposals
     .map((p) => `<tr><td>${escapeHtml(p.server.name)}</td><td>${escapeHtml(p.server.instance_name)}</td><td>${p.proposedPort}</td></tr>`)
@@ -535,6 +520,7 @@ function webguiPortsPage({ admin, proposals }) {
   return layout(`Webgui ports — DCS Control Panel`, body, { admin, active: "servers", pageTitle: "Assign webgui control ports" });
 }
 
+// confirm-before-write page for replacing webgui-static/ from a real install
 function webguiSyncPage({ admin, servers, error, notice }) {
   const withPath = servers.filter((s) => s.dcs_install_path);
   const options = withPath
@@ -558,6 +544,7 @@ ${
   return layout("Sync webgui — DCS Control Panel", body, { admin, active: "servers", pageTitle: "Sync webgui bundle" });
 }
 
+// human-readable file size
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];
@@ -570,16 +557,14 @@ function formatBytes(bytes) {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
+// the mission table, selection checkboxes shared by download and delete
 function missionListSection(server, access, missions) {
   const slug = encodeURIComponent(server.slug);
   const canSelect = access.canDownload || access.canDelete;
   const colCount = 3 + (canSelect ? 1 : 0);
 
-  // One shared out-of-band form for the whole list: the same checkboxes
-  // drive both actions. Download is the form's own default action;
-  // Delete overrides it via formaction on that one button, the same
-  // formaction trick the accounts table already uses for its own
-  // Save-vs-Delete buttons on one row-form.
+  // download is the shared form's default action, delete overrides
+  // it via formaction on that one button, same trick as the accounts table
   const rows = missions.length
     ? missions
         .map(
@@ -612,6 +597,7 @@ ${canSelect ? `<form id="mission-form" class="row-form" method="post" action="/s
 ${actions ? `<div class="mission-actions">${actions}</div>` : ""}`;
 }
 
+// a server's mission list plus its own upload form, per-permission
 function missionsPage({ admin, server, access = {}, missions = [], error, notice }) {
   const uploadForm = access.canUpload
     ? `<h2>Upload mission</h2>
@@ -631,6 +617,7 @@ ${uploadForm}`,
   );
 }
 
+// the software-update tab: current version, last check, update button
 function updatePage({ admin, currentVersion, updateState, error, notice }) {
   const hasUpdate = Boolean(updateState.available_version);
   const checkedLabel = updateState.last_checked_at ? `${updateState.last_checked_at.slice(0, 16).replace("T", " ")} UTC` : "never";
@@ -644,7 +631,7 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 ${
   hasUpdate
     ? `<p>A new version is available: <strong>${escapeHtml(updateState.available_version)}</strong>. <a href="${escapeHtml(updateState.changelog_url || "")}" target="_blank" rel="noopener">Changelog</a></p>
-${updateState.needs_service_update ? `<p class="error">This release needs a manual service-config change (systemd unit / NSSM install.ps1) before or after updating -- check the changelog for specifics. The A/B swap alone can't apply it.</p>` : ""}
+${updateState.needs_service_update ? `<p class="error">This release needs a manual service-config change (systemd unit / NSSM install.ps1) before or after updating — check the changelog for specifics. The A/B swap alone can't apply it.</p>` : ""}
 <form method="post" action="/admin/update">
   <p>Updates both this auth-gate and the mission-agent, staged into the idle slot, then restarts into it. Rolls back automatically on crash.</p>
   <button type="submit">Update now</button>
@@ -655,6 +642,7 @@ ${updateState.needs_service_update ? `<p class="error">This release needs a manu
   return layout("Update — DCS Control Panel", body, { admin, active: "update", pageTitle: "Software update" });
 }
 
+// the one site-wide settings toggle page
 function settingsPage({ admin, pinUpdateNav, error, notice }) {
   const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
@@ -668,12 +656,8 @@ ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 
 const LOG_WINDOW_LABELS = { "15m": "Last 15 minutes", "1h": "Last hour", "6h": "Last 6 hours", "24h": "Last 24 hours", all: "All" };
 
-// One merged, chat-style timeline -- oldest at top, newest at bottom, like
-// a real chat transcript -- rather than two separate auth-gate/agent
-// blocks. #latest (an empty anchor right after the newest entry) is what
-// every link to this page points at, so landing here always lands
-// scrolled to the newest entries without any client-side script; this app
-// has none anywhere else and this isn't worth being the first.
+// the merged auth-gate/agent log timeline, oldest at top like a chat
+// see docs/Why.md#why-does-the-logs-page-merge-both-sources-into-one-timeline
 function logsPage({ admin, entries, agentError, filters }) {
   const { sources, since, verbose } = filters;
 
@@ -692,7 +676,7 @@ function logsPage({ admin, entries, agentError, filters }) {
     </label>
   </div>
   <div class="log-filter-group">
-    <label title="Step-by-step detail, e.g. each stage of a self-update -- hidden by default, since it's only useful when something's actually stuck.">
+    <label title="Step-by-step detail, e.g. each stage of a self-update — hidden by default, since it's only useful when something's actually stuck.">
       <input type="checkbox" name="verbose" value="1" ${verbose ? "checked" : ""}> Verbose
     </label>
   </div>
@@ -724,6 +708,7 @@ ${filterForm}
   return layout("Logs — DCS Control Panel", body, { admin, active: "logs", pageTitle: "Logs" });
 }
 
+// expose every page-render function and the shared escaper to callers
 module.exports = {
   escapeHtml,
   loginPage,

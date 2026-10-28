@@ -13,8 +13,7 @@ process.env.AGENT_PORT = "0";
 process.env.MISSION_AGENT_TOKEN = TOKEN;
 process.env.DCS_SAVED_GAMES_ROOT = savedGamesRoot;
 process.env.AGENT_SELF_UPDATE_ROOT = selfUpdateRoot;
-// Without this, a successful /self-update/commit call kills this test
-// file's own process -- see agent.js's commit handler.
+// without this, a successful commit call would exit this test process
 process.env.AGENT_SELF_UPDATE_SKIP_EXIT = "1";
 
 const app = require("../src/agent");
@@ -33,6 +32,7 @@ test.after(() => {
   fs.rmSync(selfUpdateRoot, { recursive: true, force: true });
 });
 
+// the bearer header every authenticated request below needs
 function authHeaders(extra = {}) {
   return { Authorization: `Bearer ${TOKEN}`, ...extra };
 }
@@ -61,17 +61,15 @@ test("stage rejects a body whose sha256 doesn't match the X-Sha256 header", asyn
   assert.equal(res.status, 400);
 });
 
-// Runs before anything has been staged -- order matters here, since
-// AGENT_SELF_UPDATE_ROOT is read once at module load and can't be swapped
-// per test, so this is the one point where "nothing staged yet" is true.
+// order matters, AGENT_SELF_UPDATE_ROOT is read once at module load and
+// can't be swapped per test, so this is the one point where nothing's staged
 test("commit rejects when nothing has been staged in the idle slot", async () => {
   const res = await fetch(`${base}/self-update/commit`, { method: "POST", headers: authHeaders() });
   assert.equal(res.status, 400);
 });
 
 test("stage writes the exe into the idle slot (not the active one)", async () => {
-  // Nothing active yet -- readActiveAgentSlot() defaults to "a" when no
-  // "current" junction exists, so the idle slot is "b".
+  // nothing active yet, so the idle slot defaults to "b"
   const body = Buffer.from("fresh build bytes");
   const res = await fetch(`${base}/self-update/stage`, {
     method: "POST",
@@ -87,9 +85,8 @@ test("stage writes the exe into the idle slot (not the active one)", async () =>
 
 test("commit flips the current junction to the staged (idle) slot", async () => {
   const res = await fetch(`${base}/self-update/commit`, { method: "POST", headers: authHeaders() });
-  // The process deliberately exits right after responding (see agent.js),
-  // so the response itself is the only thing to check here -- by the time
-  // this resolves, the process may already be mid-exit.
+  // the process would normally exit right after responding, so the
+  // response itself is the only thing safe to check here
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.activeSlot, "b");

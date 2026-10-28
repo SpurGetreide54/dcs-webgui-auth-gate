@@ -1,21 +1,11 @@
-// The one piece of the A/B self-update system that never gets replaced by
-// it -- see the "Shared shape" section of the update-system design for
-// why that's a deliberate, permanent boundary, not a gap to close later.
-// Deliberately tiny: read which slot is active, run that slot's real
-// server.js. No business logic, no npm dependencies, nothing here an
-// update should ever need to touch. Changing this file is a manual,
-// deliberate step (edit it over SSH, restart the service by hand) -- it
-// intentionally does not share code with src/activeSlot.js, which the
-// rest of the app uses for the same read, to keep this file's own
-// dependency surface at exactly zero beyond Node itself.
-//
-// Sits at the top level, a sibling of releases/a/ and releases/b/, not
-// under src/ -- systemd's ExecStart targets this file directly and never
-// needs to change across updates (see docs/A-B-Self-Update.md).
+// the one piece of the a/b self-update system that never gets
+// replaced by it, see docs/Why.md#why-does-launcher-never-update-itself
 
+// node's filesystem and path modules, nothing else, by design
 const fs = require("node:fs");
 const path = require("node:path");
 
+// its own copy of activeSlot.js's read, see the same Why.md entry
 const ACTIVE_SLOT_PATH = path.join(__dirname, "active-slot");
 
 let slot;
@@ -27,4 +17,5 @@ try {
   slot = "a";
 }
 
+// run the active slot's own real server
 require(path.join(__dirname, "releases", slot, "src", "server.js")).start();

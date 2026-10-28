@@ -1,9 +1,7 @@
 #!/bin/sh
-# Builds src/agent.js into a standalone Windows agent.exe. The DCS host
-# then needs no Node.js install. Uses Node's own Single Executable
-# Application (SEA) support: bundle -> SEA blob -> inject into a copy of
-# the real Windows node.exe. Safe to run from any OS. Injection is just PE
-# resource editing, not something that needs to run on Windows itself.
+# builds src/agent.js into a standalone windows agent.exe, using node's
+# own single executable application (sea) support, safe to run from any os
+# see docs/Why.md#why-is-the-nodeexe-zips-sha256-checked-into-the-script
 #
 # Usage: sh scripts/build-agent-exe.sh
 # Output: local-only/release/agent/agent-<version>.exe
@@ -18,13 +16,10 @@ RELEASE_DIR="$ROOT_DIR/local-only/release/agent"
 NODE_VERSION="v24.19.0"
 NODE_ZIP="node-$NODE_VERSION-win-x64.zip"
 NODE_ZIP_URL="https://nodejs.org/dist/$NODE_VERSION/$NODE_ZIP"
-# Pinned against nodejs.org's own SHASUMS256.txt for this release. Checked
-# in here, not trusted fresh from a re-downloaded checksums file each
-# build, so a compromised/altered download also has to fake a value that
-# lives in this repo's own git history, not just whatever nodejs.org serves
-# today.
+# pinned against nodejs.org's own shasums256.txt for this release
 NODE_ZIP_SHA256="57f71ab3652e797d84acddc79c81cc9ff1c6ddb2a1974cdb83f00fee9bff4c73"
 
+# this build's own version, read the same way every release script does
 VERSION=$(node -e "console.log(require('$ROOT_DIR/package.json').version)")
 
 mkdir -p "$BUILD_DIR" "$RELEASE_DIR"
@@ -44,6 +39,7 @@ EOF
 node --experimental-sea-config sea-config.json
 
 echo "==> Fetching Windows node.exe ($NODE_VERSION), verifying checksum"
+# only re-download when the cached zip is missing or fails the checksum
 if [ ! -f "$NODE_ZIP" ] || ! echo "$NODE_ZIP_SHA256  $NODE_ZIP" | sha256sum -c - >/dev/null 2>&1; then
   curl -sL -o "$NODE_ZIP" "$NODE_ZIP_URL"
 fi

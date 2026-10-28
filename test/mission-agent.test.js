@@ -23,6 +23,7 @@ const app = require("../src/agent");
 let server, base;
 const INSTANCE = "Example_Training";
 
+// a given instance's own directory under the fake saved games root
 function instanceDir(name = INSTANCE) {
   return path.join(savedGamesRoot, name);
 }
@@ -44,6 +45,7 @@ test.after(() => {
   fs.rmSync(dcsInstallRoot, { recursive: true, force: true });
 });
 
+// a fake multipart upload body for the /upload tests below
 function uploadForm(filename, instanceName) {
   const form = new FormData();
   form.append("instance_name", instanceName);
@@ -51,11 +53,12 @@ function uploadForm(filename, instanceName) {
   return form;
 }
 
+// the bearer header every authenticated request below needs
 function authHeaders(extra = {}) {
   return { Authorization: `Bearer ${TOKEN}`, ...extra };
 }
 
-// ---- upload ----
+// section: upload
 
 test("rejects requests with no token", async () => {
   const res = await fetch(`${base}/upload`, { method: "POST", body: uploadForm("m.miz", INSTANCE) });
@@ -97,7 +100,7 @@ test("rejects a path-traversal filename instead of escaping the mission folder",
     headers: authHeaders(),
     body: uploadForm("../../../etc/passwd.miz", INSTANCE),
   });
-  // Whatever status it returns, the decisive check is that nothing landed outside the instance dir.
+  // whatever status it returns, the decisive check is that nothing landed outside the instance dir
   assert.ok(res.status === 400 || res.status === 200, `unexpected status ${res.status}`);
   assert.equal(fs.existsSync(path.join(outsideDir, "passwd.miz")), false);
   const escapedPath = path.resolve(instanceDir(), "Missions", "..", "..", "..", "etc", "passwd.miz");
@@ -113,7 +116,7 @@ test("rejects non-.miz files", async () => {
   assert.equal(res.status, 400);
 });
 
-// ---- webgui control port: status + ensure-port ----
+// section: webgui control port, status + ensure-port
 
 test("status reports no config and no port when autoexec.cfg doesn't exist", async () => {
   const res = await fetch(`${base}/webgui/${INSTANCE}/status`, { headers: authHeaders() });
@@ -132,10 +135,8 @@ test("status picks up webgui_port from a real autoexec.cfg", async () => {
   assert.deepEqual(body, { configExists: true, webguiPort: 8123 });
 });
 
-// Exact bytes from a real, production autoexec.cfg: unquoted numeric,
-// unquoted boolean, and a quoted string value alongside each other, no
-// trailing newline after the last line. Confirms the regex against a
-// genuine DCS-authored file shape, not just a synthetic fixture.
+// exact bytes from a real production autoexec.cfg, confirming the
+// regex against a genuine dcs-authored shape, not just a synthetic one
 test("status parses a byte-for-byte real-world autoexec.cfg with mixed value types", async () => {
   const instance = "Example_RealWorldFormat";
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
@@ -170,9 +171,8 @@ test("ensure-port appends onto a real-world multi-key file without disturbing th
 });
 
 test("status rejects an invalid instance name before touching the filesystem", async () => {
-  // ".." itself gets collapsed by URL dot-segment normalization before the
-  // request is even sent. This exercises the regex guard with a value that
-  // isn't valid Windows-folder-safe, but survives normalization intact.
+  // ".." itself gets collapsed by url normalization before the request
+  // is even sent, so this uses a value that survives normalization intact
   const res = await fetch(`${base}/webgui/${encodeURIComponent("not*valid")}/status`, { headers: authHeaders() });
   assert.equal(res.status, 400);
 });
@@ -234,7 +234,7 @@ test("ensure-port rejects an out-of-range port", async () => {
   assert.equal(res.status, 400);
 });
 
-// ---- webgui relay ----
+// section: webgui relay
 
 test("relay falls back to the DCS default port (8088) when nothing's configured", async () => {
   const dummyDcs = await new Promise((resolve) => {
@@ -284,7 +284,7 @@ test("relay rejects requests with no token", async () => {
   assert.equal(res.status, 401);
 });
 
-// ---- dcs install webgui bundle ----
+// section: dcs install webgui bundle
 
 test("webgui-bundle rejects requests with no token", async () => {
   const res = await fetch(`${base}/dcs-install/webgui-bundle?path=${encodeURIComponent(dcsInstallRoot)}`);
@@ -308,7 +308,7 @@ test("webgui-bundle 404s when the install path has no WebGUI folder", async () =
   }
 });
 
-// ---- mission list ----
+// section: mission list
 
 test("list is empty when the Missions folder doesn't exist yet", async () => {
   const instance = "Example_NoMissionsYet";
@@ -339,7 +339,7 @@ test("list rejects requests with no token", async () => {
   assert.equal(res.status, 401);
 });
 
-// ---- mission download ----
+// section: mission download
 
 test("download of a single selected mission streams the raw .miz back unmodified", async () => {
   const instance = "Example_DownloadSingle";
@@ -373,9 +373,8 @@ test("download of multiple selected missions bundles them into one zip", async (
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-disposition") || "", /filename="missions\.zip"/);
   const body = Buffer.from(await res.arrayBuffer());
-  // Stored (uncompressed) zip entries: both the filename and the raw file
-  // content survive as literal bytes in the archive, so this confirms both
-  // missions actually made it in without needing a zip-reading library.
+  // stored (uncompressed) entries, so both filename and content
+  // survive as literal bytes, no zip-reading library needed to check
   assert.ok(body.includes("alpha.miz"), "zip must contain alpha.miz's name");
   assert.ok(body.includes("alpha bytes"), "zip must contain alpha.miz's content");
   assert.ok(body.includes("bravo.miz"), "zip must contain bravo.miz's name");
@@ -391,11 +390,8 @@ test("download rejects an unknown mission name", async () => {
   assert.equal(res.status, 404);
 });
 
-// path.basename() strips the traversal down to a plain "passwd" before the
-// containment check ever runs -- same as the upload endpoint's own
-// equivalent test. It's correctly treated as "no mission named that
-// exists", not a special traversal case, so 404 here is the safe,
-// expected outcome, not 400.
+// path.basename() reduces the traversal to a plain "passwd" first,
+// so 404 (no such mission) is the correct, safe outcome, not 400
 test("download: a path-traversal mission name reduces to a plain filename and 404s, never escapes the folder", async () => {
   const res = await fetch(`${base}/missions/${INSTANCE}/download`, {
     method: "POST",
@@ -405,7 +401,7 @@ test("download: a path-traversal mission name reduces to a plain filename and 40
   assert.equal(res.status, 404);
 });
 
-// ---- mission soft-delete (trash) ----
+// section: mission soft-delete (trash)
 
 test("trash moves the mission aside instead of deleting it", async () => {
   const instance = "Example_Trash";
@@ -455,7 +451,7 @@ test("trash rejects an unknown mission name", async () => {
   assert.equal(res.status, 404);
 });
 
-// Same basename-neutralizes-it-first reasoning as the download test above.
+// same basename-neutralizes-it-first reasoning as the download test above
 test("trash: a path-traversal mission name reduces to a plain filename and 404s, never escapes the folder", async () => {
   const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
     method: "POST",
@@ -485,11 +481,9 @@ test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
 });
 
 test("installConsoleCapture formats console.log as NDJSON", () => {
-  // console.log here is already the wrapped version -- installed once,
-  // automatically, when this file required ../src/agent above. Spying on
-  // process.stdout.write (not console.log itself) is what actually lets
-  // this see what the wrapper emits, since the wrapper closed over the
-  // real console.log *before* this test ever runs.
+  // console.log is already the wrapped version, installed automatically
+  // when this file required ../src/agent, so spying on stdout directly
+  // is what actually sees what the wrapper emits
   const originalWrite = process.stdout.write;
   let captured = "";
   process.stdout.write = (chunk) => {

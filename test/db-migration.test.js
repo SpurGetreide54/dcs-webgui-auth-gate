@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const Database = require("better-sqlite3");
 
+// a fresh, unique sqlite path per test run, under the os temp dir
 function tempSqlitePath() {
   return path.join(os.tmpdir(), `auth-gate-migration-test-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
@@ -13,15 +14,14 @@ function tempSqlitePath() {
 test("upgrading an existing DB auto-grants view wherever upload was already set, and adds download/delete as 0", () => {
   const sqlitePath = tempSqlitePath();
   try {
-    // Simulate a pre-upgrade DB: admin_server_access with only the
-    // original column, one admin with upload-granted access to one
-    // server and plain access (no upload) to another.
+    // build a pre-upgrade db by hand, missing the newer columns
     const pre = new Database(sqlitePath);
     pre.exec(`
       CREATE TABLE admins (id INTEGER PRIMARY KEY, username TEXT, password_hash TEXT, can_manage_accounts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
       CREATE TABLE servers (id INTEGER PRIMARY KEY, slug TEXT, name TEXT, instance_name TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
       CREATE TABLE admin_server_access (admin_id INTEGER NOT NULL, server_id INTEGER NOT NULL, can_upload_missions INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (admin_id, server_id));
     `);
+    // one admin, upload-granted on server 1, plain access on server 2
     pre.prepare("INSERT INTO admins (id, username, password_hash) VALUES (1, 'old-admin', 'hash')").run();
     pre.prepare("INSERT INTO servers (id, slug, name, instance_name) VALUES (1, 'srv-a', 'Server A', 'Server A')").run();
     pre.prepare("INSERT INTO servers (id, slug, name, instance_name) VALUES (2, 'srv-b', 'Server B', 'Server B')").run();
@@ -29,6 +29,7 @@ test("upgrading an existing DB auto-grants view wherever upload was already set,
     pre.prepare("INSERT INTO admin_server_access (admin_id, server_id, can_upload_missions) VALUES (1, 2, 0)").run();
     pre.close();
 
+    // loading db.js now runs its guarded migrations against this file
     process.env.SQLITE_PATH = sqlitePath;
     const db = require("../src/db");
 

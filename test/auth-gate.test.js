@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const vm = require("node:vm");
 
+// a minimal http server, standing in for a real dummy backend
 function startDummyHttpServer(handler) {
   return new Promise((resolve) => {
     const server = http.createServer(handler);
@@ -14,41 +15,30 @@ function startDummyHttpServer(handler) {
   });
 }
 
-// A <form> can't legally wrap a <tr>/<td>. Browsers silently relocate or
-// drop it during HTML parsing, so inputs "inside" it are never actually
-// part of it and don't get submitted. This test caught a real bug from
-// exactly that: per-server checkboxes on the accounts page silently reset
-// on every save. Functional tests that POST hand-built bodies via fetch()
-// can't catch this at all, since they skip browser HTML parsing entirely.
-// This has to check the actual served markup.
+// checks served markup for the out-of-band row-form pattern
+// see docs/Why.md#why-does-assertnobrokentableforms-exist
 function assertNoBrokenTableForms(html, context) {
   assert.doesNotMatch(html, /<tr>\s*<form/i, `${context}: a <form> must not be nested directly inside a <tr>`);
   const formIds = new Set([...html.matchAll(/<form[^>]*\bid="([^"]+)"/g)].map((m) => m[1]));
   for (const match of html.matchAll(/\bform="([^"]+)"/g)) {
     assert.ok(formIds.has(match[1]), `${context}: an input references form="${match[1]}" but no <form id="${match[1]}"> exists`);
   }
-  // An empty out-of-band <form id="...">...</form> (no fields of its own,
-  // existing only so other rows' inputs can reference it via form="...")
-  // must carry class="row-form" -- see the rule at .row-form in style.css.
-  // Without it, the plain `form { ... }` rule renders it as a visible
-  // blank box.
+  // an empty out-of-band form needs class="row-form", see style.css,
+  // or the plain `form { ... }` rule renders it as a visible blank box
   for (const match of html.matchAll(/<form\s+id="[^"]+"[^>]*><\/form>/g)) {
     assert.match(match[0], /class="row-form"/, `${context}: an empty out-of-band form must carry class="row-form" or it renders as a visible blank box: ${match[0]}`);
   }
 }
 
+// pull just the cookie's own name=value out of a set-cookie header
 function extractCookie(res) {
   const setCookie = res.headers.get("set-cookie");
   if (!setCookie) return null;
   return setCookie.split(";")[0];
 }
 
-// node's fetch() has no cookie jar -- unlike a real browser, it does NOT
-// carry a redirect response's Set-Cookie into the request it auto-follows.
-// So a POST that now does flash.setFlash()+redirect (PRG) needs this to
-// simulate what a browser does for real: capture the 302's flash cookie by
-// hand, then fetch the Location with it (plus whatever cookie the original
-// request already carried, e.g. the session) attached.
+// node's fetch() has no cookie jar, so a redirect's flash cookie never
+// reaches the request it auto-follows, capture it and refetch by hand
 async function postAndFollowFlash(url, options) {
   const res = await fetch(url, { ...options, redirect: "manual" });
   assert.equal(res.status, 302, `expected a redirect (PRG) from ${url}, got ${res.status}`);
@@ -58,23 +48,23 @@ async function postAndFollowFlash(url, options) {
   return fetch(new URL(location, url), { headers: { Cookie: cookieHeader } });
 }
 
+// a fresh, unique sqlite path per test file, under the os temp dir
 function tempSqlitePath(label) {
   return path.join(os.tmpdir(), `auth-gate-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
 
+// delete a sqlite file and its wal/shm siblings
 function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
 let app, db, updateCheck, serversDb, invitesDb, serverProxy;
 let dummyAgent, dummyAgentPort;
-// The app now makes more than one agent call per page render (e.g. an
-// upload POST followed by a list GET to refresh the page), so a single
-// overwritten "last received call" can no longer be trusted to still hold
-// the call a given assertion cares about. This keeps every call, so a
-// specific one can be found by method+path regardless of what else the
-// app also happened to call afterward.
+// a page render can make more than one agent call (e.g. an upload post
+// then a list get), so every call is kept, not just the last one
 let dummyAgentCalls;
+// find a specific agent call by method and path, regardless of what
+// else the app also happened to call afterward
 function lastAgentCall(method, pathPrefix) {
   return dummyAgentCalls.filter((c) => c.method === method && c.url.startsWith(pathPrefix)).pop();
 }
@@ -82,15 +72,12 @@ let sqlitePath;
 let authGateLogPath;
 const AGENT_TOKEN = "test-agent-token";
 
-// Controls dummyAgent's GET /logs response -- set per test, same pattern
-// as dummyGithubRespond above.
+// controls dummyAgent's get /logs response, set per test
 let dummyAgentLogText = "";
 let dummyAgentLogsShouldFail = false;
 
-// Stands in for the real GitHub API that src/updateCheck.js's
-// checkForUpdate() reaches -- set per test via dummyGithubRespond, so the
-// "check now" route can be exercised through the real app without a real
-// network dependency, same reasoning as dummyAgent above.
+// stands in for the real github api updateCheck.js's checkForUpdate()
+// reaches, set per test via dummyGithubRespond
 let dummyGithub, dummyGithubBase;
 let dummyGithubRespond = (req, res) => {
   res.writeHead(500);
@@ -112,8 +99,8 @@ test.before(async () => {
         return res.end(dummyAgentLogText);
       }
       res.writeHead(200, { "Content-Type": "application/json" });
-      // A list GET needs a real { missions: [...] } shape, not the generic
-      // { ok: true } every other stubbed endpoint here returns.
+      // a list get needs a real { missions: [...] } shape, not the
+      // generic { ok: true } every other stubbed endpoint returns
       res.end(req.method === "GET" && req.url.startsWith("/missions/") ? JSON.stringify({ missions: [] }) : JSON.stringify({ ok: true }));
     });
   });
@@ -161,7 +148,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
   ).run("community1", "Example Server - Community 1", "community1");
 
   try {
-    // --- /setup creates the first admin with full access ---
+    // /setup creates the first admin with full access
     const setupRes = await fetch(`${base}/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -172,17 +159,17 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const siteAdminCookie = extractCookie(setupRes);
     assert.ok(siteAdminCookie, "setup should set a session cookie");
 
-    // /setup is a one-time door. Must 404 now that an admin exists.
+    // /setup is a one-time door, must 404 now that an admin exists
     const setupAgainRes = await fetch(`${base}/setup`);
     assert.equal(setupAgainRes.status, 404, "/setup must 404 once an admin account exists");
 
-    // --- dashboard shows the site admin's (full) access ---
+    // dashboard shows the site admin's (full) access
     const dashRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
     const dashHtml = await dashRes.text();
     assert.match(dashHtml, /Example Server - Training/);
     assert.match(dashHtml, /Example Server - Community 1/);
 
-    // --- create a second admin with no permissions yet, no account mgmt ---
+    // create a second admin with no permissions yet, no account mgmt
     const trainingServerId = db.prepare("SELECT id FROM servers WHERE slug = ?").get("training").id;
     const createRes = await fetch(`${base}/admin/accounts`, {
       method: "POST",
@@ -196,9 +183,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(serverAdminRow.can_manage_accounts, 0, "new account must not default to site-admin");
     assert.equal(serversDb.hasServerAccess(serverAdminRow.id, trainingServerId), false, "a new account must start with no server access at all");
 
-    // --- grant access + view (but not upload) on Training, through the
-    // permissions-matrix popup's own endpoint -- one permission per call,
-    // exactly how a cell click in the popup behaves. ---
+    // grant access + view (not upload) on training, one permission
+    // per call, exactly how a cell click in the popup behaves
     for (const permission of ["access", "view"]) {
       const grantRes = await fetch(`${base}/admin/accounts/${serverAdminRow.id}/permissions`, {
         method: "POST",
@@ -208,10 +194,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       assert.equal(grantRes.status, 200);
     }
 
-    // --- the accounts page must render popup state that matches what was
-    // actually granted, not just accept the grant server-side. Regression
-    // check for the getAccessibleServers() `server_id` gotcha (see
-    // src/servers.js). ---
+    // the accounts page must render popup state matching what was
+    // granted, regression check for getAccessibleServers()'s server_id gotcha
     const accountsHtmlAfterCreate = await (
       await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })
     ).text();
@@ -236,13 +220,13 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const serverAdminCookie = extractCookie(loginRes);
     assert.ok(serverAdminCookie);
 
-    // dashboard should show ONLY Training, not Community 1
+    // dashboard should show only training, not community 1
     const restrictedDash = await fetch(`${base}/`, { headers: { Cookie: serverAdminCookie } });
     const restrictedHtml = await restrictedDash.text();
     assert.match(restrictedHtml, /Example Server - Training/);
     assert.doesNotMatch(restrictedHtml, /Example Server - Community 1/);
 
-    // restricted account gets the read-only "My account" page, not a 403 --
+    // restricted account gets the read-only my-account page, not a 403,
     // its own row only, no site-admin column, no account-management actions
     const myAccountRes = await fetch(`${base}/admin/accounts`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(myAccountRes.status, 200);
@@ -264,9 +248,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const forbiddenMissionsNoAccess = await fetch(`${base}/s/community1/missions`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenMissionsNoAccess.status, 403);
 
-    // on Training it has "view" but not "upload" -- the missions page
-    // itself is gated on view alone, so it's reachable, but shows no
-    // upload form
+    // on training it has view but not upload, the missions page is
+    // gated on view alone, so it's reachable but shows no upload form
     const missionsPageRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(missionsPageRes.status, 200, "view access must be enough to reach the missions page");
     const missionsPageHtml = await missionsPageRes.text();
@@ -279,30 +262,22 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(forbiddenMissionUpload.status, 403, "view without the upload flag must not allow uploading");
 
-    // --- the real webgui's own static bundle is served under /s/<slug>/, as the site admin ---
+    // the real webgui's own static bundle is served under /s/<slug>/
     const webguiRes = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(webguiRes.status, 200);
     const webguiHtml = await webguiRes.text();
     assert.match(webguiHtml, /<div id="app">/, "must serve the real webgui's index.html, not a proxied response");
 
-    // the control-port token bootstrap must be injected before app.js loads,
-    // with a fresh token each page load. Nothing else lets the SPA's own
-    // fetch() reach the control-port proxy.
+    // the control-port token bootstrap must be injected with a fresh
+    // token each load, nothing else lets the spa's fetch() reach the proxy
     const tokenMatch = webguiHtml.match(/var TOKEN = "([0-9a-f]+)"/);
     assert.ok(tokenMatch, "index.html response must include the control-port token bootstrap script");
     const webguiRes2 = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
     const tokenMatch2 = (await webguiRes2.text()).match(/var TOKEN = "([0-9a-f]+)"/);
     assert.notEqual(tokenMatch2[1], tokenMatch[1], "each page load must mint its own distinct token");
 
-    // The bootstrap's fetch-rewrite logic itself, actually executed -- not
-    // just checked for presence. This exact function shipped four broken
-    // versions in a row to a real production deploy with nobody catching
-    // it, including one break from a \d escape silently getting eaten by
-    // Node's own template-literal parsing (server.js's own source has to
-    // double-escape backslashes precisely so the *browser* receives a
-    // working regex -- a mistake invisible by reading the source, only
-    // caught by running what actually reaches the browser, which is what
-    // this does).
+    // the bootstrap's fetch-rewrite logic, actually executed, not just
+    // checked for presence, see docs/Why.md#why-does-this-test-run-the-bootstrap-with-vm
     const bootstrapMatch = webguiHtml.match(/<script>([\s\S]*?)<\/script>/);
     assert.ok(bootstrapMatch, "index.html response must include an inline bootstrap <script> block");
     const bootstrapScript = bootstrapMatch[1];
@@ -317,12 +292,9 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
         },
         addEventListener: () => {},
       };
-      // The bootstrap script also contains the back-to-dashboard button's
-      // IIFE (below), which needs a `document` to run against. No real
-      // ".navbar-brand" exists in this stub, so it falls into the
-      // MutationObserver branch and sits there without ever placing a
-      // button -- irrelevant to the fetch-rewrite behavior this helper
-      // checks, but it still has to not throw.
+      // the back-button iife also runs here and needs a document, with
+      // no real navbar-brand it falls into the mutationobserver branch
+      // and just has to not throw, irrelevant to what this helper checks
       context.document = {
         getElementById: () => null,
         createElement: () => ({ style: {} }),
@@ -343,11 +315,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const hostname = "panel.example.test";
     const pathname = "/s/training/";
 
-    // The real DCS webgui's own hardcoded default backend URL, byte for
-    // byte: a literal backslash before the port colon. A backslash right
-    // after the host ends URL authority parsing for http(s) URLs, so an
-    // unfixed regex here lets "8088" leak into the path and show up
-    // doubled next to the port this rewrite sets correctly.
+    // the real dcs webgui's own malformed default backend url, byte
+    // for byte, see docs/Why.md#why-does-the-backend-url-rewrite-undo-a-literal-backslash
     const rewritten = runBootstrapFetch("http://127.0.0.1\\:8088/encryptedRequest", { hostname, pathname });
     assert.equal(
       rewritten,
@@ -355,17 +324,14 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       "must rewrite the real DCS webgui's malformed default backend URL to a clean same-host URL with no doubled port"
     );
 
-    // A request for one of the app's own served files, same-origin under
-    // BASE_PATH, must pass through untouched -- rewriting it too would
-    // send the app's own JS/CSS/font requests at the control-port proxy
-    // instead of this app's own static file server.
+    // a request for the app's own served files, under base_path,
+    // must pass through untouched, not get sent at the control-port proxy
     const ownAsset = runBootstrapFetch(`${pathname}js/app.js`, { hostname, pathname });
     assert.equal(ownAsset, `${pathname}js/app.js`, "a request for the app's own served files must not be rewritten");
 
-    // The same bootstrap script also injects a "back to control panel"
-    // button next to the real webgui's ".navbar-brand" title, actually run
-    // against a stub DOM exposing one -- not just checked for presence, the
-    // way the fetch-rewrite logic above is.
+    // the same bootstrap also injects a back-to-control-panel button,
+    // actually run against a stub dom exposing one, not just checked
+    // for presence the way the fetch-rewrite logic above is
     {
       const headChildren = [];
       const navbarChildren = [];
@@ -403,13 +369,13 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const missingAssetRes = await fetch(`${base}/s/training/does/not/exist.js`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(missingAssetRes.status, 404);
 
-    // --- unauthenticated page navigation redirects to /login; unauthenticated API-style call gets 401 ---
+    // unauthenticated page navigation redirects to /login, api-style call gets 401
     const anonNav = await fetch(`${base}/s/training/`, { redirect: "manual", headers: { "Sec-Fetch-Dest": "document" } });
     assert.equal(anonNav.status, 302);
     const anonApi = await fetch(`${base}/s/training/`, { headers: { "Sec-Fetch-Dest": "empty" } });
     assert.equal(anonApi.status, 401);
 
-    // --- mission upload, as the site admin (who has upload rights on Training) ---
+    // mission upload, as the site admin (who has upload rights on training)
     const form = new FormData();
     form.append("mission", new Blob([Buffer.from("fake miz bytes")], { type: "application/octet-stream" }), "test-mission.miz");
     const uploadRes = await fetch(`${base}/s/training/missions/upload`, {
@@ -423,10 +389,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(uploadCall.authorization, `Bearer ${AGENT_TOKEN}`, "agent must receive the shared bearer token");
     assert.match(uploadCall.body.toString("latin1"), /training/, "instance_name must be forwarded to the agent");
 
-    // non-.miz upload must be rejected before it ever reaches the agent's
-    // /upload endpoint -- the page re-render after the rejection still
-    // legitimately calls the agent's list endpoint, so the count of real
-    // /upload calls is what has to stay unchanged, not "no agent call at all"
+    // the page re-render after rejection still legitimately calls the
+    // agent's list endpoint, so only the /upload call count must stay flat
     const uploadCallCountBefore = dummyAgentCalls.filter((c) => c.method === "POST" && c.url === "/upload").length;
     const badForm = new FormData();
     badForm.append("mission", new Blob([Buffer.from("not a mission")], { type: "text/plain" }), "not-a-mission.txt");
@@ -439,21 +403,21 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const uploadCallCountAfter = dummyAgentCalls.filter((c) => c.method === "POST" && c.url === "/upload").length;
     assert.equal(uploadCallCountAfter, uploadCallCountBefore, "rejected file must never be forwarded to the mission agent's /upload endpoint");
 
-    // --- served markup for both admin tables must have valid, submittable forms ---
+    // served markup for both admin tables must have valid, submittable forms
     const accountsHtml = await (await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })).text();
     assertNoBrokenTableForms(accountsHtml, "/admin/accounts");
     const serversHtml = await (await fetch(`${base}/admin/servers`, { headers: { Cookie: siteAdminCookie } })).text();
     assertNoBrokenTableForms(serversHtml, "/admin/servers");
-    // site admin has full permissions on Training (granted at bootstrap),
-    // so this exercises the download form too -- not just the delete forms
+    // site admin has full permissions on training, so this exercises
+    // the download form too, not just the delete forms
     const trainingMissionsHtml = await (await fetch(`${base}/s/training/missions`, { headers: { Cookie: siteAdminCookie } })).text();
     assertNoBrokenTableForms(trainingMissionsHtml, "/s/training/missions");
 
-    // --- server management: restricted account can't manage servers ---
+    // server management: restricted account can't manage servers
     const forbiddenServers = await fetch(`${base}/admin/servers`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenServers.status, 403);
 
-    // --- site admin creates a new server ---
+    // site admin creates a new server
     const createServerRes = await fetch(`${base}/admin/servers`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
@@ -518,7 +482,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       "deleting a server must cascade-delete its access grants"
     );
 
-    // --- last-site-admin delete guard ---
+    // last-site-admin delete guard
     const soleSiteAdminId = db.prepare("SELECT id FROM admins WHERE username = 'siteadmin'").get().id;
     const deleteSelfRes = await postAndFollowFlash(`${base}/admin/accounts/${soleSiteAdminId}/delete`, {
       method: "POST",
@@ -526,10 +490,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.match(await deleteSelfRes.text(), /Can.{1,6}t delete the last site admin.{1,6}s account/, "must refuse to delete the last remaining admin account");
 
-    // --- login rate limiting. A throwaway username on the same running
-    // server avoids a second app/db instance -- better-sqlite3's native
-    // addon does not tolerate require.cache-driven re-instantiation
-    // mid-process. ---
+    // login rate limiting, a throwaway username avoids a second app/db
+    // instance, better-sqlite3's native addon dislikes that mid-process
     let lastAttempt;
     for (let i = 0; i < 6; i++) {
       lastAttempt = await postAndFollowFlash(`${base}/login`, {
@@ -540,9 +502,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
     assert.match(await lastAttempt.text(), /Too many attempts/, "6th attempt within the window should be rate-limited");
 
-    // --- self-service password change: wrong current password rejected,
-    // correct flow updates the hash and signs out every *other* session for
-    // that account while leaving the one that made the change alone ---
+    // self-service password change: wrong current password rejected,
+    // correct flow signs out every other session, leaves this one alone
     const secondServerAdminLogin = await fetch(`${base}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -580,7 +541,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(afterChangeOtherSession.status, 302, "changing the password must sign out every other session for that account");
 
-    // --- invite-based account creation ---
+    // invite-based account creation
     const createInviteRes = await postAndFollowFlash(`${base}/admin/accounts/invite`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
@@ -602,9 +563,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(accountsWithInviteHtml, new RegExp(`formaction="/admin/accounts/invites/${inviteRow.id}/revoke" class="destructive"`));
     assert.match(accountsWithInviteHtml, /data-kind="invite"/, "a pending invite's row must render the same Permissions popup button");
 
-    // Save updates the pending invite's can_manage_accounts flag; granting
-    // a server permission is now its own popup-endpoint call, same as for
-    // a real account
+    // save updates the pending invite's can_manage_accounts flag,
+    // a server permission is its own popup-endpoint call, same as a real account
     const saveInviteRes = await fetch(`${base}/admin/accounts/invites/${inviteRow.id}`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
@@ -623,7 +583,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const inviteGrant = invitesDb.getInviteAccess(inviteRow.id).find((g) => g.server_id === trainingServerId);
     assert.ok(inviteGrant && inviteGrant.can_view_missions, "the invite-permissions endpoint must persist the grant");
 
-    // Revoke deletes it outright
+    // revoke deletes it outright
     const revokeInviteRes = await fetch(`${base}/admin/accounts/invites/${inviteRow.id}/revoke`, {
       method: "POST",
       headers: { Cookie: siteAdminCookie },
@@ -640,9 +600,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(forbiddenInviteCreate.status, 403);
 
-    // --- invite redemption: the invitee picks their own username/password,
-    // permissions come from what the invite already had set via the
-    // permissions-popup endpoint ---
+    // invite redemption: the invitee picks their own username/password,
+    // permissions come from what the invite already had set
     const redeemInviteRes = await postAndFollowFlash(`${base}/admin/accounts/invite`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
@@ -702,8 +661,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(bogusTokenRes.status, 404);
     assert.match(await bogusTokenRes.text(), /invalid or has expired/);
 
-    // --- A/B self-update page: site-admin only, sidebar icon tracks
-    // whether update_state actually has an available version ---
+    // a/b self-update page: site-admin only, sidebar icon tracks
+    // whether update_state actually has an available version
     const forbiddenUpdatePage = await fetch(`${base}/admin/update`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenUpdatePage.status, 403, "a non-site-admin must not reach the update page");
 
@@ -726,8 +685,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
 
-    // --- "check now": manual trigger for checkForUpdate(), against the
-    // dummy GitHub API above instead of the real one ---
+    // "check now": manual trigger for checkForUpdate(), against the dummy github api
     const forbiddenCheckNow = await fetch(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenCheckNow.status, 403, "a non-site-admin must not be able to trigger a check either");
 
@@ -743,10 +701,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       };
     }
 
-    // A failed check (signed with a throwaway key the app's hardcoded
-    // public key never accepts -- deterministic regardless of whether the
-    // real local-only/keys/ private key exists on this machine) must
-    // surface as an error, not a false "up to date".
+    // signed with a throwaway key the hardcoded public key never
+    // accepts, deterministic regardless of whether the real key exists
     serveDummyManifest(
       { version: "9.9.9-bad", changelog_url: "https://example.test/changelog", needs_service_update: false, downloads: [] },
       crypto.generateKeyPairSync("ed25519").privateKey
@@ -754,10 +710,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const failedCheckRes = await postAndFollowFlash(`${base}/admin/update/check`, { method: "POST", headers: { Cookie: siteAdminCookie } });
     assert.match(await failedCheckRes.text(), /Check failed/, "a check that fails signature verification must not report success");
 
-    // A successful check with a genuinely newer, properly-signed release --
-    // only runs where the real signing key exists on this machine
-    // (gitignored, not present on a fresh clone), same gating convention
-    // test/update-check.test.js already uses.
+    // a genuinely newer, properly-signed release, only runs where the
+    // real signing key exists, same gating convention as update-check.test.js
     const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "update-signing-key.pem");
     if (fs.existsSync(REAL_PRIVATE_KEY_PATH)) {
       serveDummyManifest(
@@ -778,11 +732,9 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     db.prepare("UPDATE update_state SET available_version = NULL, changelog_url = NULL WHERE id = 1").run();
 
-    // --- "Update now" cooldown: a double-click or rapid re-click must
-    // not fire a second applyUpdate() while one is still in flight ---
-    // real applyUpdate() is never invoked here (network downloads, npm
-    // install, process.exit()) -- stub the shared, already-required
-    // module object so server.js's own reference sees the stub too.
+    // "update now" cooldown: a double-click must not fire a second
+    // applyUpdate() while one is in flight, stub the shared module object
+    // so server.js's own already-required reference sees the stub too
     const realApplyUpdate = updateCheck.applyUpdate;
     let applyUpdateCalls = 0;
     updateCheck.applyUpdate = async () => {
@@ -805,7 +757,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       assert.match(await secondTrigger.text(), /try again after \d\d:\d\d:\d\d UTC/, "an update triggered within the cooldown window must be rejected, not started again");
       assert.equal(applyUpdateCalls, 1, "a rejected trigger must not call applyUpdate() a second time");
 
-      // Back-date past the 60s cooldown window -- a third trigger must succeed.
+      // back-date past the 60s cooldown window, a third trigger must succeed
       db.prepare("UPDATE update_state SET update_triggered_at = ? WHERE id = 1").run(new Date(Date.now() - 61_000).toISOString());
       const thirdTrigger = await postAndFollowFlash(`${base}/admin/update`, { method: "POST", headers: { Cookie: siteAdminCookie } });
       assert.match(await thirdTrigger.text(), /Update started/);
@@ -815,7 +767,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       db.prepare("UPDATE update_state SET update_triggered_at = NULL WHERE id = 1").run();
     }
 
-    // --- settings: site-wide "always show Update nav" toggle ---
+    // settings: site-wide "always show update nav" toggle
     const forbiddenSettingsPage = await fetch(`${base}/admin/settings`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenSettingsPage.status, 403, "a non-site-admin must not reach the settings page");
 
@@ -825,8 +777,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(settingsHtml, /<form method="post" action="\/admin\/settings">/);
     assert.doesNotMatch(settingsHtml, /name="pin_update_nav"[^>]*checked/, "the toggle must start unchecked by default");
 
-    // available_version is null here (reset above), so the dashboard's
-    // Update icon is hidden until the setting is turned on.
+    // available_version is null here (reset above), the update icon
+    // stays hidden until the setting is turned on
     const dashBeforePin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(dashBeforePin, /href="\/admin\/update"/);
 
@@ -844,8 +796,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const settingsPageCheckedRes = await fetch(`${base}/admin/settings`, { headers: { Cookie: siteAdminCookie } });
     assert.match(await settingsPageCheckedRes.text(), /name="pin_update_nav"[^>]*checked/, "the settings page must reflect the persisted on state");
 
-    // Unchecking a checkbox sends no field at all -- simulate that by
-    // posting an empty body, not pin_update_nav=0.
+    // an unchecked checkbox sends no field at all, simulate that with
+    // an empty body, not pin_update_nav=0
     const pinOffRes = await postAndFollowFlash(`${base}/admin/settings`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
@@ -856,13 +808,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const dashAfterUnpin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(dashAfterUnpin, /href="\/admin\/update"/, "the Update nav item must disappear again once un-pinned, with no update pending");
 
-    // --- logs: auth-gate's own + agent's, merged into one timeline (site admin only) ---
+    // logs: auth-gate's own + agent's, merged into one timeline (site admin only)
     const forbiddenLogsPage = await fetch(`${base}/admin/logs`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenLogsPage.status, 403, "a non-site-admin must not reach the logs page");
 
-    // console.log/warn here are already the real wrapped versions --
-    // appLog.installConsoleCapture() ran when `app = require("../src/
-    // server")` happened in test.before(), same as production.
+    // console.log/warn are already the real wrapped versions, installed
+    // when test.before() required ../src/server, same as production
     console.log("AUTH_GATE_LOG_MARKER app-side entry");
     console.error("AUTH_GATE_LOG_MARKER app-side error");
     dummyAgentLogText = JSON.stringify({ t: new Date().toISOString(), level: "log", msg: "AUTH_GATE_LOG_MARKER agent-side entry" });
@@ -878,12 +829,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(logsHtml, />agent</, "the agent entry needs its source badge");
     assert.match(logsHtml, />auth-gate</, "the app entries need their source badge");
 
-    // --- filter by source: app-only must exclude the agent's entry ---
+    // filter by source: app-only must exclude the agent's entry
     const appOnlyHtml = await (await fetch(`${base}/admin/logs?source=app`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(appOnlyHtml, /AUTH_GATE_LOG_MARKER app-side entry/);
     assert.doesNotMatch(appOnlyHtml, /AUTH_GATE_LOG_MARKER agent-side entry/, "source=app must exclude agent entries");
 
-    // --- filter by timespan: an old entry is excluded by a short window ---
+    // filter by timespan: an old entry is excluded by a short window
     const oldTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     fs.appendFileSync(authGateLogPath, JSON.stringify({ t: oldTimestamp, level: "log", msg: "AUTH_GATE_LOG_MARKER old entry" }) + "\n");
 
@@ -892,15 +843,15 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const recentOnlyHtml = await (await fetch(`${base}/admin/logs?since=15m`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(recentOnlyHtml, /AUTH_GATE_LOG_MARKER old entry/, "since=15m must exclude a 2h-old entry");
 
-    // --- verbose filter: debug-level entries are hidden by default, shown with verbose=1 ---
+    // verbose filter: debug-level entries hidden by default, shown with verbose=1
     console.debug("AUTH_GATE_LOG_MARKER debug entry");
     const nonVerboseHtml = await (await fetch(`${base}/admin/logs`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(nonVerboseHtml, /AUTH_GATE_LOG_MARKER debug entry/, "debug-level entries must be hidden by default");
     const verboseHtml = await (await fetch(`${base}/admin/logs?verbose=1`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(verboseHtml, /AUTH_GATE_LOG_MARKER debug entry/, "verbose=1 must reveal debug-level entries");
 
-    // --- agent unreachable: the auth-gate's own entries still render,
-    // with a clear error instead of silently dropping the agent section ---
+    // agent unreachable: the auth-gate's own entries still render,
+    // with a clear error instead of silently dropping the agent section
     dummyAgentLogsShouldFail = true;
     const degradedRes = await fetch(`${base}/admin/logs`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(degradedRes.status, 200, "an unreachable agent must not fail the whole page");
@@ -909,14 +860,14 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(degradedHtml, /AUTH_GATE_LOG_MARKER app-side entry/, "the auth-gate's own entries must still render");
     dummyAgentLogsShouldFail = false;
 
-    // --- logout is a destructive-styled navbar button, POST only ---
+    // logout is a destructive-styled navbar button, post only
     const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(dashboardHtmlForLogout, /<form method="post" action="\/logout" class="logout-form">/);
     assert.match(dashboardHtmlForLogout, /<button type="submit" class="destructive">Sign out<\/button>/);
     const getLogoutRes = await fetch(`${base}/logout`, { headers: { Cookie: siteAdminCookie }, redirect: "manual" });
     assert.equal(getLogoutRes.status, 404, "logout must only accept POST now, not the old GET link");
 
-    // --- logout actually invalidates the session ---
+    // logout actually invalidates the session
     await fetch(`${base}/logout`, { method: "POST", headers: { Cookie: siteAdminCookie }, redirect: "manual" });
     const afterLogout = await fetch(`${base}/`, {
       headers: { Cookie: siteAdminCookie, "Sec-Fetch-Dest": "document" },

@@ -28,8 +28,8 @@
   --accent-red-hover: #c22636;
   --accent-cyan: #17a2b8;
   --accent-blue: #0d79e5;
-  /* colors below match the real DCS webgui's own navbar/sidebar exactly,
-     not the generic dark palette above, so the handoff into it is seamless */
+  /* matches the real dcs webgui's own navbar/sidebar exactly, not the
+     generic dark palette above, so the handoff into it is seamless */
   --navbar-bg: #1e2124;
   --sidebar-bg: #1a1d20;
 }
@@ -54,7 +54,7 @@ h1, h2 {
 
 a { color: var(--accent-cyan); }
 
-/* ---- top navbar: same 50px height and #1e2124 background as the real app's .navbar ---- */
+/* section: top navbar, same 50px height and #1e2124 background as the real app's .navbar */
 .navbar {
   height: 50px;
   min-height: 50px;
@@ -90,8 +90,7 @@ a { color: var(--accent-cyan); }
   align-items: center;
   gap: 0.8rem;
 }
-/* form's default card styling (background/border/padding/max-width) is
-   wrong for a single inline button sitting in the navbar */
+/* form's default card styling is wrong for an inline navbar button */
 .logout-form {
   display: inline-flex;
   max-width: none;
@@ -100,7 +99,7 @@ a { color: var(--accent-cyan); }
   padding: 0;
 }
 
-/* ---- shell: left icon sidebar + main content, only present once signed in ---- */
+/* section: shell, left icon sidebar + main content, only present once signed in */
 .shell { display: flex; flex: 1; min-height: 0; }
 
 .left-sidebar {
@@ -127,10 +126,8 @@ a { color: var(--accent-cyan); }
 }
 .left-sidebar .menu-items li a svg { width: 22px; height: 22px; }
 
-/* Visually hidden but still readable by screen readers -- carries each
-   nav link's accessible name explicitly, since its icon is aria-hidden
-   and title="..." tooltips aren't consistently exposed as accessible
-   names across browsers/screen readers. */
+/* visually hidden but still readable by screen readers, carries the
+   accessible name title="..." isn't consistently exposed as */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -172,14 +169,8 @@ form {
 }
 label { font-size: 0.9rem; color: var(--text-muted); }
 
-/* out-of-band forms exist only so row checkboxes/buttons can reference them
-   via form="..." (a <form> can't legally wrap a <tr>) — never rendered.
-   RULE: every out-of-band <form id="..."> in views.js must carry this
-   class. Without it, the plain `form { background / border / padding }`
-   rule further up this file applies instead, and an empty <form></form>
-   renders as a visible blank box. test/auth-gate.test.js's
-   assertNoBrokenTableForms() checks for this automatically; call it on
-   any new page that adds an out-of-band form. */
+/* every out-of-band <form id="..."> in views.js must carry this class
+   see docs/Why.md#why-does-each-table-row-get-its-own-out-of-band-form */
 .row-form { display: none; }
 
 input[type=text], input[type=password], input[type=file] {
@@ -192,9 +183,8 @@ input[type=text], input[type=password], input[type=file] {
   color: var(--text);
 }
 input[type=checkbox] { accent-color: var(--accent-green); width: 16px; height: 16px; }
-/* read-only permission checkboxes (My account page) -- ticked and unticked
-   both render as the same neutral gray, never the "this is a live control"
-   green */
+/* read-only checkboxes (my account page) stay neutral gray either way,
+   never the "this is a live control" green */
 input[type=checkbox]:disabled { accent-color: var(--text-muted); opacity: 1; }
 
 button {
@@ -243,11 +233,8 @@ fieldset {
 }
 legend { padding: 0 0.4rem; color: var(--text-muted); }
 
-/* fixed-vs-invite account creation slider: pure CSS, no JS. A single
-   checkbox drives an actual sliding-thumb switch (not segmented buttons),
-   plus which .create-form is visible, all via :checked. The checkbox is a
-   direct child of .account-create, so both the following <label> (via +)
-   and the two forms further down (via the general sibling ~) react to it. */
+/* fixed-vs-invite slider, pure css, no js, one checkbox drives both
+   the sliding thumb and which .create-form shows, all via :checked */
 .account-create { display: flex; flex-direction: column; align-items: flex-start; gap: 0.75rem; }
 .mode-toggle-input { position: absolute; opacity: 0; pointer-events: none; }
 .mode-switch-row {
@@ -293,10 +280,8 @@ legend { padding: 0 0.4rem; color: var(--text-muted); }
 tr.pending-invite td { color: var(--text-muted); }
 .pending-label { font-style: italic; }
 
-/* ---- permissions matrix popup: one per admin/invite row, opened at the
-   click point. Replaces per-server checkboxes inline in each row, which
-   got unreadable once server access, upload, view, download, and delete
-   were all five separate per-server toggles at once. ---- */
+/* section: permissions matrix popup
+   see docs/Why.md#why-does-the-permissions-matrix-use-a-shared-popup */
 .perm-btn { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; background: var(--accent-blue); }
 .perm-btn:hover { background: #0a63bd; }
 .perm-popup {
@@ -313,9 +298,8 @@ tr.pending-invite td { color: var(--text-muted); }
 }
 .perm-popup table { margin-top: 0; width: auto; }
 .perm-popup th, .perm-popup td { padding: 0.35rem 0.5rem; }
-/* visual gap between the "server access" column and the four mission-
-   category columns -- a column of its own rather than a CSS margin, since
-   it has to sit inside the table's own column grid */
+/* a real column, not a margin, since it has to sit inside the
+   table's own column grid */
 .perm-group-gap { width: 1rem; border: none; background: transparent; padding: 0; }
 .perm-cell { width: 2.2rem; text-align: center; cursor: pointer; font-weight: bold; user-select: none; }
 .perm-cell:hover { filter: brightness(0.92); }
@@ -323,7 +307,7 @@ tr.pending-invite td { color: var(--text-muted); }
 .perm-cell.granted { background: #bbf0c7; color: #1f7a33; }
 .perm-close { width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; margin-top: 0.6rem; }
 
-/* ---- mission list ---- */
+/* section: mission list */
 .mission-size, .mission-date { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
 .mission-select { width: 1.6rem; }
 .mission-actions { display: flex; gap: 0.6rem; margin-top: 0.75rem; }

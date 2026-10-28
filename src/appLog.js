@@ -1,34 +1,27 @@
+// node's own filesystem and path modules
 const fs = require("node:fs");
 const path = require("node:path");
 
-// Under the A/B layout this file lives at the shared top level (releases/a/
-// and releases/b/ are siblings of it, not parents) -- same reasoning as
-// src/activeSlot.js's ACTIVE_SLOT_PATH. The default here is right only for
-// a plain single-checkout local dev setup (same as src/db.js's own
-// SQLITE_PATH default, under local-only/ for the same reason: something
-// created on every run shouldn't need its own .gitignore entry) and wrong
-// in production, where AUTH_GATE_LOG_PATH must be set once during the A/B
-// migration, same as ACTIVE_SLOT_PATH/WEBGUI_STATIC_PATH.
+// where the structured log file lives, overridden in production via
+// auth_gate_log_path in .env, same reasoning as activeSlot.js's path
+// see docs/Why.md#why-does-the-log-path-default-to-local-only
 const LOG_PATH = process.env.AUTH_GATE_LOG_PATH || path.join(__dirname, "..", "local-only", "auth-gate.log");
+// the file rotates once it would grow past this size
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
-// A fresh clone has no local-only/ on disk at all (purely gitignored, no
-// tracked placeholder) -- same reasoning as src/db.js's own mkdirSync for
-// SQLITE_PATH. Without this, the first-ever appendLine() would silently
-// no-op (errors here are swallowed, never crash the app) instead of
-// actually logging anything.
+// a fresh clone has no local-only/ on disk at all, so make sure the
+// directory exists before the first ever log line gets written
 fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
 
-// One JSON object per line -- see /admin/logs for why: it's what makes a
-// structured, chat-style rendering possible without scraping free text,
-// and it's resilient to multi-arg console.log(a, b, c) calls (joined into
-// one message here, before anything's written).
+// join a console call's arguments into one line of readable text
+// see docs/Why.md#why-is-each-log-line-a-single-json-object
 function formatArgs(args) {
   return args
     .map((a) => (typeof a === "string" ? a : require("node:util").inspect(a)))
     .join(" ");
 }
 
+// append one structured log line, rotating the file first if it's full
 function appendLine(level, args) {
   const line = JSON.stringify({ t: new Date().toISOString(), level, msg: formatArgs(args) }) + "\n";
   try {
@@ -38,26 +31,20 @@ function appendLine(level, args) {
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
     }
-    // One rotated backup, mirroring the agent's own NSSM AppRotateFiles=1
-    // convention. Only the current file is ever read back for display --
-    // the backup exists purely to bound disk growth.
+    // one rotated backup, same convention as the agent's own nssm
+    // approtatefiles=1, kept purely to bound disk growth
     if (size + Buffer.byteLength(line) > MAX_LOG_BYTES) {
       fs.renameSync(LOG_PATH, `${LOG_PATH}.1`);
     }
     fs.appendFileSync(LOG_PATH, line);
   } catch {
-    // Never let logging itself take the app down -- same reasoning as
-    // every other best-effort write in this codebase (e.g. the mission-
-    // agent's own token-save fallback).
+    // never let logging itself take the app down
   }
 }
 
-// Wraps console.log/warn/error once so every existing call site keeps
-// working unchanged -- each call still reaches the real stdout/stderr
-// (journald, or a devenv shell redirect, unaffected) and now also appends
-// a structured line to LOG_PATH. launcher.js is deliberately left out of
-// this: its own top comment states a zero-dependency-surface boundary an
-// update should never need to cross.
+// wrap console.log/warn/error/debug so every existing call site keeps
+// working unchanged, now also appending a line to log_path
+// launcher.js is deliberately left out, see its own zero-dependency rule
 function installConsoleCapture() {
   const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
   console.log = (...args) => {
@@ -72,20 +59,17 @@ function installConsoleCapture() {
     original.error(...args);
     appendLine("error", args);
   };
-  // Step-by-step detail (e.g. src/updateCheck.js's applyUpdate() progress
-  // trail) that's noise during normal operation but genuinely useful when
-  // something's stuck -- console.debug keeps it out of the plain "log"
-  // level, so /admin/logs can hide it behind its own "Verbose" filter
-  // instead of mixing it into every other line.
+  // kept at its own level so /admin/logs can hide step-by-step detail
+  // behind a "verbose" filter instead of mixing it into every line
   console.debug = (...args) => {
     original.debug(...args);
     appendLine("debug", args);
   };
 }
 
-// Reads the last maxLines of LOG_PATH, parsed. A line that fails to parse
-// (pre-existing plain-text content from before this format existed, or a
-// hand-edited file) renders as a raw row instead of breaking the page.
+// read back the last maxLines of the log file, parsed
+// a line that fails to parse (old plain-text content, a hand edit)
+// renders as a raw row instead of breaking the page
 function readRecentEntries(maxLines) {
   let raw;
   try {
@@ -106,4 +90,5 @@ function readRecentEntries(maxLines) {
   });
 }
 
+// expose the path and both public functions to callers
 module.exports = { LOG_PATH, installConsoleCapture, readRecentEntries };

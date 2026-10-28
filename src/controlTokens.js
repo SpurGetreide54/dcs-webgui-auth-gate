@@ -1,29 +1,18 @@
+// node's own crypto module, for random token bytes
 const crypto = require("node:crypto");
 
-// The real DCS webgui reaches its backend via fetch() to a swapped
-// hostname:port origin, not a path under the page that loaded it. The
-// browser's default same-origin credentials mode never attaches the
-// session cookie to that request. These short-lived tokens are the
-// substitute. Minted server-side when an authorized admin loads
-// /s/<slug>/, injected into that page's own fetch() calls (see
-// server.js), and checked by the control-port proxy (serverProxy.js) in
-// place of a cookie.
-// A token slides forward on every use instead of expiring on a one-shot
-// clock: the real DCS webgui polls its own backend every 2 seconds on its
-// own (see webgui-static/js/app.js's lifecycleTick), so an admin who just
-// leaves a server's control panel open -- the normal way to use this app
-// -- keeps it alive indefinitely, instead of losing control after a flat
-// 5 minutes with no visible error. TOKEN_TTL_MS is that sliding renewal
-// window. MAX_TOKEN_LIFETIME_MS still bounds it: a leaked or forgotten
-// token can't stay useful forever just because something keeps polling
-// it. Hitting the ceiling just means the next page load mints a fresh
-// one, same as any other page load already does. This doesn't weaken
-// what the token protects either way -- serverProxy.js re-checks live DB
-// access on every single proxied request, independent of token freshness.
+// short-lived token standing in for the session cookie on control-port
+// requests, minted on page load, checked by serverProxy.js
+// see docs/Why.md#why-do-control-port-requests-use-a-separate-token
 const TOKEN_TTL_MS = 5 * 60 * 1000;
+// the sliding window's own hard ceiling, even if something keeps
+// polling with this token forever
+// see docs/Why.md#why-does-a-control-tokens-expiry-slide-forward
 const MAX_TOKEN_LIFETIME_MS = 12 * 60 * 60 * 1000;
+// all live tokens, keyed by the token string itself
 const tokens = new Map();
 
+// drop every token whose window has already closed
 function pruneExpired() {
   const now = Date.now();
   for (const [token, entry] of tokens) {
@@ -31,6 +20,7 @@ function pruneExpired() {
   }
 }
 
+// create and store a fresh token for this admin and server
 function mint(adminId, serverId) {
   pruneExpired();
   const token = crypto.randomBytes(24).toString("hex");
@@ -39,6 +29,7 @@ function mint(adminId, serverId) {
   return token;
 }
 
+// look up a token, dropping and refusing it once its window has closed
 function resolve(token) {
   const entry = tokens.get(token);
   if (!entry) return null;
@@ -47,8 +38,10 @@ function resolve(token) {
     tokens.delete(token);
     return null;
   }
+  // slide the window forward, capped at the token's own max lifetime
   entry.expiresAt = Math.min(now + TOKEN_TTL_MS, entry.mintedAt + MAX_TOKEN_LIFETIME_MS);
   return entry;
 }
 
+// expose both functions to callers
 module.exports = { mint, resolve };

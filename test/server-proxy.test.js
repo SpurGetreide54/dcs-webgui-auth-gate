@@ -6,6 +6,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 
+// a minimal http server, standing in for the real mission-agent
 function startDummyHttpServer(handler) {
   return new Promise((resolve) => {
     const server = http.createServer(handler);
@@ -13,10 +14,12 @@ function startDummyHttpServer(handler) {
   });
 }
 
+// a fresh, unique sqlite path per test file, under the os temp dir
 function tempSqlitePath(label) {
   return path.join(os.tmpdir(), `auth-gate-test-${label}-${crypto.randomBytes(6).toString("hex")}.sqlite`);
 }
 
+// delete a sqlite file and its wal/shm siblings
 function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
@@ -101,7 +104,7 @@ test("control-port proxy: token minted for a server the admin was never granted 
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  // Simulates a forged/stale token. The admin has no admin_server_access row for otherServerId.
+  // simulates a forged/stale token, no admin_server_access row for otherServerId
   const token = controlTokens.mint(otherAdminId, otherServerId);
 
   try {
@@ -135,15 +138,14 @@ test("control-port proxy: a token used before its TTL slides forward and survive
   const token = controlTokens.mint(allowedAdminId, allowedServerId);
 
   try {
-    // 4 minutes in, still within the original 5-minute TTL -- the real
-    // webgui's own 2-second polling would have hit this many times over by
-    // now, this just simulates one such poll.
+    // 4 minutes in, still within the original 5 minute ttl, simulates
+    // one of the real webgui's own 2 second polls
     t.mock.timers.tick(4 * 60 * 1000);
     const midRes = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
     assert.equal(midRes.status, 200, "a poll within the original TTL must succeed and slide the token forward");
 
-    // 8 minutes since mint -- past where the original flat TTL would have
-    // expired it, but within TOKEN_TTL_MS of the mid-flight poll above.
+    // 8 minutes since mint, past the original flat ttl but within
+    // TOKEN_TTL_MS of the mid-flight poll above
     t.mock.timers.tick(4 * 60 * 1000);
     const laterRes = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
     assert.equal(laterRes.status, 200, "a token used recently enough must still be accepted past its original flat expiry");
@@ -178,9 +180,8 @@ test("control-port proxy: a repeatedly-used token still hits its absolute ceilin
   const token = controlTokens.mint(allowedAdminId, allowedServerId);
 
   try {
-    // Poll every 4 minutes -- comfortably inside the 5-minute sliding
-    // window, so the token never lapses on its own -- for just past the
-    // 12-hour ceiling.
+    // poll every 4 minutes, comfortably inside the sliding window so
+    // the token never lapses on its own, for just past the 12h ceiling
     const pollIntervalMs = 4 * 60 * 1000;
     const totalPolls = Math.ceil((12 * 60 * 60 * 1000) / pollIntervalMs) + 1;
     let lastStatus;

@@ -1,3 +1,5 @@
+// express and its middleware, node built-ins, and every src/ module
+// this app wires together
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const multer = require("multer");
@@ -25,36 +27,29 @@ const PORT = Number(process.env.PORT || 3000);
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
 const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
-const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false"; // Default true. Disable only for local http dev.
+// default true, disable only for local http dev
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
 
 const app = express();
+// drop the x-powered-by header, no need to advertise the framework
 app.disable("x-powered-by");
-// Trust exactly one hop (nginx), not the whole chain. nginx's
-// $proxy_add_x_forwarded_for appends to X-Forwarded-For rather than
-// replacing it, so trusting the full chain would let a client spoof
-// req.ip with their own header and dodge the login rate limiter.
+// trust exactly one hop (nginx), not the whole chain
+// see docs/Why.md#why-does-the-app-trust-exactly-one-proxy-hop
 app.set("trust proxy", 1);
 app.use(cookieParser());
-// maxAge matters here, not just defaults to serve-static's own: without
-// it every page load/reload sends a fresh conditional request for every
-// sidebar icon before the browser's allowed to reuse what it already has,
-// which is exactly what shows up as a visible placeholder flash on each
-// reload. These are small, rarely-changed icons with no content-hashed
-// filename to cache-bust on, so a short-ish lifetime (not a year) is the
-// right trade-off -- long enough to kill the flash, short enough that an
-// icon swap shows up again within a day without a hard refresh.
+// a short cache lifetime kills the icon placeholder flash on reload
+// see docs/Why.md#why-do-static-assets-get-a-1-day-cache-lifetime
 app.use("/assets", express.static(path.join(__dirname, "..", "public"), { maxAge: "1d" }));
-// Browsers request /favicon.ico at the domain root as a fallback whenever
-// a page has no <link rel="icon"> of its own -- true of the real DCS
-// webgui's index.html, which we don't control. Answering it here avoids
-// a stray 404 on every /s/<slug>/ page load; a real .ico isn't required,
-// browsers accept any image type regardless of the request's extension.
+// answers the browser's own /favicon.ico fallback request, so a page
+// with no <link rel="icon"> of its own (the real dcs webgui) doesn't 404
 app.get("/favicon.ico", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "logo.png")));
 
+// how many admin accounts exist, used to gate /setup
 function adminCount() {
   return db.prepare("SELECT COUNT(*) AS n FROM admins").get().n;
 }
 
+// set the session cookie with this app's own fixed options
 function setSessionCookie(res, token) {
   res.cookie(auth.SESSION_COOKIE, token, {
     httpOnly: true,
@@ -64,7 +59,7 @@ function setSessionCookie(res, token) {
   });
 }
 
-// ---- /setup: only reachable while no admin accounts exist ----
+// section: /setup, only reachable while no admin accounts exist yet
 
 app.get("/setup", (req, res) => {
   if (adminCount() > 0) return res.status(404).send("Not found.");
@@ -92,7 +87,7 @@ app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
   res.redirect("/");
 });
 
-// ---- /login, /logout ----
+// section: /login, /logout
 
 app.get("/login", (req, res) => {
   if (adminCount() === 0) return res.redirect("/setup");
@@ -128,9 +123,9 @@ app.post("/logout", express.urlencoded({ extended: false }), (req, res) => {
   res.redirect("/login");
 });
 
-// ---- /invite/:token: redeem an account-creation invite. Unauthenticated,
-// same tier as /setup and /login -- the account being created doesn't
-// exist yet. ----
+// section: /invite/:token, redeeming an account-creation invite
+// unauthenticated, same tier as /setup and /login, the account being
+// created doesn't exist yet
 
 app.get("/invite/:token", (req, res) => {
   const invite = invitesDb.getValidInviteByToken(req.params.token);
@@ -180,8 +175,7 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
   res.redirect("/");
 });
 
-// ---- everything below requires a session ----
-
+// everything below here requires a session
 app.use(auth.requireAuth);
 
 app.get("/", (req, res) => {
@@ -189,16 +183,16 @@ app.get("/", (req, res) => {
   res.send(views.dashboardPage({ admin: req.admin, servers }));
 });
 
-// ---- account management: full page for site admins, read-only "My
-// account" + self-service password change for everyone else ----
+// section: account management
+// the full page for site admins, read-only "my account" plus
+// self-service password change for everyone else
 
 const accountsRouter = express.Router();
-// No blanket requireAccountManager gate here -- GET / and the
-// change-password route are for every admin (see accountsPage()'s
-// site-admin/self-service branch). Every mutation that touches another
-// account, or account creation, gets requireAccountManager on its own
-// route below instead.
+// no blanket requireAccountManager gate here, GET / and change-password
+// are for every admin, every mutation that touches another account
+// gets its own requireAccountManager below instead
 
+// load this request's own view of the accounts page (site admin or not)
 function loadAccountsPageData(req, { error, notice, inviteUrl } = {}) {
   const servers = serversDb.getAllServers();
   if (!req.admin.can_manage_accounts) {
@@ -218,11 +212,8 @@ accountsRouter.get("/", (req, res) => {
   res.send(loadAccountsPageData(req, flash.readFlash(req, res)));
 });
 
-// Self-service: change the logged-in admin's own password. Available to
-// every admin, not just site admins, which is why this isn't under
-// requireAccountManager. Signs out every other session for this account --
-// the point of requiring the current password is letting the real owner
-// kick out anyone (or anything hijacked) still logged in elsewhere.
+// self-service password change, available to every admin
+// see docs/Why.md#why-does-changing-your-password-sign-out-every-other-session
 accountsRouter.post("/change-password", express.urlencoded({ extended: false }), (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (!current_password || !new_password || !confirm_password) {
@@ -248,18 +239,14 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
   res.redirect("/admin/accounts");
 });
 
-// ---- everything below is site-admin only ----
+// everything below here is site-admin only
 
-// Permission names the matrix popup is allowed to toggle, one cell at a
-// time. Checked against this fixed list before ever reaching servers.js/
-// invites.js, which also reject anything outside their own PERMISSION_COLUMNS
-// -- belt and suspenders, since this value flows in from a request body.
+// permission names the matrix popup may toggle, checked here too,
+// belt and suspenders on top of servers.js/invites.js's own checks,
+// since this value flows in from a request body
 const TOGGLEABLE_PERMISSIONS = new Set(["access", "upload", "view", "download", "delete"]);
 
-// The matrix popup's per-cell toggle, for a real account. Server access and
-// each mission-category permission all move through here now, each as its
-// own request -- not the per-server loop the row's own Save button used to
-// run. JSON in, JSON out: this is fetch()-driven, not a page navigation.
+// the matrix popup's per-cell toggle for a real account, fetch driven
 accountsRouter.post("/:id/permissions", auth.requireAccountManager, express.json(), (req, res) => {
   const targetId = Number(req.params.id);
   const serverId = Number(req.body?.server_id);
@@ -271,6 +258,7 @@ accountsRouter.post("/:id/permissions", auth.requireAccountManager, express.json
   res.json({ ok: true });
 });
 
+// the same per-cell toggle, for a pending invite instead of a real account
 accountsRouter.post("/invites/:id/permissions", auth.requireAccountManager, express.json(), (req, res) => {
   const inviteId = Number(req.params.id);
   const serverId = Number(req.body?.server_id);
@@ -285,8 +273,8 @@ accountsRouter.post("/invites/:id/permissions", auth.requireAccountManager, expr
 accountsRouter.post("/invite", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   invitesDb.pruneExpired();
   const { token } = invitesDb.createInvite({ canManageAccounts: Boolean(req.body.can_manage_accounts) });
-  // Starts with no server permissions -- granted afterward from the same
-  // page, via the pending invite's own Permissions button/popup.
+  // starts with no server permissions, granted afterward from the
+  // pending invite's own permissions button
   const inviteUrl = `${req.protocol}://${req.get("host")}/invite/${token}`;
   flash.setFlash(res, { inviteUrl });
   res.redirect("/admin/accounts");
@@ -320,8 +308,8 @@ accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extend
     flash.setFlash(res, { error: "That username is already taken." });
     return res.redirect("/admin/accounts");
   }
-  // Starts with no server permissions -- granted afterward from the same
-  // page, via the new account's own Permissions button/popup.
+  // starts with no server permissions, granted afterward from the
+  // new account's own permissions button
   res.redirect("/admin/accounts");
 });
 
@@ -365,20 +353,19 @@ accountsRouter.post("/:id/delete", auth.requireAccountManager, (req, res) => {
 
 app.use("/admin/accounts", accountsRouter);
 
-// ---- server management (site admins only) ----
+// section: server management, site admins only
 
 const SLUG_RE = /^[a-z0-9-]+$/;
-// Must match the real Windows DCS instance folder name under Saved Games,
-// e.g. "Example_Training", or the DCS default "DCS.dcs_serverrelease".
-// Dots are normal here. Only a string of dots alone (".", "..") is
-// rejected, not dots in general. No slashes/backslashes -- the agent
-// builds filesystem paths from this. Kept in sync with agent.js.
+// must match the real windows dcs instance folder name under saved
+// games, dots are normal, only a string of dots alone is rejected,
+// kept in sync with agent.js's own copy of this pattern
 const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
 const DEFAULT_INSTANCE_NAME = "DCS.dcs_serverrelease";
 
 const serversRouter = express.Router();
 serversRouter.use(auth.requireAccountManager);
 
+// load this request's own view of the servers page
 function loadServersPageData(req, { error, notice } = {}) {
   return views.serversPage({ admin: req.admin, servers: serversDb.getAllServers(), error, notice });
 }
@@ -434,15 +421,17 @@ serversRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) =
 
 serversRouter.post("/:id/delete", (req, res) => {
   const targetId = Number(req.params.id);
-  // admin_server_access rows for this server cascade-delete automatically
-  // via ON DELETE CASCADE in the schema. No separate cleanup needed here.
+  // admin_server_access rows for this server cascade-delete via the
+  // schema's own ON DELETE CASCADE, no separate cleanup needed
   db.prepare("DELETE FROM servers WHERE id = ?").run(targetId);
   res.redirect("/admin/servers");
 });
 
-// ---- webgui control-port assignment: review + explicit confirm before
-// ever writing to a server's own autoexec.cfg on the physical host ----
+// section: webgui control-port assignment
+// review, then an explicit confirm before ever writing to a server's
+// own autoexec.cfg on the physical host
 
+// ask the agent what webgui_port (if any) an instance already has
 async function agentStatus(instanceName) {
   const url = new URL(`/webgui/${encodeURIComponent(instanceName)}/status`, MISSION_AGENT_URL);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
@@ -450,6 +439,7 @@ async function agentStatus(instanceName) {
   return res.json();
 }
 
+// propose a free port for every server that doesn't already have one
 async function buildWebguiPortProposal() {
   const servers = serversDb.getAllServers();
   const statuses = await Promise.all(
@@ -510,15 +500,11 @@ serversRouter.post("/webgui-ports/confirm", async (req, res) => {
   }
 });
 
-// ---- webgui bundle sync ----
-// Pulls the real DCS webgui SPA straight out of a DCS World Server install
-// already on the host, instead of an admin copying their own legitimate
-// copy into webgui-static/ by hand. Explicit admin action, same shape as
-// webgui-ports above -- a silent DCS update on the host must not silently
-// change what every admin sees. webgui-static/ stays a single shared
-// folder for every server slug. The admin just picks which configured
-// server to sync *from*.
+// section: webgui bundle sync
+// pulls the real dcs webgui spa out of a dcs world server install
+// already on the host, see docs/Why.md#why-is-webgui-static-synced-explicitly
 
+// ask the agent for a tarball of one install's own WebGUI folder
 async function fetchWebguiBundle(installPath) {
   const url = new URL("/dcs-install/webgui-bundle", MISSION_AGENT_URL);
   url.searchParams.set("path", installPath);
@@ -536,17 +522,10 @@ serversRouter.get("/webgui-sync", (req, res) => {
   res.send(views.webguiSyncPage({ admin: req.admin, servers: serversDb.getAllServers(), ...flash.readFlash(req, res) }));
 });
 
-// Two path segments deliberately. A single-segment "/webgui-sync" would be
-// shadowed by the earlier POST "/:id" route above -- Express matches ":id"
-// against the literal string "webgui-sync". Same reason webgui-ports' own
-// confirm route is "/webgui-ports/confirm" rather than a bare POST
-// "/webgui-ports".
+// two path segments deliberately, a bare "/webgui-sync" would be
+// shadowed by the earlier POST "/:id" route matching "webgui-sync" as an id
 serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
-    // Matches the original direct-render target: this check used
-    // loadServersPageData (the servers page), not webguiSyncPage, unlike
-    // the validation check right below it -- preserved as-is rather than
-    // "fixed" into consistency, since that's a separate UX question.
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
   }
@@ -556,15 +535,9 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
     return res.redirect("/admin/servers/webgui-sync");
   }
 
-  // Extract into a scratch dir first and validate it before touching the
-  // live webgui-static/ at all. Then swap via two renames -- fast, same
-  // filesystem -- with a restore-on-failure path. A bad path, a
-  // mid-transfer failure, or a bundle missing index.html must never leave
-  // /s/:slug/ serving a half-replaced or missing bundle. The scratch dir
-  // has to be a sibling of webguiRoot, not e.g. somewhere under
-  // local-only/: rename() across filesystems fails with EXDEV, and
-  // WEBGUI_STATIC_PATH can point anywhere, so nothing guarantees they'd
-  // share one otherwise.
+  // extract into a scratch dir and validate before touching the live
+  // webgui-static/ at all, then swap via two fast same-filesystem renames
+  // see docs/Why.md#why-must-the-webgui-sync-scratch-dir-be-a-sibling-of-webguiroot
   const tmpDir = `${webguiRoot}.sync-tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const hadExisting = fsSync.existsSync(webguiRoot);
   const backupDir = `${webguiRoot}.sync-backup-${Date.now()}`;
@@ -579,6 +552,7 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
     try {
       await fs.rename(tmpDir, webguiRoot);
     } catch (renameErr) {
+      // the rename into place failed, put the old bundle back
       if (hadExisting) await fs.rename(backupDir, webguiRoot);
       throw renameErr;
     }
@@ -597,7 +571,7 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
 
 app.use("/admin/servers", serversRouter);
 
-// ---- A/B self-update (site admins only) ----
+// section: a/b self-update, site admins only
 
 const updateRouter = express.Router();
 updateRouter.use(auth.requireAccountManager);
@@ -627,30 +601,27 @@ updateRouter.post("/check", async (req, res) => {
 });
 
 updateRouter.post("/", (req, res) => {
-  // Guards against a double-click or rapid re-click firing a second
-  // applyUpdate() while one is already in flight -- confirmed in
-  // production as a real risk (two full update cycles 24 seconds
-  // apart), not theoretical.
+  // guards against a double-click firing a second applyUpdate() while
+  // one is already in flight, see docs/Why.md#why-does-update-state-track-when-an-update-was-triggered
   const cooldownUntil = updateCheck.getUpdateCooldownUntil();
   if (cooldownUntil) {
-    flash.setFlash(res, { error: `An update was just started -- try again after ${cooldownUntil.toISOString().slice(11, 19)} UTC.` });
+    flash.setFlash(res, { error: `An update was just started, try again after ${cooldownUntil.toISOString().slice(11, 19)} UTC.` });
     return res.redirect("/admin/update");
   }
   updateCheck.recordUpdateTriggered();
-  // Responds first, then kicks applyUpdate() off only once that response
-  // has actually finished sending -- it ends in process.exit() on
-  // success, which must never race the admin's own page load. res.on
-  // ("finish") still fires normally on a redirect response.
+  // respond first, only kick off applyUpdate() once the response has
+  // actually finished sending, it ends in process.exit() on success,
+  // which must never race the admin's own page load
   res.on("finish", () => {
     updateCheck.applyUpdate().catch((err) => console.error(`Update failed: ${err.message}`));
   });
-  flash.setFlash(res, { notice: "Update started. Staging the new release and restarting both services -- this can take a minute; refresh afterward." });
+  flash.setFlash(res, { notice: "Update started. Staging the new release and restarting both services — this can take a minute; refresh afterward." });
   res.redirect("/admin/update");
 });
 
 app.use("/admin/update", updateRouter);
 
-// ---- site-wide settings (site admins only) ----
+// section: site-wide settings, site admins only
 
 const settingsRouter = express.Router();
 settingsRouter.use(auth.requireAccountManager);
@@ -673,14 +644,15 @@ settingsRouter.post("/", express.urlencoded({ extended: false }), (req, res) => 
 
 app.use("/admin/settings", settingsRouter);
 
-// ---- logs: the auth-gate's own + the mission-agent's, merged into one
-// timeline (site admins only) ----
+// section: logs, the auth-gate's own plus the mission-agent's, merged
+// site admins only
 
 const logsRouter = express.Router();
 logsRouter.use(auth.requireAccountManager);
 
 const LOG_WINDOWS_MS = { "15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000, "6h": 6 * 60 * 60 * 1000, "24h": 24 * 60 * 60 * 1000 };
 
+// parse a raw ndjson log file's text into entry objects
 function parseLogLines(text) {
   return text
     .split("\n")
@@ -696,6 +668,7 @@ function parseLogLines(text) {
     });
 }
 
+// fetch and parse the mission-agent's own log entries
 async function fetchAgentLogEntries() {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured.");
   const url = new URL("/logs", MISSION_AGENT_URL);
@@ -740,13 +713,10 @@ logsRouter.get("/", async (req, res) => {
 
 app.use("/admin/logs", logsRouter);
 
-// ---- per-server: access check, mission upload, then generic proxy ----
+// section: per-server access check, mission upload, then generic proxy
 
-// permission is one of servers.js's PERMISSION_COLUMNS keys ("upload",
-// "view", "download", "delete"), or omitted for routes that only need
-// *some* access to the server at all (the generic webgui proxy/static
-// passthrough) -- "view" is specifically the mission-management page's own
-// gate, not a stand-in for bare access.
+// permission is one of servers.js's PERMISSION_COLUMNS keys, or
+// omitted for routes that only need some access to the server at all
 function requireServerAccess({ permission } = {}) {
   return (req, res, next) => {
     const server = serversDb.getServerBySlug(req.params.slug);
@@ -759,6 +729,7 @@ function requireServerAccess({ permission } = {}) {
   };
 }
 
+// missions arrive in memory, only .miz files accepted
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_MISSION_BYTES, files: 1 },
@@ -767,6 +738,7 @@ const upload = multer({
   },
 });
 
+// this admin's own mission permissions on this one server
 function loadMissionAccess(req) {
   const access = serversDb.getAccess(req.admin.id, req.dcsServer.id) || {};
   return {
@@ -777,6 +749,7 @@ function loadMissionAccess(req) {
   };
 }
 
+// ask the agent for one instance's mission list
 async function fetchMissionsList(instanceName) {
   const url = new URL(`/missions/${encodeURIComponent(instanceName)}`, MISSION_AGENT_URL);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
@@ -784,6 +757,7 @@ async function fetchMissionsList(instanceName) {
   return (await res.json()).missions;
 }
 
+// render the missions page, loading the list only if this admin can view it
 async function renderMissionsPage(req, res, { status = 200, error, notice } = {}) {
   const access = loadMissionAccess(req);
   let missions = [];
@@ -806,11 +780,9 @@ app.get("/s/:slug/missions", requireServerAccess({ permission: "view" }), (req, 
   renderMissionsPage(req, res, flash.readFlash(req, res));
 });
 
-// Redirects after every outcome (not the direct-render renderMissionsPage()
-// uses elsewhere) so reloading the result page never resubmits the same
-// file a second time -- download/trash below stay as they are: download
-// streams a file directly (can't redirect binary content), and a
-// reloaded trash request is harmless (the file's already moved).
+// redirects after every outcome so reloading the result page never
+// resubmits the same file, unlike download/trash below (download
+// streams a file directly, a reloaded trash request is just harmless)
 app.post(
   "/s/:slug/missions/upload",
   requireServerAccess({ permission: "upload" }),
@@ -914,35 +886,18 @@ app.post(
   }
 );
 
-// The real DCS webgui is a static SPA with no server of its own. Opened as
-// a local file, its own connection logic tries to reach a backend at
-// whatever host/port it decides on -- undocumented, and not necessarily
-// even the page's own hostname:port. Rather than guess that logic, this
-// rewrites it at the network layer: any fetch() that isn't for one of the
-// app's own static files under /s/<slug>/ gets redirected to the one
-// shared control-port proxy, with a short-lived per-load token attached
-// (see controlTokens.js) in place of a cookie. Cross-port/cross-origin
-// fetch() doesn't carry cookies by default, even though the cookie itself
-// is host-scoped, so a plain reverse proxy would have nothing to authorize
-// the connection with.
+// section: the real dcs webgui itself, reverse-proxied and rewritten
+// see docs/Why.md#why-does-the-auth-gate-rewrite-fetch-instead-of-a-plain-reverse-proxy
 
-// webgui-static/ is deliberately gitignored, not shipped in this repo. The
-// real DCS webgui is shared-source, not open source. Redistributing it is
-// not allowed. Each deployment has to populate this directory itself, from
-// its own legitimate copy. Its absence is an expected state on a fresh
-// checkout, not a bug, and must not take the rest of the app down --
-// login/accounts/servers admin should all still work before it's in place.
+// gitignored, each deployment supplies its own legitimate copy
+// see docs/Why.md#why-is-webgui-static-gitignored-instead-of-shipped
 const webguiRoot = process.env.WEBGUI_STATIC_PATH || path.join(__dirname, "..", "webgui-static");
 
-// Matches the app.js script tag regardless of quoting style or whitespace.
-// A real DCS webgui build ships this minified -- no quotes around the src
-// attribute (<script src=js/app.js></script>) -- which an exact literal-
-// string match misses entirely and silently. A silent miss here means the
-// bootstrap below never gets injected: app.js runs with native fetch(),
-// talks straight to 127.0.0.1 instead of the control-port proxy, and every
-// admin just sees "server not responding" with no error anywhere.
+// matches the app.js script tag regardless of quoting/whitespace
+// see docs/Why.md#why-does-the-bootstrap-injection-match-the-script-tag-with-a-regex
 const APP_JS_SCRIPT_RE = /<script\s+src=["']?js\/app\.js["']?\s*>\s*<\/script>/;
 
+// read index.html and warn (never throw) if it's missing or unexpected
 function loadWebguiIndexTemplate(root) {
   let template;
   try {
@@ -983,49 +938,22 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
     function rewriteIfBackendCall(url) {
       var target;
       try {
-        // The real DCS webgui's own default backend URL is malformed --
-        // "http://127.0.0.1\\:8088/..." with a literal backslash before the
-        // port colon. Per the URL spec, a backslash right after the host
-        // ends authority parsing for http(s) URLs, so the port number never
-        // gets recognized as a port at all -- it falls into the path
-        // instead ("/8088/encryptedRequest"), which then rides along
-        // untouched through the rewrite below and shows up doubled next to
-        // the port we do set correctly. Undo that one specific escape
-        // before parsing, so the URL's own port is what wins.
-        //
-        // Quadruple/double backslashes below, not the single/double a
-        // plain regex would use: this whole block is itself a JS template
-        // literal in server.js. \\d is not a recognized string escape, so
-        // Node's own parser silently drops the backslash and ships the
-        // browser a regex that can never match a digit -- confirmed with
-        // node -e before writing this the second time. This exact count
-        // survives that first unescaping and reaches the browser as the
-        // literal regex /\\+:(\d+)/.
+        // undo one specific escape before parsing
+        // see docs/Why.md#why-does-the-backend-url-rewrite-undo-a-literal-backslash
         target = new URL(url.replace(/\\\\+:(\\d+)/, ":$1"), location.href);
       } catch (e) {
         return null;
       }
-      // Anything for one of the app's own served files (same-origin, under
-      // BASE_PATH) stays untouched. Everything else -- same-host on a
-      // different path, or a hardcoded absolute host like the real DCS
-      // webgui's own 127.0.0.1 -- is the app trying to reach its live
-      // backend.
+      // the app's own served files, under base_path, stay untouched
+      // everything else is the app trying to reach its live backend
       if (target.hostname === location.hostname && target.pathname.indexOf(BASE_PATH) === 0) return null;
       target.protocol = location.protocol;
       target.hostname = location.hostname;
       target.port = CONTROL_PORT;
       return target.toString();
     }
-    // The real DCS webgui's own control-port discovery call
-    // (ACTION=GetJSONData) only exists to hand back { address, webPort,
-    // webKey } so the app can set its live backend URL and derive its
-    // AES key from webKey. The app's own code already skips this call
-    // entirely when opened via file:// or localhost, hardcoding this
-    // exact response instead -- webKey is a fixed, publicly known
-    // constant baked into every DCS install (never a per-server secret),
-    // not something that needs a real round trip. Mirroring that same
-    // shortcut here, for the reverse-proxied case, is exactly as
-    // legitimate as the app's own file://+localhost path already is.
+    // fakes the real webgui's own control-port discovery response
+    // see docs/Why.md#why-does-the-bootstrap-fake-the-control-port-discovery-call
     function isControlPortDiscoveryCall(url) {
       return /[?&]ACTION=GetJSONData(?:&|$)/.test(url);
     }
@@ -1047,13 +975,8 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
     };
   })();
 
-  // The real DCS webgui has no link back to the auth-gate dashboard -- once
-  // an admin is inside it, the only way out is the browser's own back
-  // button, which is unreliable since the webgui's Vue router does its own
-  // in-page navigation. This adds one, anchored to the top bar next to the
-  // "DCS Server" title (.navbar-brand) rather than a fixed screen corner,
-  // because the left icon sidebar can collapse/expand and would shift or
-  // cover a corner-anchored button; the top bar itself never moves.
+  // adds a link back to this app's own dashboard
+  // see docs/Why.md#why-is-the-back-button-anchored-to-the-navbar-brand
   (function () {
     var STYLE_ID = "auth-gate-back-btn-style";
     if (!document.getElementById(STYLE_ID)) {
@@ -1070,11 +993,8 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
       btn.className = "auth-gate-back-btn";
       btn.href = "/";
       btn.textContent = "\\u2190 Control Panel";
-      // Styled as a nav item, not a button -- the same idiom the real
-      // webgui's own left sidebar uses for its nav links (dim at rest,
-      // full opacity + a blue left-border accent on hover), not the dark
-      // filled pill this started as, which read as a foreign floating
-      // widget rather than a built-in part of the top bar.
+      // styled as a nav item, the same idiom the real sidebar's own
+      // links use, not a floating pill that reads as a foreign widget
       btn.style.cssText =
         "position:absolute;top:50%;transform:translateY(-50%);" +
         "padding:12px 16px;border-left:3px solid transparent;" +
@@ -1116,15 +1036,15 @@ app.use("/s/:slug", requireServerAccess(), express.static(webguiRoot, { index: f
 
 app.use((req, res) => res.status(404).send("Not found."));
 
+// start every listener this app owns, and wire up a graceful shutdown
 function start() {
   const httpServer = app.listen(PORT, () => {
     console.log(`dcs-webgui-auth-gate listening on :${PORT}`);
   });
   const controlProxyServer = serverProxy.startControlProxy();
   updateCheck.startHourlyCheck();
-  // Explicit db.close() on shutdown, not just process exit. Leaving
-  // better-sqlite3's native handles to GC/finalizers has crashed the
-  // process during teardown instead of exiting cleanly.
+  // explicit db.close() on shutdown
+  // see docs/Why.md#why-does-shutdown-call-db-close-explicitly
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
       controlProxyServer.close(() => {
@@ -1137,14 +1057,12 @@ function start() {
   }
 }
 
-// require.main === module is only true for `node src/server.js` directly
-// (local dev, and the pre-A/B deployment path) -- launcher.js requires
-// this file instead of running it, so require.main there is launcher.js's
-// own module, never this one. It calls start() explicitly instead; see
-// launcher.js.
+// only true for `node src/server.js` directly, launcher.js requires
+// this file instead of running it, and calls start() explicitly itself
 if (require.main === module) {
   start();
 }
 
+// expose the express app itself, plus the starter launcher.js calls
 module.exports = app;
 module.exports.start = start;

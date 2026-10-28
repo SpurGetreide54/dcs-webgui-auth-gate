@@ -1,43 +1,20 @@
-# Runs once, as root, whenever dcs-webgui-auth-gate.service's OnFailure=
-# fires -- which, after the exit(0)/Restart=always fix (see
-# dcs-webgui-auth-gate.service's own comment), now only happens for a
-# genuine failed exit, not a successful update's deliberate handoff.
-# This is deliberately a *separate* unit, not logic inside
-# the app: the dcs-webgui-auth-gate service account has no sudo (confirmed
-# during the A/B design's own live-infra audit), so it cannot call
-# systemctl itself -- this root-run unit is what makes "a bad update rolls
-# back automatically" possible without granting the app account anything
-# new.
-#
-# Flips active-slot (a<->b) and restarts -- correct precisely because a
-# failed start always just happened in whichever slot an update flipped
-# *to*, so "the other slot" is always the last one that was actually
-# working.
+# runs once, as root, whenever the real unit's OnFailure= fires
+# flips active-slot and restarts into the slot that was working before
+# see docs/Why.md#why-is-the-rollback-a-separate-systemd-unit
 #
 # Install alongside the real unit at
 # /etc/systemd/system/dcs-webgui-auth-gate-rollback.service, then
-# systemctl daemon-reload. See docs/SETUP.md's A/B migration section.
+# systemctl daemon-reload. See docs/A-B-Self-Update.md.
 
 [Unit]
 Description=Roll dcs-webgui-auth-gate back to its other A/B slot after repeated start failures
 
 [Service]
 Type=oneshot
-# LOG_FILE here must match whatever AUTH_GATE_LOG_PATH is set to in the
-# shared .env (see docs/SETUP.md's A/B migration section) -- this is a
-# separate root-run unit, with no EnvironmentFile of its own, so it can't
-# read that value and has its own hardcoded copy instead, same as
-# STATE_FILE already is. A rollback is exactly the kind of event
-# /admin/logs exists to surface, so it's worth logging here too.
-# Every %s below is doubled to %%s -- systemd expands a bare % as its own
-# unit-file specifier syntax *before* the shell ever sees this line (e.g.
-# %s alone means "the invoking user's default shell"), not just inside the
-# shell's own printf. Confirmed the hard way in production: a bare %s here
-# silently turned "printf %s "$NEW"" into "printf /usr/bin/bash "$NEW"",
-# writing the literal text "/usr/bin/bash" into active-slot instead of
-# "a"/"b" -- corrupting the one thing this unit exists to fix, the first
-# time it ever actually fired. %% is the escape for a literal % in any
-# ExecStart= line, same as it would be for %i, %n, or any other specifier.
+# log_file/state_file are hardcoded, not read from .env
+# see docs/Why.md#why-does-the-rollback-unit-hardcode-its-own-paths
+# every %s is doubled to %%s
+# see docs/Why.md#why-is-every-percent-s-doubled-in-this-execstart
 ExecStart=/bin/sh -c '\
   STATE_FILE=/var/www/dcs-webgui-auth-gate/active-slot; \
   LOG_FILE=/var/www/dcs-webgui-auth-gate/auth-gate.log; \

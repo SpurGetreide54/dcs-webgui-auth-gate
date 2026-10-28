@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Builds and signs local-only/release/signed_updates.json: the manifest
-// src/updateCheck.js verifies before ever trusting a release. Run by hand
-// at release time, after the two artifacts already exist (the auth-gate
-// tarball and agent.exe -- see scripts/build-agent-exe.sh for the latter).
-// The releaser then uploads both artifacts plus this manifest as assets
-// on a real GitHub Release, tagged to match --version.
+// builds and signs signed_updates.json, the manifest updateCheck.js
+// verifies before trusting a release, run by hand after both
+// artifacts already exist
 //
 // Usage:
 //   node scripts/release/sign-updates.js \
@@ -16,8 +13,8 @@
 //     [--tag 1.4.3-alpha] \
 //     [--key local-only/keys/update-signing-key.pem]
 //
-// The private key never leaves this machine -- local-only/ is gitignored.
-// Only its public half (hardcoded in src/updateCheck.js) ships with the app.
+// the private key never leaves this machine, local-only/ is gitignored
+// only its public half (hardcoded in src/updateCheck.js) ships with the app
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -79,11 +76,8 @@ function main() {
 
   const privateKey = crypto.createPrivateKey(fs.readFileSync(args.keyPath, "utf8"));
 
-  // Fixed key order matters: this exact object (stringified) is what gets
-  // signed, and src/updateCheck.js's verifyManifest() re-stringifies the
-  // same keys (everything except "signature") in the order they were
-  // parsed from the file. Writing {...signed, signature} below keeps that
-  // order intact end to end.
+  // fixed key order matters here, see
+  // docs/Why.md#why-does-sign-updatesjs-care-about-key-order
   const signed = {
     version: args.version,
     changelog_url: args.changelogUrl,
