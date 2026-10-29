@@ -109,8 +109,7 @@ app.post("/login", express.urlencoded({ extended: false }), async (req, res) => 
   auth.recordLoginAttempt(req, username);
 
   const admin = db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
-  // always run one real bcrypt compare, known username or not, so an
-  // unknown username can't be told apart by a near-instant response
+  // always run one real bcrypt compare, known username or not
   // see docs/Why.md#why-is-verifypassword-async-but-hashpassword-isnt
   const passwordOk = await auth.verifyPassword(password, admin ? admin.password_hash : auth.DUMMY_PASSWORD_HASH);
   if (!admin || !passwordOk) {

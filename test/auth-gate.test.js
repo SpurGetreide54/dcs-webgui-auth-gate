@@ -503,10 +503,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
     assert.match(await lastAttempt.text(), /Too many attempts/, "6th attempt within the window should be rate-limited");
 
-    // login lockout must not count successful logins, and must clear
-    // on a success -- a fresh X-Forwarded-For isolates this from the
-    // rate-limit-probe block above and from siteadmin/serveradmin's
-    // other logins elsewhere in this test
+    // login lockout must not count successful logins, and must clear on a
+    // success, isolated via a fresh X-Forwarded-For from the blocks above
     const lockoutProbeHeaders = { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.1" };
     for (let i = 0; i < 4; i++) {
       await postAndFollowFlash(`${base}/login`, {
@@ -526,10 +524,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(successAfterFourFailuresRes.status, 302, "a correct password on the 5th attempt must still succeed");
     assert.equal(successAfterFourFailuresRes.headers.get("location"), "/", "a successful login must redirect to the dashboard, not back to /login");
 
-    // a 6th attempt (another failure) must not be locked out: if the
-    // prior success hadn't cleared the counter, this would be the 6th
-    // recorded attempt in the window and get rejected before even
-    // checking the password
+    // a 6th attempt (another failure) must not be locked out, proving
+    // the prior success actually cleared the counter
     const afterClearRes = await postAndFollowFlash(`${base}/login`, {
       method: "POST",
       headers: lockoutProbeHeaders,
@@ -537,9 +533,8 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.match(await afterClearRes.text(), /Invalid username or password/, "a success must clear the counter, so the next attempt is judged on its own, not rejected as rate-limited");
 
-    // six correct logins in a row must all succeed -- under the old
-    // bug (never cleared on success) the 6th would have been rejected
-    // as rate-limited even though every attempt used the right password
+    // six correct logins in a row must all succeed, proving a run of
+    // successes alone never trips the lockout
     const successiveLoginHeaders = { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.2" };
     for (let i = 0; i < 6; i++) {
       const res = await fetch(`${base}/login`, {
@@ -570,9 +565,9 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       "an expired session row must be pruned by the next login"
     );
 
-    // known-username and unknown-username logins must take roughly
-    // the same, measurably non-trivial time -- a loose bound, not
-    // pinned to an exact ms figure, since CI hardware varies
+    // known-username and unknown-username logins must take roughly the
+    // same, measurably non-trivial time, as a loose bound since CI
+    // hardware varies
     async function timeLogin(usernameForTiming, xff) {
       const t0 = process.hrtime.bigint();
       await fetch(`${base}/login`, {

@@ -18,16 +18,13 @@ function hashPassword(password) {
   return bcrypt.hashSync(password, BCRYPT_COST);
 }
 
-// check a plain password against a stored hash, async so a 260ms
-// bcrypt compare yields the event loop instead of blocking it solid
+// check a plain password against a stored hash
 // see docs/Why.md#why-is-verifypassword-async-but-hashpassword-isnt
 function verifyPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
 
-// a hash of no real password, compared on every login with an unknown
-// username so that path costs the same one real bcrypt compare a
-// known username does, instead of returning near-instantly
+// a hash of no real password, compared on login when the username doesn't exist
 // see docs/Why.md#why-is-verifypassword-async-but-hashpassword-isnt
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), BCRYPT_COST);
 
@@ -65,8 +62,7 @@ function pruneOldLoginAttempts() {
   ).run(RATE_LIMIT_WINDOW_SECONDS);
 }
 
-// clear this ip/username pair's recorded attempts after a successful
-// login, so a run of good logins never burns through the lockout budget
+// clear this ip/username pair's recorded login attempts
 function clearLoginAttempts(req, username) {
   db.prepare("DELETE FROM login_attempts WHERE key = ?").run(rateLimitKey(req, username));
 }
