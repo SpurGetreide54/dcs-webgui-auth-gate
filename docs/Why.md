@@ -287,6 +287,21 @@ shared bearer token can't tell admins apart, so nothing here can
 destroy a mission file outright.<br>A leaked token can add files and
 move files into `Missions/.trash/`, never erase one for good.
 
+## Why does the agent check typeof before every path operation?
+
+`path.basename`, `path.join`, and friends throw `ERR_INVALID_ARG_TYPE`
+on anything that isn't a string, and that throw happens inside an
+async Express 4 handler with no try/catch, so it becomes an unhandled
+rejection and kills the whole process.<br>Confirmed by reproducing it:
+`POST /missions/Inst/download` with `{"missions":[{"a":1}]}` crashed
+the agent via `path.basename`, and an array `instance_name` on
+`/upload` crashed it via `path.join` -- a single-element array like
+`["Inst"]` stringifies to `"Inst"` and passes `INSTANCE_NAME_RE.test()`
+by coercion, then reaches `path.join` as the array itself, not a
+string.<br>Checking `typeof === "string"` first, before any other
+validation, closes both without having to reason about what every
+downstream `path.*` call would do with the wrong type.
+
 ## Why does safeMissionPath reject empty and dot-led names?
 
 `.` and `""` both resolve to `targetDir` itself once joined and
