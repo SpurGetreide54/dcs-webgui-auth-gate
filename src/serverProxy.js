@@ -67,9 +67,12 @@ function buildControlProxyApp() {
     ws: true,
     on: {
       proxyReq(proxyReq) {
-        // server to server only, this bearer token never reaches the
-        // browser, and the browser's own token never reaches the agent
+        // server to server only, scrub every browser-identifying header
+        // before this hop so nothing admin-specific reaches the agent
         proxyReq.setHeader("Authorization", `Bearer ${MISSION_AGENT_TOKEN}`);
+        proxyReq.removeHeader("x-auth-gate-token");
+        proxyReq.removeHeader("cookie");
+        proxyReq.removeHeader("origin");
       },
       // a failed upstream connection becomes a plain text error, not a crash
       error(err, req, res) {

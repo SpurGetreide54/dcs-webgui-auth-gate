@@ -313,6 +313,33 @@ test("relay uses the configured port and strips the /webgui/<instance> prefix", 
   }
 });
 
+test("relay strips the agent's own bearer token, cookie, and origin before reaching DCS", async () => {
+  let lastDcsRequestHeaders;
+  const dummyDcs = await new Promise((resolve) => {
+    const s = require("node:http").createServer((req, res) => {
+      lastDcsRequestHeaders = req.headers;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ path: req.url }));
+    });
+    s.listen(0, "127.0.0.1", () => resolve(s));
+  });
+  try {
+    const port = dummyDcs.address().port;
+    const instance = "Example_HeaderScrub";
+    fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
+    fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), `webgui_port = ${port}\n`);
+
+    await fetch(`${base}/webgui/${instance}/some/path`, {
+      headers: authHeaders({ Cookie: "dcs_session=leaked-session-value", Origin: "http://evil.example" }),
+    });
+    assert.equal(lastDcsRequestHeaders.authorization, undefined, "the agent's own bearer token must not reach DCS");
+    assert.equal(lastDcsRequestHeaders.cookie, undefined, "the gate's session cookie must not reach DCS");
+    assert.equal(lastDcsRequestHeaders.origin, undefined, "the browser's own origin must not reach DCS");
+  } finally {
+    dummyDcs.close();
+  }
+});
+
 test("relay rejects requests with no token", async () => {
   const res = await fetch(`${base}/webgui/${INSTANCE}/some/path`);
   assert.equal(res.status, 401);

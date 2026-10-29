@@ -34,7 +34,7 @@ let allowedAdminId, otherAdminId, allowedServerId, otherServerId;
 
 test.before(async () => {
   dummyAgent = await startDummyHttpServer((req, res) => {
-    lastAgentRequest = { path: req.url, authorization: req.headers.authorization };
+    lastAgentRequest = { path: req.url, authorization: req.headers.authorization, headers: req.headers };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ path: req.url }));
   });
@@ -80,6 +80,25 @@ test("control-port proxy: valid token for a granted server reaches the agent, sc
     const body = await res.json();
     assert.equal(body.path, "/webgui/Example_Allowed/some/path", "must route through the agent under /webgui/<instance_name>");
     assert.equal(lastAgentRequest.authorization, `Bearer ${AGENT_TOKEN}`, "agent call must carry the shared bearer token, not the browser's own X-Auth-Gate-Token");
+  } finally {
+    server.close();
+  }
+});
+
+test("control-port proxy: strips the browser's own token, cookie, and origin before relaying to the agent", async () => {
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+
+  try {
+    await fetch(`${base}/some/path`, {
+      headers: { "X-Auth-Gate-Token": token, Cookie: "dcs_session=leaked-session-value", Origin: "http://evil.example" },
+    });
+    assert.equal(lastAgentRequest.headers["x-auth-gate-token"], undefined, "the browser's own control token must not reach the agent");
+    assert.equal(lastAgentRequest.headers.cookie, undefined, "the gate's session cookie must not reach the agent");
+    assert.equal(lastAgentRequest.headers.origin, undefined, "the browser's own origin must not reach the agent");
   } finally {
     server.close();
   }

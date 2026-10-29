@@ -332,6 +332,13 @@ const webguiProxyMiddleware = createProxyMiddleware({
   changeOrigin: true,
   ws: true,
   on: {
+    proxyReq(proxyReq) {
+      // the bearer token checkToken already verified must not ride any
+      // further than this agent, same for the browser's own cookie/origin
+      proxyReq.removeHeader("authorization");
+      proxyReq.removeHeader("cookie");
+      proxyReq.removeHeader("origin");
+    },
     error(err, req, res) {
       res.writeHead(502, { "Content-Type": "text/plain" });
       res.end(`Could not reach the DCS server: ${err.message}`);
