@@ -287,6 +287,23 @@ shared bearer token can't tell admins apart, so nothing here can
 destroy a mission file outright.<br>A leaked token can add files and
 move files into `Missions/.trash/`, never erase one for good.
 
+## Why does safeMissionPath reject empty and dot-led names?
+
+`.` and `""` both resolve to `targetDir` itself once joined and
+resolved, and the old path check had a special case
+(`resolvedFinal !== resolvedTarget && ...`) that let exactly that
+through as "safe."<br>Confirmed by reproducing the crash: downloading
+a mission named `.` passed that check, then
+`fsSync.createReadStream(dir)` emitted an uncaught `EISDIR` with no
+error listener, killing the agent process and every server's control
+channel with it until NSSM restarted it.<br>Rejecting any name that is
+empty or starts with `.` removes the one case the special-case check
+existed for, so the check could be simplified back to a plain
+`startsWith(resolvedTarget + path.sep)`.<br>The same gap let the trash
+route rename the Missions directory into itself (`EINVAL`) after
+already moving earlier names in the same request, which is why every
+name in a trash request is still validated before any file is moved.
+
 ## Why does agent.js duplicate appLog.js's log format instead of importing it?
 
 This file builds standalone into `agent.exe` with zero dependency on
