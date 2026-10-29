@@ -154,11 +154,25 @@ function missionsDir(instanceDir) {
 function safeMissionPath(targetDir, filename) {
   // strips any directory components first
   const safeName = path.basename(filename || "");
+  // an empty or dot-led name resolves to targetDir itself (or a
+  // hidden entry such as .trash), never a real mission
+  // see docs/Why.md#why-does-safemissionpath-reject-empty-and-dot-led-names
+  if (!safeName || safeName.startsWith(".")) return null;
   const finalPath = path.join(targetDir, safeName);
   const resolvedTarget = path.resolve(targetDir);
   const resolvedFinal = path.resolve(finalPath);
-  if (resolvedFinal !== resolvedTarget && !resolvedFinal.startsWith(resolvedTarget + path.sep)) return null;
+  if (!resolvedFinal.startsWith(resolvedTarget + path.sep)) return null;
   return { safeName, finalPath };
+}
+
+// true only for an existing plain file, never a directory
+async function isExistingFile(filePath) {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
 }
 
 // an RFC 6266 Content-Disposition value: a quoted ascii fallback for
@@ -233,7 +247,7 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
   for (const name of names) {
     const resolved = safeMissionPath(targetDir, name);
     if (!resolved) return res.status(400).send(`Invalid mission name: ${name}`);
-    if (!fsSync.existsSync(resolved.finalPath)) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
+    if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
     resolvedPaths.push(resolved);
   }
 
@@ -242,7 +256,14 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
     const { safeName, finalPath } = resolvedPaths[0];
     res.set("Content-Disposition", contentDispositionValue(safeName));
     res.set("Content-Type", "application/zip");
-    return fsSync.createReadStream(finalPath).pipe(res);
+    const stream = fsSync.createReadStream(finalPath);
+    // a file removed or replaced by something unreadable after the
+    // isExistingFile check above would otherwise crash the agent
+    stream.on("error", (err) => {
+      if (!res.headersSent) res.status(500);
+      res.end(`Failed to read mission: ${err.message}`);
+    });
+    return stream.pipe(res);
   }
 
   // more than one gets bundled, unmodified, into one outer zip
@@ -270,7 +291,7 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
   for (const name of names) {
     const resolved = safeMissionPath(targetDir, name);
     if (!resolved) return res.status(400).send(`Invalid mission name: ${name}`);
-    if (!fsSync.existsSync(resolved.finalPath)) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
+    if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
     resolvedPaths.push(resolved);
   }
 

@@ -521,6 +521,38 @@ test("download: a path-traversal mission name reduces to a plain filename and 40
   assert.equal(res.status, 404);
 });
 
+test("download rejects a dot-led or empty mission name, and the agent survives the attempt", async () => {
+  for (const name of [".", "", "..", ".trash", ".hidden.miz"]) {
+    const res = await fetch(`${base}/missions/${INSTANCE}/download`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ missions: [name] }),
+    });
+    assert.equal(res.status, 400, `${JSON.stringify(name)} must be rejected before it can resolve to the Missions folder itself`);
+  }
+
+  // proves the process is still alive, not just that each fetch above
+  // returned without the connection dropping
+  const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
+test("download 404s on a real subdirectory instead of streaming it", async () => {
+  const instance = "Example_SubdirDownload";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(path.join(missionsDir, "a-subdir"), { recursive: true });
+
+  const res = await fetch(`${base}/missions/${instance}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["a-subdir"] }),
+  });
+  assert.equal(res.status, 404);
+
+  const stillUp = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
 // section: mission soft-delete (trash)
 
 test("trash moves the mission aside instead of deleting it", async () => {
@@ -579,6 +611,37 @@ test("trash: a path-traversal mission name reduces to a plain filename and 404s,
     body: JSON.stringify({ missions: ["../../../etc/passwd"] }),
   });
   assert.equal(res.status, 404);
+});
+
+test("trash rejects a dot-led or empty mission name, and the agent survives the attempt", async () => {
+  for (const name of [".", "", "..", ".trash", ".hidden.miz"]) {
+    const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ missions: [name] }),
+    });
+    assert.equal(res.status, 400, `${JSON.stringify(name)} must be rejected before any file in the request is moved`);
+  }
+
+  const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
+test("trash 404s on a real subdirectory instead of renaming it into itself", async () => {
+  const instance = "Example_SubdirTrash";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(path.join(missionsDir, "a-subdir"), { recursive: true });
+
+  const res = await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["a-subdir"] }),
+  });
+  assert.equal(res.status, 404);
+  assert.equal(fs.existsSync(path.join(missionsDir, "a-subdir")), true, "the subdirectory must be left untouched");
+
+  const stillUp = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
 });
 
 test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
