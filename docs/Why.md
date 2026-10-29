@@ -92,6 +92,31 @@ rate-limit window, where same-day comparisons depend on the mismatched
 `T`/space byte.<br>Keeping every timestamp in SQLite's own format
 sidesteps the mismatch entirely.
 
+## Why is verifyPassword async but hashPassword isn't?
+
+A bcrypt compare at this app's cost factor takes around 260ms, measured
+directly with the project's own `bcryptjs` dependency.<br>Run
+synchronously, that blocks the whole event loop solid for 260ms on
+every login attempt, including the 2-second control-panel polling
+every open server panel relies on.<br>`bcryptjs`'s own async `compare`
+yields the event loop between internal rounds instead, so `/login` and
+`/change-password`'s current-password check both call it with
+`await`.<br>`hashPassword` stays synchronous: every call site
+(`/setup`, invite-accept, a new password on `/change-password`,
+account creation) is a rare, admin-triggered write, not part of the
+threat model the event-loop stall is about, and converting it too
+would force two more handlers to become `async` for no benefit.
+
+The same `await auth.verifyPassword(...)` call in `/login` also closes
+a timing side channel: skipping the compare entirely for an unknown
+username let it return in a couple of milliseconds, while a known
+username paid the full ~260ms, letting anyone enumerate valid
+usernames by timing alone (measured directly: known-username median
+264ms vs. unknown-username median 2.3ms).<br>`DUMMY_PASSWORD_HASH`, a
+hash of no real password computed once at module load, is compared
+via that same call whenever the submitted username doesn't match a
+real admin, so both paths always pay for one real bcrypt compare.
+
 ## Why does requireAuth check Sec-Fetch-Dest?
 
 `Sec-Fetch-Dest` is set by the browser itself, `app.js` can't override
