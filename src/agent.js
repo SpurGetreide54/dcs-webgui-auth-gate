@@ -161,6 +161,14 @@ function safeMissionPath(targetDir, filename) {
   return { safeName, finalPath };
 }
 
+// an RFC 6266 Content-Disposition value: a quoted ascii fallback for
+// clients that don't decode filename*, plus the real name for ones that do
+// see docs/Why.md#why-does-content-disposition-carry-two-filenames
+function contentDispositionValue(filename) {
+  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/[\\"]/g, "\\$&");
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 // missions arrive in memory, then get written to disk atomically
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -232,13 +240,13 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
   // one .miz is already a zip, renamed, so it needs no wrapping at all
   if (resolvedPaths.length === 1) {
     const { safeName, finalPath } = resolvedPaths[0];
-    res.set("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}"`);
+    res.set("Content-Disposition", contentDispositionValue(safeName));
     res.set("Content-Type", "application/zip");
     return fsSync.createReadStream(finalPath).pipe(res);
   }
 
   // more than one gets bundled, unmodified, into one outer zip
-  res.set("Content-Disposition", `attachment; filename="missions.zip"`);
+  res.set("Content-Disposition", contentDispositionValue("missions.zip"));
   res.set("Content-Type", "application/zip");
   // already-compressed .miz files, re-compressing just burns cpu
   const archive = archiver("zip", { zlib: { level: 0 } });

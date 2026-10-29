@@ -392,6 +392,24 @@ test("download of a single selected mission streams the raw .miz back unmodified
   assert.equal(body.toString("utf8"), "solo mission bytes", "a single selection must come back byte-for-byte, not re-wrapped in another zip");
 });
 
+test("download Content-Disposition carries an ascii fallback and the real UTF-8 name", async () => {
+  const instance = "Example_DownloadUnicodeName";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  const name = "Red Flag ü.miz";
+  fs.writeFileSync(path.join(missionsDir, name), "unicode-named mission bytes");
+
+  const res = await fetch(`${base}/missions/${instance}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: [name] }),
+  });
+  assert.equal(res.status, 200);
+  const disposition = res.headers.get("content-disposition") || "";
+  assert.match(disposition, /filename="Red Flag _\.miz"/, "the ascii fallback must keep the space and replace the non-ascii character");
+  assert.match(disposition, new RegExp(`filename\\*=UTF-8''${encodeURIComponent(name)}`), "the extended value must carry the real name, percent-encoded");
+});
+
 test("download of multiple selected missions bundles them into one zip", async () => {
   const instance = "Example_DownloadMulti";
   const missionsDir = path.join(instanceDir(instance), "Missions");
