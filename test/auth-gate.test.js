@@ -170,6 +170,18 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(dashHtml, /Example Server - Training/);
     assert.match(dashHtml, /Example Server - Community 1/);
 
+    // a malformed dcs_flash cookie (null, a number, a quoted string, an
+    // array) must never crash the process, just render with no flash
+    for (const malformed of ["null", "1", '"x"', "[]"]) {
+      for (const flashPath of ["/login", "/admin/accounts", "/s/training/missions"]) {
+        const cookie = `${siteAdminCookie}; dcs_flash=${malformed}`;
+        const res = await fetch(`${base}${flashPath}`, { headers: { Cookie: cookie } });
+        assert.notEqual(res.status, 500, `dcs_flash=${malformed} on ${flashPath} must not 500`);
+      }
+    }
+    const stillAliveRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(stillAliveRes.status, 200, "the server must still answer after every malformed flash cookie");
+
     // create a second admin with no permissions yet, no account mgmt
     const trainingServerId = db.prepare("SELECT id FROM servers WHERE slug = ?").get("training").id;
     const createRes = await fetch(`${base}/admin/accounts`, {

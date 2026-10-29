@@ -17,13 +17,22 @@ function readFlash(req, res) {
   if (!raw) return {};
   // one-shot: clear it immediately so it never shows twice
   res.clearCookie(FLASH_COOKIE);
+  let parsed;
   try {
-    // parse the stored json back into an object
-    return JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
-    // a corrupt or tampered cookie is treated as no flash at all
     return {};
   }
+  // a tampered cookie can parse to any json value, not just an object
+  // (null, a number, an array), so check the shape before trusting it
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  // copy through only the known string fields, never anything else the
+  // cookie might carry
+  const flash = {};
+  for (const key of ["error", "notice", "inviteUrl"]) {
+    if (typeof parsed[key] === "string") flash[key] = parsed[key];
+  }
+  return flash;
 }
 
 // expose both functions to callers
