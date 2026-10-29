@@ -254,6 +254,26 @@ test(
   }
 );
 
+test(
+  "checkForUpdate rejects a downgrade: a lower, validly-signed version is not an update",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: "0.0.1",
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "c".repeat(64) }],
+    });
+    serveManifest(manifest);
+
+    const hasUpdate = await updateCheck.checkForUpdate();
+    assert.equal(hasUpdate, false, "a lower version must not be treated as an update, even though its signature is valid");
+    const state = updateCheck.getUpdateState();
+    assert.equal(state.available_version, null);
+  }
+);
+
 test("checkForUpdate rejects and still records the attempt when the check fails", async () => {
   // no real key needed, a throwaway key the hardcoded public key will
   // never accept, so this runs unconditionally unlike the two tests above

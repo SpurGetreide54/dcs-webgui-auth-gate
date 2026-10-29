@@ -89,6 +89,23 @@ async function downloadAndVerify(url, sha256, destPath) {
   if (actual !== sha256) throw new Error(`${url}: sha256 mismatch (expected ${sha256}, got ${actual}).`);
 }
 
+// parse "X.Y.Z" from a version string, ignoring any suffix
+function parseVersionTriple(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!match) throw new Error(`Cannot parse version "${version}".`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+// true only if a's X.Y.Z triple is strictly greater than b's
+// see docs/Why.md#why-does-checkforupdate-reject-a-lower-or-equal-version
+function isVersionGreater(a, b) {
+  const [aMajor, aMinor, aPatch] = parseVersionTriple(a);
+  const [bMajor, bMinor, bPatch] = parseVersionTriple(b);
+  if (aMajor !== bMajor) return aMajor > bMajor;
+  if (aMinor !== bMinor) return aMinor > bMinor;
+  return aPatch > bPatch;
+}
+
 // section: update_state, the display-only cache of the last check
 
 // read the single update_state row
@@ -109,7 +126,10 @@ async function checkForUpdate() {
   const now = new Date().toISOString();
   try {
     const manifest = await fetchVerifiedManifest();
-    const hasUpdate = manifest.version !== getCurrentVersion();
+    const hasUpdate = isVersionGreater(manifest.version, getCurrentVersion());
+    if (!hasUpdate) {
+      console.warn(`Offered version ${manifest.version} is not newer than the current ${getCurrentVersion()}, ignoring.`);
+    }
     setUpdateState({
       lastCheckedAt: now,
       availableVersion: hasUpdate ? manifest.version : null,
