@@ -56,6 +56,22 @@ never from anything the client supplies directly, which is what stops
 "just try a different port" from reaching a server without a grant
 for it.
 
+## Why doesn't the control-port proxy handle websocket upgrades?
+
+The real DCS webgui doesn't use WebSockets at all (confirmed by
+grepping the synced `webgui-static/js/app.js`, zero matches for
+`WebSocket`/`socket`/`ws://`/`wss://`).<br>The old `ws: true` option
+plus `httpServer.on("upgrade", proxyMiddleware.upgrade)` wiring, on
+both the gate and the agent, let an unauthenticated raw upgrade
+request reach `http-proxy-middleware`'s own `error` handler with a
+bare `Socket` standing in for `res`, and that handler's
+`res.writeHead(...)` call then threw, crashing the whole
+process.<br>Since nothing needs upgrades, the fix removes the
+capability instead of authenticating it: with no `upgrade` listener
+registered at all, Node treats the request as an ordinary one and
+routes it through the normal request path, same as any other request
+to that URL.
+
 ## Why is it safe to reflect the request origin?
 
 The control token rides in a custom header, so a cross-origin
