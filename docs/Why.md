@@ -277,6 +277,18 @@ prompt.<br>The value itself is never logged, only which of these two
 cases happened, since `agent.log` is easy to end up pasted into a
 chat or a screen share.
 
+## Why does Content-Disposition carry two filenames?
+
+RFC 6266 clients don't decode percent-escapes in the plain `filename`
+parameter, so a mission named `My Mission.miz` sent as
+`filename="My%20Mission.miz"` could save under that literal encoded
+name instead of the real one.<br>`filename*=UTF-8''<encoded>` is the
+form browsers actually decode, but a client that doesn't understand
+it falls back to `filename=`, so both are sent: a quoted ASCII
+fallback (non-ASCII bytes replaced, `"`/`\` backslash-escaped per
+quoted-string syntax) for the clients that ignore `filename*`, and
+the real UTF-8 name in `filename*` for the ones that don't.
+
 ## Why isn't the DCS install path confined to a fixed root?
 
 Unlike `instanceName`, which is confined under `SAVED_GAMES_ROOT`,
