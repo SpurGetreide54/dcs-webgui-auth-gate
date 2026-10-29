@@ -684,7 +684,9 @@ logsRouter.get("/", async (req, res) => {
     sources.add("app");
     sources.add("agent");
   }
-  const since = typeof req.query.since === "string" && req.query.since in LOG_WINDOWS_MS ? req.query.since : "all";
+  // Object.hasOwn, not `in`, so ?since=constructor can't walk the
+  // prototype chain to a function and silently turn the cutoff into NaN
+  const since = typeof req.query.since === "string" && Object.hasOwn(LOG_WINDOWS_MS, req.query.since) ? req.query.since : "all";
   const verbose = req.query.verbose === "1";
 
   let entries = [];

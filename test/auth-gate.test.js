@@ -843,6 +843,11 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const recentOnlyHtml = await (await fetch(`${base}/admin/logs?since=15m`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(recentOnlyHtml, /AUTH_GATE_LOG_MARKER old entry/, "since=15m must exclude a 2h-old entry");
 
+    // an inherited key must not be treated as a valid window, and must
+    // not empty the view the way a plain `in` check would (NaN cutoff)
+    const inheritedKeyHtml = await (await fetch(`${base}/admin/logs?since=constructor`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(inheritedKeyHtml, /AUTH_GATE_LOG_MARKER old entry/, "since=constructor must behave like since=all, not empty the view");
+
     // verbose filter: debug-level entries hidden by default, shown with verbose=1
     console.debug("AUTH_GATE_LOG_MARKER debug entry");
     const nonVerboseHtml = await (await fetch(`${base}/admin/logs`, { headers: { Cookie: siteAdminCookie } })).text();
