@@ -171,6 +171,18 @@ public key ships with the app.<br>A compromised GitHub account or a
 MITM'd download can serve bytes, but can't produce a manifest this
 code will accept without that private key.
 
+## Why does sign-updates.js not require updateCheck.js?
+
+`updateCheck.js` requires `./db`, which opens and migrates the SQLite
+file and loads the native `better-sqlite3` module as a side
+effect.<br>`sign-updates.js` runs on the releaser's own machine, not a
+deployed instance, and only ever needed one constant,
+`GITHUB_REPO`.<br>Requiring `updateCheck.js` just for that left a
+stray database file behind on every release run, and failed outright
+if the native module wasn't built there.<br>`updateConstants.js`
+holds `GITHUB_REPO` with no further requires of its own, so
+`sign-updates.js` can read it without booting anything.
+
 ## Why is fetchVerifiedManifest always re-fetched instead of cached?
 
 Callers never see an unsigned or tampered manifest this way.<br>It's
