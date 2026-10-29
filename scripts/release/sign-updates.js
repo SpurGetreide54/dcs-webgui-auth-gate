@@ -19,7 +19,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { GITHUB_REPO } = require("../../src/updateCheck");
+const { GITHUB_REPO } = require("../../src/updateConstants");
 
 function parseArgs(argv) {
   const args = { needsServiceUpdate: false };

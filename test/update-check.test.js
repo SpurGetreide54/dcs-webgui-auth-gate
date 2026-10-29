@@ -171,6 +171,30 @@ test("sign-updates.js produces a manifest the real verifyManifest() accepts, end
   }
 });
 
+test("updateConstants.js has no side effects: no db import, no sqlite file created", () => {
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "update-constants-test-"));
+  try {
+    const { execFileSync } = require("node:child_process");
+    const constantsPath = path.join(__dirname, "..", "src", "updateConstants.js");
+    const out = execFileSync(
+      process.execPath,
+      [
+        "-e",
+        `const { GITHUB_REPO } = require(${JSON.stringify(constantsPath)});
+         const loadedDb = Object.keys(require.cache).some((k) => k.includes("src${path.sep}db.js"));
+         console.log(JSON.stringify({ GITHUB_REPO, loadedDb }));`,
+      ],
+      { cwd: scratchDir, stdio: "pipe" }
+    ).toString();
+    const result = JSON.parse(out);
+    assert.equal(result.loadedDb, false, "requiring updateConstants.js must not pull in db.js");
+    assert.match(result.GITHUB_REPO, /\//, "GITHUB_REPO must still be the real owner/repo string");
+    assert.equal(fs.existsSync(path.join(scratchDir, "local-only")), false, "no local-only/ directory must be created just from requiring updateConstants.js");
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  }
+});
+
 function sendJson(res, status, obj) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(obj));

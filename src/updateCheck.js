@@ -14,10 +14,10 @@ const { Readable } = require("node:stream");
 const tar = require("tar");
 const db = require("./db");
 const activeSlot = require("./activeSlot");
+const { GITHUB_REPO } = require("./updateConstants");
 
 // section: constants and the trust root
 
-const GITHUB_REPO = "SpurGetreide54/dcs-webgui-auth-gate";
 // overridable so tests can point this at a local dummy server instead
 // of the real github api
 const GITHUB_API_BASE = process.env.GITHUB_API_BASE_OVERRIDE || "https://api.github.com";
