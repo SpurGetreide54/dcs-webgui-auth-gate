@@ -202,6 +202,14 @@ function permPopupMarkup(servers) {
   var CATEGORIES = ${categoriesJson};
   var popup = document.getElementById("perm-popup");
 
+  // escape a value before it goes into popup.innerHTML, mirrors
+  // escapeHtml's own map, not reachable from this client-side script
+  function esc(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
   function cellHtml(serverId, perm, granted) {
     return '<td class="perm-cell ' + (granted ? "granted" : "denied") + '" data-server-id="' + serverId + '" data-permission="' + perm + '">' +
       (granted ? "\\u2713" : "\\u2715") + "</td>";
@@ -217,7 +225,7 @@ function permPopupMarkup(servers) {
 
     var body = SERVERS.map(function (server) {
       var row = rows.filter(function (r) { return r.server_id === server.id; })[0];
-      var tds = "<td>" + server.name + "</td>";
+      var tds = "<td>" + esc(server.name) + "</td>";
       CATEGORIES.forEach(function (c, i) {
         if (i === 1) tds += '<td class="perm-group-gap"></td>';
         tds += cellHtml(server.id, c.key, row ? row[c.key] : false);

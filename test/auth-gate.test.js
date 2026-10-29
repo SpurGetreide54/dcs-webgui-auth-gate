@@ -224,6 +224,51 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(trainingGrant.view, true);
     assert.equal(trainingGrant.upload, false, "upload was never granted, so it must render as false");
 
+    // a server named with an html sink must render escaped in the perm
+    // popup's own inline script, actually run against a stub dom, not
+    // just checked for presence in the raw markup
+    const xssServerName = "<img src=x onerror=alert(1)>";
+    db.prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)").run("xss-server", xssServerName, "Example_Xss");
+    const accountsHtmlWithXssServer = await (
+      await fetch(`${base}/admin/accounts`, { headers: { Cookie: siteAdminCookie } })
+    ).text();
+    const permPopupScriptMatch = accountsHtmlWithXssServer.match(/<div id="perm-popup"[^>]*><\/div>\s*<script>([\s\S]*?)<\/script>/);
+    assert.ok(permPopupScriptMatch, "accounts page must render the perm-popup's own inline script");
+
+    let capturedPopupInnerHtml = "";
+    let permBtnClickHandler;
+    const popupStub = {
+      style: {},
+      getBoundingClientRect: () => ({ width: 0, height: 0 }),
+      querySelector: (sel) => (sel === ".perm-close" ? { addEventListener: () => {} } : null),
+      querySelectorAll: () => [],
+      contains: () => false,
+      set innerHTML(value) {
+        capturedPopupInnerHtml = value;
+      },
+    };
+    const permBtnStub = {
+      getAttribute: (attr) => ({ "data-kind": "account", "data-id": "999", "data-access": "[]" })[attr],
+      addEventListener: (type, handler) => {
+        if (type === "click") permBtnClickHandler = handler;
+      },
+    };
+    const permPopupContext = {
+      document: {
+        getElementById: (id) => (id === "perm-popup" ? popupStub : null),
+        querySelectorAll: (sel) => (sel === ".perm-btn" ? [permBtnStub] : []),
+        addEventListener: () => {},
+      },
+      window: { innerWidth: 1000, innerHeight: 800 },
+    };
+    vm.createContext(permPopupContext);
+    vm.runInContext(permPopupScriptMatch[1], permPopupContext);
+    assert.ok(permBtnClickHandler, "the popup script must attach a click handler to every .perm-btn");
+    permBtnClickHandler({ clientX: 0, clientY: 0, stopPropagation: () => {} });
+
+    assert.doesNotMatch(capturedPopupInnerHtml, /<img/, "a server name must never reach popup.innerHTML as a live html sink");
+    assert.match(capturedPopupInnerHtml, /&lt;img src=x onerror=alert\(1\)&gt;/, "the server name must render escaped instead");
+
     const loginRes = await fetch(`${base}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
