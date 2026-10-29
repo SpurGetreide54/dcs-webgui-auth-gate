@@ -13,7 +13,12 @@ Both the auth-gate and the mission-agent can update themselves.
 4. It relays and commits the mission-agent's own matching update.
 5. It flips the active-slot pointer and exits.
 6. The service supervisor restarts into the new slot.
-7. A version that fails to start rolls back automatically.
+7. A version that fails to start rolls back automatically. The
+   rollback unit clears the failed unit's start-limit hit
+   (`systemctl reset-failed`) before restarting it, since a unit that
+   just hit its `StartLimitBurst` refuses a plain `systemctl start`
+   otherwise. See
+   [Why.md](Why.md#why-does-the-rollback-unit-call-reset-failed-before-start).
 
 A 60-second cooldown follows every trigger. It stops a double-click,
 or a page reload, from starting a second update on top of one still

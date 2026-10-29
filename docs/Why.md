@@ -561,6 +561,18 @@ rollback is exactly the kind of event `/admin/logs` exists to surface,
 so it's worth logging here too, not just via `systemctl`'s own
 journal.
 
+## Why does the rollback unit call reset-failed before start?
+
+The real unit's `OnFailure=` only fires after it has already hit its
+own `StartLimitBurst`/`StartLimitIntervalSec`, so by the time the
+rollback unit runs, `dcs-webgui-auth-gate` is in systemd's rate-limited
+"failed" state.<br>A plain `systemctl start` on a rate-limited unit is
+refused ("Start request repeated too quickly") until
+`systemctl reset-failed` clears it or the interval passes, which would
+leave the service down right when the rollback is supposed to bring it
+back.<br>Confirmed with a throwaway `systemd --user` unit: the refusal
+and the `reset-failed` fix both reproduce exactly as described.
+
 ## Why is every %s doubled in this ExecStart?
 
 Systemd expands a bare `%` as its own unit-file specifier syntax
