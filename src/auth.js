@@ -25,6 +25,12 @@ function verifyPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
 
+// a hash of no real password, compared on every login with an unknown
+// username so that path costs the same one real bcrypt compare a
+// known username does, instead of returning near-instantly
+// see docs/Why.md#why-is-verifypassword-async-but-hashpassword-isnt
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), BCRYPT_COST);
+
 // hash a bearer token for storage, so the plain token never sits in the db
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -57,6 +63,18 @@ function pruneOldLoginAttempts() {
   db.prepare(
     `DELETE FROM login_attempts WHERE attempted_at <= datetime('now', '-' || ? || ' seconds')`
   ).run(RATE_LIMIT_WINDOW_SECONDS);
+}
+
+// clear this ip/username pair's recorded attempts after a successful
+// login, so a run of good logins never burns through the lockout budget
+function clearLoginAttempts(req, username) {
+  db.prepare("DELETE FROM login_attempts WHERE key = ?").run(rateLimitKey(req, username));
+}
+
+// delete expired session rows, called opportunistically on login,
+// mirrors pruneOldLoginAttempts's own pattern
+function pruneExpiredSessions() {
+  db.prepare(`DELETE FROM sessions WHERE expires_at <= datetime('now')`).run();
 }
 
 // create a new session for this admin, returning its plain token
@@ -123,12 +141,15 @@ function requireAccountManager(req, res, next) {
 // expose every public function and the session cookie's own name
 module.exports = {
   SESSION_COOKIE,
+  DUMMY_PASSWORD_HASH,
   hashPassword,
   verifyPassword,
   hashToken,
   isRateLimited,
   recordLoginAttempt,
   pruneOldLoginAttempts,
+  clearLoginAttempts,
+  pruneExpiredSessions,
   createSession,
   getSessionAdmin,
   destroySession,

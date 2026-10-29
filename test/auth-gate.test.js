@@ -58,7 +58,7 @@ function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
-let app, db, updateCheck, serversDb, invitesDb, serverProxy;
+let app, db, updateCheck, serversDb, invitesDb, serverProxy, auth;
 let dummyAgent, dummyAgentPort;
 // a page render can make more than one agent call (e.g. an upload post
 // then a list get), so every call is kept, not just the last one
@@ -125,6 +125,7 @@ test.before(async () => {
   serversDb = require("../src/servers");
   invitesDb = require("../src/invites");
   serverProxy = require("../src/serverProxy");
+  auth = require("../src/auth");
 });
 
 test.after(async () => {
@@ -501,6 +502,93 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       });
     }
     assert.match(await lastAttempt.text(), /Too many attempts/, "6th attempt within the window should be rate-limited");
+
+    // login lockout must not count successful logins, and must clear
+    // on a success -- a fresh X-Forwarded-For isolates this from the
+    // rate-limit-probe block above and from siteadmin/serveradmin's
+    // other logins elsewhere in this test
+    const lockoutProbeHeaders = { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.1" };
+    for (let i = 0; i < 4; i++) {
+      await postAndFollowFlash(`${base}/login`, {
+        method: "POST",
+        headers: lockoutProbeHeaders,
+        body: "username=serveradmin&password=wrong-password",
+      });
+    }
+    // the 5th attempt, with the right password, must still succeed
+    // (count was 4, under the limit) and must clear the counter
+    const successAfterFourFailuresRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: lockoutProbeHeaders,
+      body: "username=serveradmin&password=another-long-password",
+      redirect: "manual",
+    });
+    assert.equal(successAfterFourFailuresRes.status, 302, "a correct password on the 5th attempt must still succeed");
+    assert.equal(successAfterFourFailuresRes.headers.get("location"), "/", "a successful login must redirect to the dashboard, not back to /login");
+
+    // a 6th attempt (another failure) must not be locked out: if the
+    // prior success hadn't cleared the counter, this would be the 6th
+    // recorded attempt in the window and get rejected before even
+    // checking the password
+    const afterClearRes = await postAndFollowFlash(`${base}/login`, {
+      method: "POST",
+      headers: lockoutProbeHeaders,
+      body: "username=serveradmin&password=wrong-password",
+    });
+    assert.match(await afterClearRes.text(), /Invalid username or password/, "a success must clear the counter, so the next attempt is judged on its own, not rejected as rate-limited");
+
+    // six correct logins in a row must all succeed -- under the old
+    // bug (never cleared on success) the 6th would have been rejected
+    // as rate-limited even though every attempt used the right password
+    const successiveLoginHeaders = { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.2" };
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch(`${base}/login`, {
+        method: "POST",
+        headers: successiveLoginHeaders,
+        body: "username=serveradmin&password=another-long-password",
+        redirect: "manual",
+      });
+      assert.equal(res.status, 302, `successive login ${i + 1} of 6 must succeed`);
+      assert.equal(res.headers.get("location"), "/", `successive login ${i + 1} of 6 must redirect to the dashboard, not back to /login`);
+    }
+
+    // an expired session row must be gone after the next login, not
+    // just ignored by getSessionAdmin
+    const expiredTokenHash = auth.hashToken("expired-test-token");
+    db.prepare(
+      `INSERT INTO sessions (admin_id, token_hash, expires_at) VALUES (?, ?, datetime('now', '-1 seconds'))`
+    ).run(soleSiteAdminId, expiredTokenHash);
+    await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.3" },
+      body: "username=serveradmin&password=another-long-password",
+      redirect: "manual",
+    });
+    assert.equal(
+      db.prepare("SELECT 1 FROM sessions WHERE token_hash = ?").get(expiredTokenHash),
+      undefined,
+      "an expired session row must be pruned by the next login"
+    );
+
+    // known-username and unknown-username logins must take roughly
+    // the same, measurably non-trivial time -- a loose bound, not
+    // pinned to an exact ms figure, since CI hardware varies
+    async function timeLogin(usernameForTiming, xff) {
+      const t0 = process.hrtime.bigint();
+      await fetch(`${base}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": xff },
+        body: `username=${encodeURIComponent(usernameForTiming)}&password=wrong-password`,
+        redirect: "manual",
+      });
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    }
+    const knownUsernameMs = await timeLogin("serveradmin", "10.1.1.4");
+    const unknownUsernameMs = await timeLogin("no-such-admin", "10.1.1.5");
+    assert.ok(knownUsernameMs > 20, `a known-username login must take a measurably non-trivial time, took ${knownUsernameMs}ms`);
+    assert.ok(unknownUsernameMs > 20, `an unknown-username login must take a measurably non-trivial time, took ${unknownUsernameMs}ms`);
+    const [fasterMs, slowerMs] = [knownUsernameMs, unknownUsernameMs].sort((a, b) => a - b);
+    assert.ok(slowerMs < fasterMs * 5, `known (${knownUsernameMs}ms) and unknown (${unknownUsernameMs}ms) username logins must take roughly the same time, not an order of magnitude apart`);
 
     // self-service password change: wrong current password rejected,
     // correct flow signs out every other session, leaves this one alone

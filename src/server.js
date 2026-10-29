@@ -105,13 +105,19 @@ app.post("/login", express.urlencoded({ extended: false }), async (req, res) => 
     return res.redirect("/login");
   }
   auth.pruneOldLoginAttempts();
+  auth.pruneExpiredSessions();
   auth.recordLoginAttempt(req, username);
 
   const admin = db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
-  if (!admin || !(await auth.verifyPassword(password, admin.password_hash))) {
+  // always run one real bcrypt compare, known username or not, so an
+  // unknown username can't be told apart by a near-instant response
+  // see docs/Why.md#why-is-verifypassword-async-but-hashpassword-isnt
+  const passwordOk = await auth.verifyPassword(password, admin ? admin.password_hash : auth.DUMMY_PASSWORD_HASH);
+  if (!admin || !passwordOk) {
     flash.setFlash(res, { error: "Invalid username or password." });
     return res.redirect("/login");
   }
+  auth.clearLoginAttempts(req, username);
   const token = auth.createSession(admin.id);
   setSessionCookie(res, token);
   res.redirect("/");
