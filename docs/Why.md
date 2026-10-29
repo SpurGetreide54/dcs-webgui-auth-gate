@@ -65,6 +65,18 @@ request's own origin (never a wildcard) is safe to pair with
 entirely on the opaque token, not on any browser-ambient credential a
 third-party origin could piggyback on.
 
+## Why does the control-port proxy strip Cookie/Origin before relaying?
+
+`http-proxy-middleware` forwards every incoming header except the
+ones a `proxyReq` hook explicitly overwrites, so the browser's own
+`X-Auth-Gate-Token`, session cookie, and origin all rode along
+unchanged on both the gate-to-agent and agent-to-DCS hops by
+default.<br>Both hops are server-to-server once past this app's own
+checks, so none of those headers do anything useful on the other
+end, and forwarding them widens what a compromised agent or DCS
+process could see.<br>Each hop's `proxyReq` hook now calls
+`removeHeader` on all three before the request leaves.
+
 ## Why does the log path default to a path under local-only?
 
 Something created fresh on every run shouldn't need its own
