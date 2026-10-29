@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
 
 const TOKEN = "agent-self-update-test-token";
@@ -93,6 +94,38 @@ test("commit flips the current junction to the staged (idle) slot", async () => 
 
   const linkTarget = fs.readlinkSync(path.join(selfUpdateRoot, "current"));
   assert.equal(path.basename(linkTarget), "b");
+});
+
+test("commit leaves current untouched when building the new junction fails", async (t) => {
+  // stage a fresh build into whatever slot is idle now (a, since the
+  // previous test flipped current to b)
+  const body = Buffer.from("another build's bytes");
+  await fetch(`${base}/self-update/stage`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/octet-stream", "X-Sha256": sha256(body) }),
+    body,
+  });
+
+  const beforeTarget = fs.readlinkSync(path.join(selfUpdateRoot, "current"));
+  t.mock.method(fsp, "symlink", () => {
+    throw new Error("simulated symlink failure");
+  });
+
+  const res = await fetch(`${base}/self-update/commit`, { method: "POST", headers: authHeaders() });
+  assert.equal(res.status, 500);
+
+  const afterTarget = fs.readlinkSync(path.join(selfUpdateRoot, "current"));
+  assert.equal(afterTarget, beforeTarget, "current must still point at its original slot after a failed symlink attempt");
+});
+
+test("commit still flips current once the junction can be built again", async () => {
+  const res = await fetch(`${base}/self-update/commit`, { method: "POST", headers: authHeaders() });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.activeSlot, "a");
+
+  const linkTarget = fs.readlinkSync(path.join(selfUpdateRoot, "current"));
+  assert.equal(path.basename(linkTarget), "a");
 });
 
 test("commit rejects requests with no token", async () => {

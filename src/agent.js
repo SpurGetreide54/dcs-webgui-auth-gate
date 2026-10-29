@@ -439,10 +439,22 @@ app.post("/self-update/commit", checkToken, async (req, res) => {
     return res.status(400).send(`No staged build in slot ${idleSlot}. Stage one first.`);
   }
 
+  // build the new junction under a temp name first, so a failure here
+  // leaves the existing current untouched
+  // see docs/Why.md#why-does-the-commit-handler-build-the-junction-under-a-temp-name-first
+  const tempLinkPath = `${CURRENT_LINK}.new`;
+  try {
+    await fs.rm(tempLinkPath, { force: true });
+    await fs.symlink(idleSlotDir, tempLinkPath, "junction");
+  } catch (err) {
+    return res.status(500).send(`Could not flip to the new build: ${err.message}`);
+  }
+
   try {
     await fs.rm(CURRENT_LINK, { force: true });
-    await fs.symlink(idleSlotDir, CURRENT_LINK, "junction");
+    await fs.rename(tempLinkPath, CURRENT_LINK);
   } catch (err) {
+    console.error(`Could not move ${tempLinkPath} into place as ${CURRENT_LINK}: ${err.message}. The known-good junction is still at ${tempLinkPath}; rename it to "current" and restart manually.`);
     return res.status(500).send(`Could not flip to the new build: ${err.message}`);
   }
 
