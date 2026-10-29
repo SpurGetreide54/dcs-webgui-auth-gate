@@ -150,6 +150,40 @@ test("status parses a byte-for-byte real-world autoexec.cfg with mixed value typ
   assert.deepEqual(body, { configExists: true, webguiPort: 8089 });
 });
 
+test("status ignores a commented-out webgui_port line", async () => {
+  const instance = "Example_CommentedPort";
+  fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
+  fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), "-- webgui_port = 8088\n");
+
+  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const body = await res.json();
+  assert.deepEqual(body, { configExists: true, webguiPort: null });
+});
+
+test("status takes the last webgui_port assignment when several exist", async () => {
+  const instance = "Example_MultipleAssignments";
+  fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
+  fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), "webgui_port = 8080\nwebgui_port = 8081\n");
+
+  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const body = await res.json();
+  assert.deepEqual(body, { configExists: true, webguiPort: 8081 }, "lua evaluates repeated assignments in order, last one wins");
+});
+
+test("ensure-port then status round-trips the same port", async () => {
+  const instance = "Example_RoundTrip";
+  fs.mkdirSync(instanceDir(instance), { recursive: true });
+
+  await fetch(`${base}/webgui/${instance}/ensure-port`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ port: 8095 }),
+  });
+  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const body = await res.json();
+  assert.deepEqual(body, { configExists: true, webguiPort: 8095 });
+});
+
 test("ensure-port appends onto a real-world multi-key file without disturbing the other keys", async () => {
   const instance = "Example_RealWorldAppend";
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });

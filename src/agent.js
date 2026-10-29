@@ -109,8 +109,11 @@ async function readWebguiPort(instanceDir) {
     if (err.code === "ENOENT") return { configExists: false, webguiPort: null };
     throw err;
   }
-  const match = contents.match(/webgui_port\W*=\W*(\d+)/i);
-  return { configExists: true, webguiPort: match ? Number(match[1]) : null };
+  // anchored per line, ignores a trailing lua comment, last match wins
+  // see docs/Why.md#why-does-readwebguiport-anchor-its-regex-per-line
+  const matches = [...contents.matchAll(/^\s*webgui_port\s*=\s*(\d+)\s*(?:--.*)?$/gim)];
+  const last = matches.pop();
+  return { configExists: true, webguiPort: last ? Number(last[1]) : null };
 }
 
 const app = express();
