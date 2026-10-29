@@ -200,6 +200,21 @@ just clicked "check now" needs to know the check itself failed, not
 see a false "you're up to date."<br>`startHourlyCheck()`'s own silent
 background-poll behavior comes from catching it there instead.
 
+## Why does checkForUpdate reject a lower or equal version?
+
+The signature on `signed_updates.json` proves the release was signed
+with the real key, not that it's the newest one.<br>Any older,
+validly-signed manifest could still be offered as GitHub's "latest"
+(a compromised GitHub account replacing the release asset, or a stale
+cache), and this app would install it as a downgrade, rolling every
+site back to a build with a known bug.<br>`isVersionGreater` parses
+each version's `X.Y.Z` numeric triple (ignoring any `-alpha`-style
+suffix, no `semver` dependency needed) and only treats a strictly
+greater manifest version as an update.<br>No deliberate-rollback path
+exists through this channel: the automatic, local,
+crash-triggered rollback unit already covers a bad release's real
+failure mode without touching GitHub at all.
+
 ## Why is the agent relay timeout only 60 seconds?
 
 Without it, a stalled upload to a real remote host can hang
