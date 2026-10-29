@@ -285,6 +285,19 @@ input with no fixed root to confine it to.<br>This is the same trust
 level an account-manager admin already has via `instance_name` and
 mission uploads, not a new privilege boundary.
 
+## Why does readWebguiPort anchor its regex per line?
+
+The original `/webgui_port\W*=\W*(\d+)/i` had no line anchor and let
+`\W*` span newlines, so a commented-out example line (`-- webgui_port
+= 8088`, a real pattern DCS itself writes into a fresh
+`autoexec.cfg`) or an unrelated key like `my_webgui_port` would match
+and silently report the wrong port.<br>Anchoring per line
+(`^\s*webgui_port\s*=\s*(\d+)\s*(?:--.*)?$`, with `m` so `^`/`$` match
+line boundaries) fixes both, while still tolerating a trailing Lua
+comment on the real line.<br>Taking the last match when several exist
+mirrors how Lua itself would evaluate repeated assignments in the
+same file.
+
 ## Why does the agent use a "current" junction instead of NSSM's own config?
 
 `"current"` is a directory junction NSSM's `ExecStart` always targets
