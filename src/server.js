@@ -94,7 +94,7 @@ app.get("/login", (req, res) => {
   res.send(views.loginPage(flash.readFlash(req, res)));
 });
 
-app.post("/login", express.urlencoded({ extended: false }), (req, res) => {
+app.post("/login", express.urlencoded({ extended: false }), async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     flash.setFlash(res, { error: "Username and password required." });
@@ -108,7 +108,7 @@ app.post("/login", express.urlencoded({ extended: false }), (req, res) => {
   auth.recordLoginAttempt(req, username);
 
   const admin = db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
-  if (!admin || !auth.verifyPassword(password, admin.password_hash)) {
+  if (!admin || !(await auth.verifyPassword(password, admin.password_hash))) {
     flash.setFlash(res, { error: "Invalid username or password." });
     return res.redirect("/login");
   }
@@ -214,13 +214,13 @@ accountsRouter.get("/", (req, res) => {
 
 // self-service password change, available to every admin
 // see docs/Why.md#why-does-changing-your-password-sign-out-every-other-session
-accountsRouter.post("/change-password", express.urlencoded({ extended: false }), (req, res) => {
+accountsRouter.post("/change-password", express.urlencoded({ extended: false }), async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (!current_password || !new_password || !confirm_password) {
     flash.setFlash(res, { error: "All password fields are required." });
     return res.redirect("/admin/accounts");
   }
-  if (!auth.verifyPassword(current_password, req.admin.password_hash)) {
+  if (!(await auth.verifyPassword(current_password, req.admin.password_hash))) {
     flash.setFlash(res, { error: "Current password is incorrect." });
     return res.redirect("/admin/accounts");
   }

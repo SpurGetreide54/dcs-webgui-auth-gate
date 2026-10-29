@@ -18,9 +18,11 @@ function hashPassword(password) {
   return bcrypt.hashSync(password, BCRYPT_COST);
 }
 
-// check a plain password against a stored hash
+// check a plain password against a stored hash, async so a 260ms
+// bcrypt compare yields the event loop instead of blocking it solid
+// see docs/Why.md#why-is-verifypassword-async-but-hashpassword-isnt
 function verifyPassword(password, hash) {
-  return bcrypt.compareSync(password, hash);
+  return bcrypt.compare(password, hash);
 }
 
 // hash a bearer token for storage, so the plain token never sits in the db
