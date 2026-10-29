@@ -330,7 +330,6 @@ const webguiProxyMiddleware = createProxyMiddleware({
     return rest || "/";
   },
   changeOrigin: true,
-  ws: true,
   on: {
     proxyReq(proxyReq) {
       // the bearer token checkToken already verified must not ride any
@@ -473,11 +472,11 @@ app.get("/logs", checkToken, async (req, res) => {
 app.use((req, res) => res.status(404).send("Not found."));
 
 // only listen when run directly, tests import the app instead
+// see docs/Why.md#why-doesnt-the-control-port-proxy-handle-websocket-upgrades
 if (require.main === module) {
-  const httpServer = app.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`mission-agent listening on :${PORT}`);
   });
-  httpServer.on("upgrade", webguiProxyMiddleware.upgrade);
 }
 
 // expose the express app itself, for both real use and tests

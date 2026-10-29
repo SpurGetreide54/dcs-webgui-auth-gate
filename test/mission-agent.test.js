@@ -340,6 +340,47 @@ test("relay strips the agent's own bearer token, cookie, and origin before reach
   }
 });
 
+test("relay: a websocket upgrade request is treated as an ordinary one, not routed to a crashing handler", async () => {
+  const dummyDcs = await new Promise((resolve) => {
+    const s = require("node:http").createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ path: req.url }));
+    });
+    s.listen(0, "127.0.0.1", () => resolve(s));
+  });
+  try {
+    const port = dummyDcs.address().port;
+    const instance = "Example_UpgradeRequest";
+    fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
+    fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), `webgui_port = ${port}\n`);
+
+    const http = require("node:http");
+    const upgradeStatus = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: server.address().port,
+          path: `/webgui/${instance}/some/path`,
+          headers: { Authorization: `Bearer ${TOKEN}`, Connection: "Upgrade", Upgrade: "websocket" },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        }
+      );
+      req.on("upgrade", (res) => resolve(`upgrade:${res.statusCode}`));
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(upgradeStatus, 200, "with no upgrade listener attached, the request must be handled as an ordinary one");
+
+    const plainRes = await fetch(`${base}/webgui/${instance}/some/path`, { headers: authHeaders() });
+    assert.equal(plainRes.status, 200, "the server must still answer normal requests afterward");
+  } finally {
+    dummyDcs.close();
+  }
+});
+
 test("relay rejects requests with no token", async () => {
   const res = await fetch(`${base}/webgui/${INSTANCE}/some/path`);
   assert.equal(res.status, 401);

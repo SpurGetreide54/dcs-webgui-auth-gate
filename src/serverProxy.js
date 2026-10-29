@@ -64,7 +64,6 @@ function buildControlProxyApp() {
     router: (req) => req.dcsAgentUrl,
     pathRewrite: (reqPath, req) => `${req.dcsAgentPathPrefix}${reqPath}`,
     changeOrigin: true,
-    ws: true,
     on: {
       proxyReq(proxyReq) {
         // server to server only, scrub every browser-identifying header
@@ -86,15 +85,13 @@ function buildControlProxyApp() {
   return { app, proxyMiddleware };
 }
 
-// start the control-port proxy listening, websocket upgrades included
+// start the control-port proxy listening
+// see docs/Why.md#why-doesnt-the-control-port-proxy-handle-websocket-upgrades
 function startControlProxy() {
-  const { app, proxyMiddleware } = buildControlProxyApp();
-  const httpServer = app.listen(CONTROL_PORT, () => {
+  const { app } = buildControlProxyApp();
+  return app.listen(CONTROL_PORT, () => {
     console.log(`dcs-webgui control-port proxy listening on :${CONTROL_PORT}`);
   });
-  // route websocket upgrade requests through the same proxy
-  httpServer.on("upgrade", proxyMiddleware.upgrade);
-  return httpServer;
 }
 
 // expose the starter, the builder (for tests), and the port itself

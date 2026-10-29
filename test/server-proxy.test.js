@@ -104,6 +104,39 @@ test("control-port proxy: strips the browser's own token, cookie, and origin bef
   }
 });
 
+test("control-port proxy: a websocket upgrade request is treated as an ordinary one, not routed to a crashing handler", async () => {
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+
+  try {
+    const upgradeStatus = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: server.address().port,
+          path: "/some/path",
+          headers: { "X-Auth-Gate-Token": token, Connection: "Upgrade", Upgrade: "websocket" },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        }
+      );
+      req.on("upgrade", (res) => resolve(`upgrade:${res.statusCode}`));
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(upgradeStatus, 200, "with no upgrade listener attached, the request must be handled as an ordinary one");
+
+    const plainRes = await fetch(`http://127.0.0.1:${server.address().port}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(plainRes.status, 200, "the server must still answer normal requests afterward");
+  } finally {
+    server.close();
+  }
+});
+
 test("control-port proxy: rejects a missing token", async () => {
   const { app } = serverProxy.buildControlProxyApp();
   const server = app.listen(0, "127.0.0.1");
