@@ -15,6 +15,9 @@ Type=oneshot
 # see docs/Why.md#why-does-the-rollback-unit-hardcode-its-own-paths
 # every %s is doubled to %%s
 # see docs/Why.md#why-is-every-percent-s-doubled-in-this-execstart
+# reset-failed clears the start-limit hit that triggered this rollback,
+# or the start below is refused too
+# see docs/Why.md#why-does-the-rollback-unit-call-reset-failed-before-start
 ExecStart=/bin/sh -c '\
   STATE_FILE=/var/www/dcs-webgui-auth-gate/active-slot; \
   LOG_FILE=/var/www/dcs-webgui-auth-gate/auth-gate.log; \
@@ -23,5 +26,6 @@ ExecStart=/bin/sh -c '\
   printf %%s "$NEW" > "$STATE_FILE"; \
   echo "Rolled back: active-slot $CURRENT -> $NEW"; \
   printf "{\"t\":\"%%s\",\"level\":\"warn\",\"msg\":\"Rolled back: active-slot %%s -> %%s\"}\n" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000Z)" "$CURRENT" "$NEW" >> "$LOG_FILE"; \
+  systemctl reset-failed dcs-webgui-auth-gate; \
   systemctl start dcs-webgui-auth-gate \
 '
