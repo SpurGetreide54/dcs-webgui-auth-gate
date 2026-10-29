@@ -348,6 +348,18 @@ own exit-based flip: no `sc.exe`/NSSM call is needed, the Windows
 service's own restart-on-exit policy brings the process back up
 through the now-repointed junction.
 
+## Why does the commit handler build the junction under a temp name first?
+
+`fs.symlink` can fail partway through (permission, a locked directory,
+antivirus), and the old approach removed `current` before recreating
+it, so a failure there left no junction at all and the next NSSM
+restart couldn't find `agent.exe`.<br>Building `current.new` first and
+only then swapping it in means a failure during the build step leaves
+the original `current` completely untouched, and a failure during the
+swap step leaves a known-good junction sitting at `current.new` for
+manual recovery (rename it to `current`, restart), logged with that
+exact path so it's easy to find.
+
 ## Why does views.js read the DB for the update icon?
 
 Every other piece of page data is loaded by `server.js` and passed
