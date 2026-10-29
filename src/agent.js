@@ -87,7 +87,11 @@ const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
 
 // turn an instance name into its real directory, or null if unsafe
 function resolveInstanceDir(instanceName) {
-  if (!INSTANCE_NAME_RE.test(instanceName || "")) return null;
+  // a non-string would coerce through the regex test below, then
+  // throw inside path.join
+  // see docs/Why.md#why-does-the-agent-check-typeof-before-every-path-operation
+  if (typeof instanceName !== "string") return null;
+  if (!INSTANCE_NAME_RE.test(instanceName)) return null;
   const dir = path.join(SAVED_GAMES_ROOT, instanceName);
   const resolvedRoot = path.resolve(SAVED_GAMES_ROOT);
   const resolvedDir = path.resolve(dir);
@@ -152,8 +156,11 @@ function missionsDir(instanceDir) {
 // turn admin-typed-adjacent input into a safe path inside targetDir
 // shared by upload, download, and trash below
 function safeMissionPath(targetDir, filename) {
+  // a non-string entry would otherwise throw inside path.basename below
+  // see docs/Why.md#why-does-the-agent-check-typeof-before-every-path-operation
+  if (typeof filename !== "string") return null;
   // strips any directory components first
-  const safeName = path.basename(filename || "");
+  const safeName = path.basename(filename);
   // an empty or dot-led name resolves to targetDir itself (or a
   // hidden entry such as .trash), never a real mission
   // see docs/Why.md#why-does-safemissionpath-reject-empty-and-dot-led-names

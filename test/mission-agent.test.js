@@ -107,6 +107,21 @@ test("rejects a path-traversal filename instead of escaping the mission folder",
   assert.equal(fs.existsSync(escapedPath), false, "path traversal must not escape the instance folder");
 });
 
+test("rejects a non-string instance_name, and the agent survives the attempt", async () => {
+  // a repeated form field is how multer turns instance_name into an
+  // array, the same shape a crafted request would use
+  const form = new FormData();
+  form.append("instance_name", "first");
+  form.append("instance_name", "second");
+  form.append("mission", new Blob([Buffer.from("fake miz contents")]), "m.miz");
+
+  const res = await fetch(`${base}/upload`, { method: "POST", headers: authHeaders(), body: form });
+  assert.equal(res.status, 400);
+
+  const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
 test("rejects non-.miz files", async () => {
   const res = await fetch(`${base}/upload`, {
     method: "POST",
@@ -537,6 +552,20 @@ test("download rejects a dot-led or empty mission name, and the agent survives t
   assert.equal(stillUp.status, 200);
 });
 
+test("download rejects a non-string mission name, and the agent survives the attempt", async () => {
+  for (const name of [{ a: 1 }, 42, null, ["nested"]]) {
+    const res = await fetch(`${base}/missions/${INSTANCE}/download`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ missions: [name] }),
+    });
+    assert.equal(res.status, 400, `${JSON.stringify(name)} must be rejected before it reaches path.basename`);
+  }
+
+  const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
 test("download 404s on a real subdirectory instead of streaming it", async () => {
   const instance = "Example_SubdirDownload";
   const missionsDir = path.join(instanceDir(instance), "Missions");
@@ -621,6 +650,20 @@ test("trash rejects a dot-led or empty mission name, and the agent survives the 
       body: JSON.stringify({ missions: [name] }),
     });
     assert.equal(res.status, 400, `${JSON.stringify(name)} must be rejected before any file in the request is moved`);
+  }
+
+  const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
+test("trash rejects a non-string mission name, and the agent survives the attempt", async () => {
+  for (const name of [{ a: 1 }, 42, null, ["nested"]]) {
+    const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ missions: [name] }),
+    });
+    assert.equal(res.status, 400, `${JSON.stringify(name)} must be rejected before it reaches path.basename`);
   }
 
   const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
