@@ -188,6 +188,22 @@ one cell instead, for the matrix popup's per-cell click, and never
 touches the other columns.<br>`invites.js`'s `setInvitePermission`
 mirrors `setPermission` for the same popup on a pending invite.
 
+## Why does any-mission exist alongside view?
+
+The permissions matrix lets a site admin grant `upload` (or
+`download`, or `delete`) alone, with no `view`, but `GET
+/s/:slug/missions` used to gate on `view` specifically, so an
+upload-only admin had no way to reach the one page the upload form
+lives on -- a grantable permission that couldn't be used.<br>The
+mission list itself had the same narrower gate (`access.canView`
+alone, in both `missionsPage` and the agent fetch in
+`renderMissionsPage`), which would have left a download-or-delete-only
+admin on a page with nothing to select from, so both now check
+`canView || canDownload || canDelete` -- the list is also how such an
+admin picks what to act on, not just how a view-only admin reads
+it.<br>`upload`'s own form stays gated on `canUpload` alone, it needs
+no list.
+
 ## Why does the permission migration backfill from can_upload_missions?
 
 Adding the `can_view_missions`/`can_download_missions`/`can_delete_missions`
