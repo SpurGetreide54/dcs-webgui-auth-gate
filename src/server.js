@@ -769,7 +769,9 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
   const access = loadMissionAccess(req);
   let missions = [];
   let pageError = error;
-  if (access.canView) {
+  // the list is also needed to pick a mission for download/delete,
+  // not shown only to admins with the view flag itself
+  if (access.canView || access.canDownload || access.canDelete) {
     if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
       pageError = pageError || "Mission agent is not configured.";
     } else {
@@ -783,7 +785,7 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
   res.status(status).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, access, missions, error: pageError, notice }));
 }
 
-app.get("/s/:slug/missions", requireServerAccess({ permission: "view" }), (req, res) => {
+app.get("/s/:slug/missions", requireServerAccess({ permission: "any-mission" }), (req, res) => {
   renderMissionsPage(req, res, flash.readFlash(req, res));
 });
 

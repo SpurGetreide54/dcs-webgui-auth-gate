@@ -61,10 +61,14 @@ function canUploadMissions(adminId, serverId) {
 }
 
 // true if this admin holds the named permission on this server
+// "any-mission" is also a sentinel, true if any one of the four
+// mission permissions is set, not a real column
+// see docs/Why.md#why-does-any-mission-exist-alongside-view
 function hasPermission(adminId, serverId, permission) {
   const access = getAccess(adminId, serverId);
   if (!access) return false;
   if (permission === "access") return true;
+  if (permission === "any-mission") return Object.values(PERMISSION_COLUMNS).some((column) => Boolean(access[column]));
   const column = PERMISSION_COLUMNS[permission];
   if (!column) throw new Error(`Unknown permission: ${permission}`);
   return Boolean(access[column]);

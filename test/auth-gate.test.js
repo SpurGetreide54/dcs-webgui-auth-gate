@@ -302,12 +302,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(forbiddenProxy.status, 403);
 
     // restricted account has no access at all on Community 1, so the
-    // missions page (gated on "view", not "access") must 403 there too
+    // missions page (gated on "any-mission", not "access") must 403 there too
     const forbiddenMissionsNoAccess = await fetch(`${base}/s/community1/missions`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenMissionsNoAccess.status, 403);
 
     // on training it has view but not upload, the missions page is
-    // gated on view alone, so it's reachable but shows no upload form
+    // reachable but shows no upload form
     const missionsPageRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(missionsPageRes.status, 200, "view access must be enough to reach the missions page");
     const missionsPageHtml = await missionsPageRes.text();
@@ -319,6 +319,44 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       body: new FormData(),
     });
     assert.equal(forbiddenMissionUpload.status, 403, "view without the upload flag must not allow uploading");
+
+    // a permission the matrix lets a site admin grant alone (upload,
+    // or download) must still have somewhere to be used
+    // see docs/Why.md#why-does-any-mission-exist-alongside-view
+    async function loginAs(username, password) {
+      const res = await fetch(`${base}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `username=${username}&password=${encodeURIComponent(password)}`,
+        redirect: "manual",
+      });
+      const cookie = extractCookie(res);
+      assert.ok(cookie, `login as ${username} must succeed`);
+      return cookie;
+    }
+
+    const uploadOnlyId = db
+      .prepare("INSERT INTO admins (username, password_hash) VALUES (?, ?)")
+      .run("uploadonlyadmin", auth.hashPassword("upload-only-long-password")).lastInsertRowid;
+    serversDb.setAccess(uploadOnlyId, trainingServerId, { canUploadMissions: true });
+    const uploadOnlyCookie = await loginAs("uploadonlyadmin", "upload-only-long-password");
+    const uploadOnlyRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: uploadOnlyCookie } });
+    assert.equal(uploadOnlyRes.status, 200, "upload-only access must be enough to reach the missions page");
+    const uploadOnlyHtml = await uploadOnlyRes.text();
+    assert.match(uploadOnlyHtml, /Upload mission/, "upload rights must show the upload form");
+    assert.doesNotMatch(uploadOnlyHtml, /<h2>Missions<\/h2>/, "no view, download, or delete rights means no mission list");
+
+    const downloadOnlyId = db
+      .prepare("INSERT INTO admins (username, password_hash) VALUES (?, ?)")
+      .run("downloadonlyadmin", auth.hashPassword("download-only-long-password")).lastInsertRowid;
+    serversDb.setAccess(downloadOnlyId, trainingServerId, { canDownloadMissions: true });
+    const downloadOnlyCookie = await loginAs("downloadonlyadmin", "download-only-long-password");
+    const downloadOnlyRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: downloadOnlyCookie } });
+    assert.equal(downloadOnlyRes.status, 200, "download-only access must be enough to reach the missions page");
+    const downloadOnlyHtml = await downloadOnlyRes.text();
+    assert.doesNotMatch(downloadOnlyHtml, /Upload mission/, "no upload rights means no upload form");
+    assert.match(downloadOnlyHtml, /<h2>Missions<\/h2>/, "download rights alone must still show the list to pick a mission from");
+    assert.match(downloadOnlyHtml, /Download selected/, "download rights must show the download button");
 
     // the real webgui's own static bundle is served under /s/<slug>/
     const webguiRes = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });

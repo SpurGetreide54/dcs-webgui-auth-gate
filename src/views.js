@@ -148,7 +148,11 @@ function dashboardPage({ admin, servers }) {
           (s) => `<li>
         <strong>${escapeHtml(s.name)}</strong>
         — <a href="/s/${encodeURIComponent(s.slug)}/">Open control panel</a>
-        ${s.can_view_missions ? `— <a href="/s/${encodeURIComponent(s.slug)}/missions">Missions</a>` : ""}
+        ${
+          s.can_upload_missions || s.can_view_missions || s.can_download_missions || s.can_delete_missions
+            ? `— <a href="/s/${encodeURIComponent(s.slug)}/missions">Missions</a>`
+            : ""
+        }
       </li>`
         )
         .join("")}</ul>`
@@ -619,7 +623,7 @@ function missionsPage({ admin, server, access = {}, missions = [], error, notice
     `Missions — ${server.name}`,
     `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
-${access.canView ? missionListSection(server, access, missions) : ""}
+${access.canView || access.canDownload || access.canDelete ? missionListSection(server, access, missions) : ""}
 ${uploadForm}`,
     { admin, active: "dashboard", pageTitle: `Missions — ${server.name}` }
   );
