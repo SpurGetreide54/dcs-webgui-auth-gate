@@ -192,16 +192,16 @@ mirrors `setPermission` for the same popup on a pending invite.
 
 The permissions matrix lets a site admin grant `upload` (or
 `download`, or `delete`) alone, with no `view`, but `GET
-/s/:slug/missions` used to gate on `view` specifically, so an
-upload-only admin had no way to reach the one page the upload form
-lives on -- a grantable permission that couldn't be used.<br>The
+/s/:slug/missions` used to gate on `view` specifically, leaving an
+upload-only admin with no way to reach the one page the upload form
+lives on: a grantable permission that couldn't be used.<br>The
 mission list itself had the same narrower gate (`access.canView`
 alone, in both `missionsPage` and the agent fetch in
 `renderMissionsPage`), which would have left a download-or-delete-only
 admin on a page with nothing to select from, so both now check
-`canView || canDownload || canDelete` -- the list is also how such an
-admin picks what to act on, not just how a view-only admin reads
-it.<br>`upload`'s own form stays gated on `canUpload` alone, it needs
+`canView || canDownload || canDelete`, since the list is also how such
+an admin picks what to act on, not just how a view-only admin reads
+it.<br>`upload`'s own form stays gated on `canUpload` alone; it needs
 no list.
 
 ## Why does the permission migration backfill from can_upload_missions?
@@ -327,7 +327,7 @@ async Express 4 handler with no try/catch, so it becomes an unhandled
 rejection and kills the whole process.<br>Confirmed by reproducing it:
 `POST /missions/Inst/download` with `{"missions":[{"a":1}]}` crashed
 the agent via `path.basename`, and an array `instance_name` on
-`/upload` crashed it via `path.join` -- a single-element array like
+`/upload` crashed it via `path.join`: a single-element array like
 `["Inst"]` stringifies to `"Inst"` and passes `INSTANCE_NAME_RE.test()`
 by coercion, then reaches `path.join` as the array itself, not a
 string.<br>Checking `typeof === "string"` first, before any other
