@@ -1005,6 +1005,22 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(degradedHtml, /AUTH_GATE_LOG_MARKER app-side entry/, "the auth-gate's own entries must still render");
     dummyAgentLogsShouldFail = false;
 
+    // session cookie sliding: the browser's own cookie must catch up
+    // to what sessions.expires_at already does on every request
+    // see docs/Why.md#why-does-getsessionadmin-report-a-cookie-refresh-flag
+    const slidingTokenHash = auth.hashToken(siteAdminCookie.split("=")[1]);
+    db.prepare("UPDATE sessions SET expires_at = datetime('now', '+30 minutes') WHERE token_hash = ?").run(slidingTokenHash);
+    const staleRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
+    const staleSetCookie = staleRes.headers.get("set-cookie");
+    assert.ok(staleSetCookie, "a session more than an hour past its last slide must get its cookie reissued");
+    assert.equal(extractCookie(staleRes), siteAdminCookie, "the reissued cookie must carry the same session token, not a new one");
+    assert.match(staleSetCookie, /Max-Age=43200/, "the reissued cookie must carry a fresh 12h maxAge");
+
+    // right after a refresh, the session is nowhere near the threshold
+    // again, so the cookie must not be reissued on every single request
+    const freshRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(extractCookie(freshRes), null, "a session well within the threshold must not get its cookie reissued");
+
     // logout is a destructive-styled navbar button, post only
     const dashboardHtmlForLogout = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.match(dashboardHtmlForLogout, /<form method="post" action="\/logout" class="logout-form">/);

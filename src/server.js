@@ -181,7 +181,7 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
 });
 
 // everything below here requires a session
-app.use(auth.requireAuth);
+app.use(auth.requireAuth(setSessionCookie));
 
 app.get("/", (req, res) => {
   const servers = serversDb.getAccessibleServers(req.admin.id);

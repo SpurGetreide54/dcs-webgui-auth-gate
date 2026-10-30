@@ -6,6 +6,9 @@ const db = require("./db");
 const BCRYPT_COST = 12;
 // 12h sliding idle timeout
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
+// how much of that 12h can pass before the browser's own cookie
+// (set once, at login) needs reissuing to match the slide below
+const COOKIE_REFRESH_THRESHOLD_SECONDS = 60 * 60;
 const SESSION_COOKIE = "dcs_session";
 const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
@@ -84,23 +87,28 @@ function createSession(adminId) {
 }
 
 // look up the admin a session token belongs to, or null if it's gone
+// see docs/Why.md#why-does-getsessionadmin-report-a-cookie-refresh-flag
 function getSessionAdmin(token) {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT admins.* FROM sessions
+      `SELECT admins.*,
+         sessions.expires_at < datetime('now', '+' || ? || ' seconds') AS needs_cookie_refresh
+       FROM sessions
        JOIN admins ON admins.id = sessions.admin_id
        WHERE sessions.token_hash = ? AND sessions.expires_at > datetime('now')`
     )
-    .get(hashToken(token));
+    .get(SESSION_TTL_SECONDS - COOKIE_REFRESH_THRESHOLD_SECONDS, hashToken(token));
   if (!row) return null;
+  const needsCookieRefresh = !!row.needs_cookie_refresh;
+  delete row.needs_cookie_refresh;
 
   // sliding expiry, touch the session on every authenticated request
   db.prepare(
     `UPDATE sessions SET expires_at = datetime('now', '+' || ? || ' seconds') WHERE token_hash = ?`
   ).run(SESSION_TTL_SECONDS, hashToken(token));
 
-  return row;
+  return { admin: row, needsCookieRefresh };
 }
 
 // delete a session outright, e.g. on logout
@@ -109,21 +117,26 @@ function destroySession(token) {
   db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
 }
 
-// express middleware: require a valid session, or send the caller to login
-function requireAuth(req, res, next) {
-  const token = req.cookies[SESSION_COOKIE];
-  const admin = getSessionAdmin(token);
-  if (!admin) {
-    // tell a real page load apart from the spa's own fetch() calls
-    // see docs/Why.md#why-does-requireauth-check-sec-fetch-dest
-    const isPageLoad = (req.get("sec-fetch-dest") || "document") === "document";
-    if (!isPageLoad) {
-      return res.status(401).json({ error: "not authenticated" });
+// express middleware factory: require a valid session, or send the
+// caller to login; onCookieRefreshNeeded(res, token) reissues the cookie
+// see docs/Why.md#why-does-getsessionadmin-report-a-cookie-refresh-flag
+function requireAuth(onCookieRefreshNeeded) {
+  return function (req, res, next) {
+    const token = req.cookies[SESSION_COOKIE];
+    const session = getSessionAdmin(token);
+    if (!session) {
+      // tell a real page load apart from the spa's own fetch() calls
+      // see docs/Why.md#why-does-requireauth-check-sec-fetch-dest
+      const isPageLoad = (req.get("sec-fetch-dest") || "document") === "document";
+      if (!isPageLoad) {
+        return res.status(401).json({ error: "not authenticated" });
+      }
+      return res.redirect("/login");
     }
-    return res.redirect("/login");
-  }
-  req.admin = admin;
-  next();
+    req.admin = session.admin;
+    if (session.needsCookieRefresh) onCookieRefreshNeeded(res, token);
+    next();
+  };
 }
 
 // express middleware: require the logged-in admin to manage accounts
