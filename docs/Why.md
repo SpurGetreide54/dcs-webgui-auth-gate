@@ -153,6 +153,22 @@ it, so it reliably tells apart a real page load from the SPA's own
 header (curl, very old browsers) defaults to `"document"`, so a human
 hitting the URL directly sees the login page, not raw JSON.
 
+## Why does getSessionAdmin report a cookie-refresh flag?
+
+`sessions.expires_at` already slides on every authenticated request,
+but the browser's own `dcs_session` cookie (a fixed 12h `maxAge`) was
+only ever set at login, setup, or invite redemption, so it expired at
+hour 12 regardless of activity, contradicting `SESSION_TTL_SECONDS`'s
+own "12h sliding idle timeout" comment.<br>Reissuing the cookie on
+every single request would work too, but adds a `Set-Cookie` header
+to every response for no reason; comparing `expires_at` against the
+same threshold the DB row already uses means the cookie only gets
+reissued once an hour of real idle time has actually passed, same
+cadence as `src/controlTokens.js`'s own slide.<br>`requireAuth` takes
+`onCookieRefreshNeeded` as a parameter, rather than importing
+`setSessionCookie` directly, because that function (and the `secure`
+cookie flag it needs) lives in `server.js`, not `auth.js`.
+
 ## Why does getAccessibleServers select server_id explicitly?
 
 `servers.*` alone gives a bare `id`, the server's own id, with no way
