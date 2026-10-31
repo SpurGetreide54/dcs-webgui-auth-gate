@@ -193,11 +193,20 @@ test("getActiveIssues assembles every currently-active issue, dismissed rollback
     const keys = issues.map((i) => i.key);
     assert.ok(keys.includes("mission_agent"), "not_configured must surface as an issue");
     assert.ok(keys.includes("update_check_stale"));
+    // only the rollback check has a seen/fresh distinction, every
+    // other issue type must always render at full severity, never muted
+    for (const issue of issues) assert.equal(issue.seen, false, `${issue.key} must never report seen: true`);
 
     writeRollbackLine("2026-11-01T16:00:00.000Z");
     fresh.checkRollback();
     issues = fresh.getActiveIssues({ updateState: freshUpdateState, updateCheckIntervalMs: hourMs, staleMultiplier: 3 });
-    assert.ok(issues.map((i) => i.key).includes("rollback"));
+    const rollbackIssue = issues.find((i) => i.key === "rollback");
+    assert.ok(rollbackIssue);
+    assert.equal(rollbackIssue.seen, false, "a freshly-detected rollback must render highlighted, not muted");
+
+    fresh.markRollbackSeen();
+    issues = fresh.getActiveIssues({ updateState: freshUpdateState, updateCheckIntervalMs: hourMs, staleMultiplier: 3 });
+    assert.equal(issues.find((i) => i.key === "rollback").seen, true, "after a visit, the same rollback renders muted");
 
     fresh.dismissRollback();
     issues = fresh.getActiveIssues({ updateState: freshUpdateState, updateCheckIntervalMs: hourMs, staleMultiplier: 3 });

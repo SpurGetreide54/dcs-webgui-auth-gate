@@ -163,7 +163,7 @@ function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }
       severity: "warning",
       message: "The mission agent is not configured yet (MISSION_AGENT_URL/MISSION_AGENT_TOKEN).",
       link: "Troubleshooting.md#the-mission-agent-rejects-every-request",
-      seen: true,
+      seen: false,
     });
   } else if (state.mission_agent_status && state.mission_agent_status !== "ok") {
     issues.push({
@@ -171,7 +171,7 @@ function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }
       severity: "error",
       message: `The mission agent is not reachable (${state.mission_agent_status}).`,
       link: "Troubleshooting.md#the-mission-agent-rejects-every-request",
-      seen: true,
+      seen: false,
     });
   }
 
@@ -191,7 +191,7 @@ function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }
       severity: "warning",
       message: "The periodic update check keeps failing.",
       link: "Troubleshooting.md#the-update-sidebar-icon-never-appears-even-after-a-real-release",
-      seen: true,
+      seen: false,
     });
   }
 
@@ -201,7 +201,7 @@ function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }
       severity: "error",
       message: "webgui-static/ is empty.",
       link: "Troubleshooting.md#s-slug-returns-503",
-      seen: true,
+      seen: false,
     });
   }
 
@@ -211,7 +211,7 @@ function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }
       severity: "warning",
       message: `Deprecated env var(s) still set: ${state.deprecated_env_vars_detected}.`,
       link: "Configuration.md#deprecated-still-work",
-      seen: true,
+      seen: false,
     });
   }
 
