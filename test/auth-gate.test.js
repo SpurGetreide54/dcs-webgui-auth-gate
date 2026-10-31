@@ -58,7 +58,7 @@ function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
-let app, db, updateCheck, serversDb, invitesDb, serverProxy, auth;
+let app, db, updateCheck, diagnostics, serversDb, invitesDb, serverProxy, auth;
 let dummyAgent, dummyAgentPort;
 // a page render can make more than one agent call (e.g. an upload post
 // then a list get), so every call is kept, not just the last one
@@ -126,6 +126,7 @@ test.before(async () => {
   invitesDb = require("../src/invites");
   serverProxy = require("../src/serverProxy");
   auth = require("../src/auth");
+  diagnostics = require("../src/diagnostics");
 });
 
 test.after(async () => {
@@ -1022,6 +1023,65 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     const dashAfterUnpin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
     assert.doesNotMatch(dashAfterUnpin, /href="\/admin\/update"/, "the Update nav item must disappear again once un-pinned, with no update pending");
+
+    // diagnostics: early, clearer surfacing of config mismatches and recent failures
+    const forbiddenDiagPage = await fetch(`${base}/admin/diag`, { headers: { Cookie: serverAdminCookie } });
+    assert.equal(forbiddenDiagPage.status, 403, "a non-site-admin must not reach the diagnostics page");
+
+    const cleanDiagHtml = await (await fetch(`${base}/admin/diag`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(cleanDiagHtml, /All clear\./, "no check has run yet in this test, so nothing is reported as active");
+    const dashBeforeRollback = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(dashBeforeRollback, /href="\/admin\/diag"/);
+
+    // simulate the rollback unit's own log line, same shape it writes
+    fs.appendFileSync(
+      authGateLogPath,
+      JSON.stringify({ t: new Date().toISOString(), level: "warn", msg: "Rolled back: active-slot a -> b" }) + "\n"
+    );
+    diagnostics.checkRollback();
+
+    const dashWithRollback = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(dashWithRollback, /href="\/admin\/diag"/, "an active issue must show the diagnostics nav item even when not pinned");
+
+    const diagWithRollbackRes = await fetch(`${base}/admin/diag`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(diagWithRollbackRes.status, 200);
+    const diagWithRollbackHtml = await diagWithRollbackRes.text();
+    assert.match(diagWithRollbackHtml, /rolled back/i);
+    assert.match(diagWithRollbackHtml, /Dismiss the rollback notice/);
+
+    const dismissRes = await postAndFollowFlash(`${base}/admin/diag/dismiss-rollback`, {
+      method: "POST",
+      headers: { Cookie: siteAdminCookie },
+    });
+    assert.match(await dismissRes.text(), /dismissed/i);
+
+    const diagAfterDismissHtml = await (await fetch(`${base}/admin/diag`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(diagAfterDismissHtml, /rolled back/i, "a dismissed rollback must no longer be reported as active");
+    assert.match(diagAfterDismissHtml, /All clear\./);
+
+    // settings: pin_diag_nav and the stale-check multiplier, same shape as pin_update_nav
+    const pinDiagRes = await postAndFollowFlash(`${base}/admin/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: "pin_diag_nav=1&update_check_stale_multiplier=5",
+    });
+    assert.match(await pinDiagRes.text(), /Settings saved/);
+
+    const dashWithPinnedDiag = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(dashWithPinnedDiag, /href="\/admin\/diag"/, "the Diagnostics nav item must appear once pinned, even with a clean state");
+
+    const settingsAfterDiagPinHtml = await (await fetch(`${base}/admin/settings`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.match(settingsAfterDiagPinHtml, /name="pin_diag_nav"[^>]*checked/);
+    assert.match(settingsAfterDiagPinHtml, /name="update_check_stale_multiplier"[^>]*value="5"/);
+
+    // unchecked checkboxes send no field at all, same as the update-pin unpin above
+    await postAndFollowFlash(`${base}/admin/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: "update_check_stale_multiplier=5",
+    });
+    const dashAfterDiagUnpin = await (await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } })).text();
+    assert.doesNotMatch(dashAfterDiagUnpin, /href="\/admin\/diag"/, "the Diagnostics nav item must disappear again once un-pinned, with a clean state");
 
     // logs: auth-gate's own + agent's, merged into one timeline (site admin only)
     const forbiddenLogsPage = await fetch(`${base}/admin/logs`, { headers: { Cookie: serverAdminCookie } });

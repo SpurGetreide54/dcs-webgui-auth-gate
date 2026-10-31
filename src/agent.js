@@ -153,6 +153,12 @@ function requireInstanceDir(req, res, next) {
   next();
 }
 
+// section: connectivity check, for the auth-gate's diagnostics page
+
+app.get("/ping", checkToken, (req, res) => {
+  res.json({ ok: true });
+});
+
 // section: mission upload, list, download, soft-delete
 
 // the Missions folder under one instance's own directory

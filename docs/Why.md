@@ -447,11 +447,12 @@ exact path so it's easy to find.
 ## Why does views.js read the DB for the update icon?
 
 Every other piece of page data is loaded by `server.js` and passed
-in, but the update-available sidebar icon has to show on every
-authenticated page.<br>Threading one more parameter through every
-single page function's call site for a single cheap synchronous read
-isn't worth it, and `updateCheck.js`'s own DB read is a single-row
-`SELECT`, not network I/O, so this stays fast.
+in, but the update-available and diagnostics sidebar icons both have
+to show on every authenticated page.<br>Threading one more parameter
+through every single page function's call site for a single cheap
+synchronous read isn't worth it, and `updateCheck.js`/`diagnostics.js`'s
+own DB reads are single-row `SELECT`s, not network I/O, so this stays
+fast.
 
 ## Why are icons inlined instead of referenced via <img src>?
 

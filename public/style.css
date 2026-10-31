@@ -28,6 +28,7 @@
   --accent-red-hover: #c22636;
   --accent-cyan: #17a2b8;
   --accent-blue: #0d79e5;
+  --accent-yellow: #d9a52c;
   /* matches the real dcs webgui's own navbar/sidebar exactly, not the
      generic dark palette above, so the handoff into it is seamless */
   --navbar-bg: #1e2124;
@@ -216,6 +217,19 @@ tr:last-child td { border-bottom: none; }
 
 .error { color: var(--accent-red); }
 .error::before { content: "⚠ "; }
+
+.diag-all-clear { color: var(--accent-green); font-size: 1.5rem; }
+.diag-issue {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.diag-issue.diag-error { border-left-color: var(--accent-red); }
+.diag-issue.diag-warning { border-left-color: var(--accent-yellow); }
+.diag-issue.diag-seen { border-left-color: var(--border); }
 
 ul.server-list { list-style: none; padding: 0; }
 ul.server-list li {

@@ -94,10 +94,37 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  -- single row, same id = 1 convention as update_state, tracks every
+  -- diagnostics check's own result, for /admin/diag
+  -- see docs/Why.md#why-does-diagnostics-mirror-updatecheckjss-own-shape
+  CREATE TABLE IF NOT EXISTS diagnostics_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+
+    -- when the periodic checks below (everything except the env-var
+    -- one, which only runs once at startup) last ran, success or not
+    last_checked_at TEXT,
+
+    -- mission-agent connectivity, from GET /ping
+    mission_agent_status TEXT,
+
+    -- last self-update rollback, scanned from auth-gate.log
+    rollback_detected_at TEXT,
+    rollback_seen_at TEXT,
+    rollback_dismissed_at TEXT,
+
+    -- webgui-static/ directory check
+    webgui_static_empty INTEGER NOT NULL DEFAULT 0,
+
+    -- env vars read once at process startup, never rechecked until restart
+    deprecated_env_vars_detected TEXT NOT NULL DEFAULT ''
+  );
 `);
 
 // seed the single update_state row, once, on the very first run
 db.prepare("INSERT OR IGNORE INTO update_state (id) VALUES (1)").run();
+// seed the single diagnostics_state row, same reasoning
+db.prepare("INSERT OR IGNORE INTO diagnostics_state (id) VALUES (1)").run();
 
 // guarded migration from the old upstream_url/mission_folder_key
 // columns, see docs/FAQ.md#why-does-this-project-exist-at-all for why

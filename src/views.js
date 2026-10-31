@@ -3,10 +3,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const BRAND_NAME = process.env.BRAND_NAME || "DCS Auth Gate";
-// the one deliberate exception to "views.js never touches the db"
+// the deliberate exception to "views.js never touches the db": both
+// sidebar icons below need a cheap synchronous read on every page
 // see docs/Why.md#why-does-viewsjs-read-the-db-for-the-update-icon
 const updateCheck = require("./updateCheck");
 const settings = require("./settings");
+const diagnostics = require("./diagnostics");
 
 // escape a value for safe interpolation into html
 function escapeHtml(str) {
@@ -62,6 +64,16 @@ function sidebarNav(admin, active) {
     if (updateState.available_version || pinUpdateNav) {
       const label = updateState.available_version ? `Update available: ${updateState.available_version}` : "Software update";
       items.push(navItem("update", "/admin/update", "icon-update.svg", label));
+    }
+    const pinDiagNav = settings.getSetting("pin_diag_nav") === "1";
+    const activeIssueCount = diagnostics.getActiveIssues({
+      updateState,
+      updateCheckIntervalMs: updateCheck.CHECK_INTERVAL_MS,
+      staleMultiplier: Number(settings.getSetting("update_check_stale_multiplier")) || diagnostics.DEFAULT_STALE_MULTIPLIER,
+    }).length;
+    if (activeIssueCount > 0 || pinDiagNav) {
+      const label = activeIssueCount > 0 ? `Diagnostics: ${activeIssueCount} active issue(s)` : "Diagnostics";
+      items.push(navItem("diag", "/admin/diag", "icon-diag.svg", label));
     }
   }
 
@@ -681,12 +693,51 @@ ${updateState.needs_service_update ? `<p class="error">This release needs a manu
   return layout("Update — DCS Control Panel", body, { admin, active: "update", pageTitle: "Software update" });
 }
 
-// the one site-wide settings toggle page
-function settingsPage({ admin, pinUpdateNav, error, notice }) {
+// where each issue's link points, this repo's own docs/ at a fixed
+// branch, since the app never serves docs/ itself
+const DOCS_BASE_URL = "https://github.com/SpurGetreide54/dcs-webgui-auth-gate/blob/master/docs/";
+
+// one issue row: severity color, a muted border once already seen
+function diagIssueRow(issue) {
+  return `<div class="diag-issue diag-${issue.severity} ${issue.seen ? "diag-seen" : ""}">
+    <p>${escapeHtml(issue.message)}</p>
+    <p><a href="${DOCS_BASE_URL}${issue.link}" target="_blank" rel="noopener">More info</a></p>
+  </div>`;
+}
+
+// the diagnostics tab: every currently-active issue, or "all clear"
+function diagPage({ admin, issues, error, notice }) {
+  const rollbackActive = issues.some((i) => i.key === "rollback");
+
+  const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
+${
+  issues.length === 0
+    ? `<p class="diag-all-clear">All clear.</p>`
+    : `${issues.map(diagIssueRow).join("")}
+${
+  rollbackActive
+    ? `<form method="post" action="/admin/diag/dismiss-rollback">
+  <button type="submit">Dismiss the rollback notice</button>
+</form>`
+    : ""
+}`
+}`;
+
+  return layout("Diagnostics — DCS Control Panel", body, { admin, active: "diag", pageTitle: "Diagnostics" });
+}
+
+// the site-wide settings toggles
+function settingsPage({ admin, pinUpdateNav, pinDiagNav, staleMultiplier, error, notice }) {
   const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 <form method="post" action="/admin/settings">
   <label><input type="checkbox" name="pin_update_nav" value="1" ${pinUpdateNav ? "checked" : ""}> Always show Update in the sidebar</label>
+  <label><input type="checkbox" name="pin_diag_nav" value="1" ${pinDiagNav ? "checked" : ""}> Always show Diagnostics in the sidebar</label>
+  <label>Flag the update check as failing after this many missed hourly
+    checks in a row
+    <input type="number" name="update_check_stale_multiplier" min="1" step="1" value="${escapeHtml(String(staleMultiplier))}">
+  </label>
   <button type="submit">Save</button>
 </form>`;
 
@@ -761,6 +812,7 @@ module.exports = {
   webguiSyncPage,
   missionsPage,
   updatePage,
+  diagPage,
   settingsPage,
   logsPage,
 };

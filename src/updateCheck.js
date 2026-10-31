@@ -277,6 +277,10 @@ async function applyUpdate() {
       changelogUrl: null,
       needsServiceUpdate: Boolean(manifest.needs_service_update),
     });
+    // a fresh update with no new rollback is itself the "resolved"
+    // signal, required here (not at module load) to avoid a circular
+    // require with diagnostics.js, see docs/Why.md#why-does-diagnostics-mirror-updatecheckjss-own-shape
+    require("./diagnostics").clearRollback();
     console.log(`Update: flipped active slot to ${idleSlot}. Exiting for the supervisor to restart into it.`);
   } finally {
     await fsp.rm(scratchDir, { recursive: true, force: true });
@@ -293,6 +297,7 @@ async function applyUpdate() {
 module.exports = {
   GITHUB_REPO,
   PUBLIC_KEY_PEM,
+  CHECK_INTERVAL_MS,
   getCurrentVersion,
   verifyManifest,
   fetchVerifiedManifest,

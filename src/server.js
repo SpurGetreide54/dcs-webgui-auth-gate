@@ -18,6 +18,7 @@ const views = require("./views");
 const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
 const updateCheck = require("./updateCheck");
+const diagnostics = require("./diagnostics");
 const settings = require("./settings");
 const appLog = require("./appLog");
 const flash = require("./flash");
@@ -644,6 +645,35 @@ updateRouter.post("/", (req, res) => {
 
 app.use("/admin/update", updateRouter);
 
+// section: diagnostics, site admins only
+
+// the configured stale-check multiplier, or diagnostics.js's own default
+function getStaleMultiplier() {
+  return Number(settings.getSetting("update_check_stale_multiplier")) || diagnostics.DEFAULT_STALE_MULTIPLIER;
+}
+
+const diagRouter = express.Router();
+diagRouter.use(auth.requireAccountManager);
+
+diagRouter.get("/", (req, res) => {
+  const issues = diagnostics.getActiveIssues({
+    updateState: updateCheck.getUpdateState(),
+    updateCheckIntervalMs: updateCheck.CHECK_INTERVAL_MS,
+    staleMultiplier: getStaleMultiplier(),
+  });
+  // the first visit after a rollback appears mutes its highlight from then on
+  diagnostics.markRollbackSeen();
+  res.send(views.diagPage({ admin: req.admin, issues, ...flash.readFlash(req, res) }));
+});
+
+diagRouter.post("/dismiss-rollback", (req, res) => {
+  diagnostics.dismissRollback();
+  flash.setFlash(res, { notice: "Rollback notice dismissed." });
+  res.redirect("/admin/diag");
+});
+
+app.use("/admin/diag", diagRouter);
+
 // section: site-wide settings, site admins only
 
 const settingsRouter = express.Router();
@@ -654,6 +684,8 @@ settingsRouter.get("/", (req, res) => {
     views.settingsPage({
       admin: req.admin,
       pinUpdateNav: settings.getSetting("pin_update_nav") === "1",
+      pinDiagNav: settings.getSetting("pin_diag_nav") === "1",
+      staleMultiplier: getStaleMultiplier(),
       ...flash.readFlash(req, res),
     })
   );
@@ -661,6 +693,12 @@ settingsRouter.get("/", (req, res) => {
 
 settingsRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
   settings.setSetting("pin_update_nav", req.body.pin_update_nav === "1" ? "1" : "0");
+  settings.setSetting("pin_diag_nav", req.body.pin_diag_nav === "1" ? "1" : "0");
+  // a non-positive-integer input is ignored, the stored default stands
+  const multiplier = Number.parseInt(req.body.update_check_stale_multiplier, 10);
+  if (Number.isInteger(multiplier) && multiplier >= 1) {
+    settings.setSetting("update_check_stale_multiplier", String(multiplier));
+  }
   flash.setFlash(res, { notice: "Settings saved." });
   res.redirect("/admin/settings");
 });
@@ -1140,6 +1178,7 @@ function start() {
   });
   const controlProxyServer = serverProxy.startControlProxy();
   updateCheck.startHourlyCheck();
+  diagnostics.startDiagnosticsCheck();
   // explicit db.close() on shutdown
   // see docs/Why.md#why-does-shutdown-call-db-close-explicitly
   for (const signal of ["SIGTERM", "SIGINT"]) {
