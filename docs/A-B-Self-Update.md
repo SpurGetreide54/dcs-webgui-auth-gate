@@ -45,12 +45,25 @@ yet:
 - a stable `launcher.js` at the top level, outside both slots, for
   systemd to always point at
 
-This is not automated. It touches root-owned systemd config and
-restructures the app's own directory layout, so a human does it once,
-deliberately.<br>Routine updates after this need no further manual
-steps.
+Both sides automate this now, each safe to re-run:
+`scripts/linux/install.sh` on the VM, `install.ps1` on the physical
+host. Routine updates after this need no further manual steps.
 
 ### auth-gate side (on the VM)
+
+Run the guided installer as root, from the unpacked release:
+
+```
+sudo sh scripts/linux/install.sh
+```
+
+It derives `AUTH_GATE_STATE_DIR`, creates both slot directories,
+seeds slot A, copies `launcher.js` to the top level, and installs
+both systemd units, in one step. See the script's own top comment
+for every field it can be pre-seeded with, and
+[Installation](Installation.md) for where it fits in a fresh deploy.
+
+#### Doing it by hand instead
 
 1. Add this line to `.env`, if not already there:
    ```
@@ -91,10 +104,10 @@ steps.
    ```
    sudo cp scripts/systemd/dcs-webgui-auth-gate.service scripts/systemd/dcs-webgui-auth-gate-rollback.service /etc/systemd/system/
    sudo systemctl daemon-reload
-   sudo systemctl restart dcs-webgui-auth-gate
+   sudo systemctl enable --now dcs-webgui-auth-gate
    ```
 
-4. Confirm it restarted through the new launcher:
+4. Confirm it started through the new launcher:
    ```
    systemctl status dcs-webgui-auth-gate
    ```

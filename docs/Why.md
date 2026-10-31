@@ -791,6 +791,28 @@ path `AppStdout`/`AppStderr` already write to, since `/admin/logs`
 relays through this same file and has to agree with where NSSM is
 actually writing it.
 
+## Why does install.sh leave an existing active-slot file alone?
+
+`scripts/linux/install.sh` is designed to be safe to re-run, the same
+property `install.ps1` already has on the mission-agent side.<br>The
+one-time manual prerequisites it replaces always wrote `active-slot`
+unconditionally, because they were only ever meant to run once. A
+script meant to be rerun cannot do the same: a production deployment
+that has since self-updated onto slot b would get silently rolled
+back to slot a on every rerun, just from an admin tweaking an
+unrelated `.env` value. Permissions on the file are still fixed every
+run; only its content is write-once.
+
+## Why does install.sh read the deployed unit file for its rerun defaults, not .env?
+
+Install directory and service account are not `.env` keys, so the
+usual "current `.env` value as the default" rule has nothing to read
+for them. Each is still remembered across a re-run anyway, taken from
+the already-installed `dcs-webgui-auth-gate.service`'s own
+`WorkingDirectory=`/`User=` lines, the one fixed, always-present
+source of truth checked before `.env`'s own location can even be
+known.
+
 ## Why does assertNoBrokenTableForms exist?
 
 A `<form>` can't legally wrap a `<tr>`/`<td>`.<br>Browsers silently

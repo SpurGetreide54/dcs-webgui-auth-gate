@@ -13,17 +13,25 @@ maintainer concern, not a normal install step.
    ([GitHub Releases](https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases)),
    `.tar.gz` or `.zip`. It already includes `node_modules`. No build
    step.
-2. Unpack it on the VM.
-3. Copy `.env.example` to `.env` and fill it in. See
-   [Configuration](Configuration.md).
-4. Set `COOKIE_SECURE=true`. It needs real HTTPS, from a reverse
-   proxy in front. See [Deployment Topology](Deployment-Topology.md).
-5. On the reverse proxy, add a second server block for
+2. Unpack it anywhere on the VM. It needs real HTTPS in front, from a
+   reverse proxy. See [Deployment Topology](Deployment-Topology.md).
+3. On the reverse proxy, add a second server block for
    `WEBGUI_CONTROL_PORT` (default 8088), with its own TLS passthrough.
    The browser dials this port directly. See
    [Architecture](Architecture.md) for why.
-6. Start it. The next step sets it up as a supervised service. See
-   [A/B Self-Update](A-B-Self-Update.md).
+4. Run the guided installer as root:
+   ```
+   sudo sh scripts/linux/install.sh
+   ```
+   It writes `.env`, deploys the a/b slot layout, and starts it as a
+   supervised systemd service, all in one step. Safe to re-run. See
+   [A/B Self-Update](A-B-Self-Update.md) for what it sets up, and the
+   script's own top comment for every field it can be pre-seeded
+   with.
+
+   To configure by hand instead, copy `.env.example` to `.env`,
+   fill it in (see [Configuration](Configuration.md)), and follow
+   [A/B Self-Update](A-B-Self-Update.md)'s prerequisites manually.
 
 ## mission-agent
 

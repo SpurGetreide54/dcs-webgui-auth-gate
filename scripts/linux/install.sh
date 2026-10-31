@@ -193,8 +193,8 @@ set_env_value() {
 }
 
 # section: install dir and service account, remembered across a
-# re-run from the already-deployed unit file, not from .env (which
-# lives inside the install dir we have not resolved yet)
+# re-run from the already-deployed unit file, not .env
+# see docs/Why.md#why-does-installsh-read-the-deployed-unit-file-for-its-rerun-defaults-not-env
 INSTALL_DIR_DEFAULT_EFFECTIVE=$INSTALL_DIR_DEFAULT
 SERVICE_ACCOUNT_DEFAULT_EFFECTIVE=$SERVICE_ACCOUNT_DEFAULT
 if [ -f "$SERVICE_UNIT_PATH" ]; then
@@ -242,7 +242,7 @@ fi
 
 # section: AUTH_GATE_STATE_DIR's four derived paths, computed once,
 # used below for chown targets and the rollback unit's own hardcoded
-# paths, see local-only/todo/archive/feature/self-update/ab-state-vars-consolidation.md
+# paths, see docs/Why.md#why-does-auth_gate_state_dir-not-replace-the-older-vars
 WEBGUI_STATIC_PATH="$AUTH_GATE_STATE_DIR/webgui-static"
 ACTIVE_SLOT_PATH="$AUTH_GATE_STATE_DIR/active-slot"
 AUTH_GATE_LOG_PATH="$AUTH_GATE_STATE_DIR/auth-gate.log"
@@ -284,7 +284,7 @@ cp -r "$ROOT_DIR/node_modules" "$INSTALL_DIR/releases/a/node_modules"
 chown -R "$SERVICE_ACCOUNT:$SERVICE_ACCOUNT" "$INSTALL_DIR/releases"
 
 # a fresh active-slot always starts at "a", an existing one is left
-# alone, a rerun must never roll a live deployment back to slot a
+# alone, see docs/Why.md#why-does-installsh-leave-an-existing-active-slot-file-alone
 if [ ! -f "$ACTIVE_SLOT_PATH" ]; then
   printf '%s' a > "$ACTIVE_SLOT_PATH"
 fi
