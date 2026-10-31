@@ -4,8 +4,8 @@ const fs = require("node:fs");
 const Database = require("better-sqlite3");
 
 // where the sqlite file lives, overridden in production via
-// sqlite_path in .env, same reasoning as activeSlot.js's path
-const SQLITE_PATH = process.env.SQLITE_PATH || path.join(__dirname, "..", "local-only", "data", "auth-gate.sqlite");
+// sqlite_path (or auth_gate_state_dir) in .env
+const { SQLITE_PATH } = require("./stateDir");
 
 // a fresh clone has no local-only/ on disk at all, make sure it exists
 fs.mkdirSync(path.dirname(SQLITE_PATH), { recursive: true });

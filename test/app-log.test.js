@@ -89,10 +89,14 @@ test("readRecentEntries returns an empty list when the log file doesn't exist ye
   const missingPath = tempLogPath("missing");
   const previous = process.env.AUTH_GATE_LOG_PATH;
   process.env.AUTH_GATE_LOG_PATH = missingPath;
+  // appLog reads its path from stateDir, clear both so the fresh
+  // require actually picks up missingPath instead of the cached one
   delete require.cache[require.resolve("../src/appLog")];
+  delete require.cache[require.resolve("../src/stateDir")];
   const freshAppLog = require("../src/appLog");
   process.env.AUTH_GATE_LOG_PATH = previous;
   delete require.cache[require.resolve("../src/appLog")];
+  delete require.cache[require.resolve("../src/stateDir")];
 
   assert.deepEqual(freshAppLog.readRecentEntries(10), []);
 });

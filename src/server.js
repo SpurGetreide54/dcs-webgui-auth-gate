@@ -21,8 +21,18 @@ const updateCheck = require("./updateCheck");
 const settings = require("./settings");
 const appLog = require("./appLog");
 const flash = require("./flash");
+const stateDir = require("./stateDir");
 
 appLog.installConsoleCapture();
+
+// each old per-path var still works, but AUTH_GATE_STATE_DIR replaces
+// all four, see docs/Why.md#why-does-auth_gate_state_dir-not-replace-the-older-vars
+if (stateDir.deprecatedVarsSet.length > 0) {
+  console.warn(
+    `Deprecated env var(s) still set: ${stateDir.deprecatedVarsSet.join(", ")}. ` +
+      "They still work, but will be removed in a future version. Use AUTH_GATE_STATE_DIR instead."
+  );
+}
 
 const PORT = Number(process.env.PORT || 3000);
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
@@ -908,7 +918,7 @@ app.post(
 
 // gitignored, each deployment supplies its own legitimate copy
 // see docs/Why.md#why-is-webgui-static-gitignored-instead-of-shipped
-const webguiRoot = process.env.WEBGUI_STATIC_PATH || path.join(__dirname, "..", "webgui-static");
+const webguiRoot = stateDir.WEBGUI_STATIC_PATH;
 
 // matches the app.js script tag regardless of quoting/whitespace
 // see docs/Why.md#why-does-the-bootstrap-injection-match-the-script-tag-with-a-regex

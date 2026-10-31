@@ -3,9 +3,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 // where the structured log file lives, overridden in production via
-// auth_gate_log_path in .env, same reasoning as activeSlot.js's path
+// auth_gate_log_path (or auth_gate_state_dir) in .env, same reasoning
+// as activeSlot.js's path
 // see docs/Why.md#why-does-the-log-path-default-to-local-only
-const LOG_PATH = process.env.AUTH_GATE_LOG_PATH || path.join(__dirname, "..", "local-only", "auth-gate.log");
+const { AUTH_GATE_LOG_PATH: LOG_PATH } = require("./stateDir");
 // the file rotates once it would grow past this size
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
