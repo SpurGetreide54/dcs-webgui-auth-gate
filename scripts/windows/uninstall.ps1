@@ -4,8 +4,9 @@
 
 .DESCRIPTION
   Symmetric with install.ps1. Stops the service, removes its registration
-  via NSSM, and deletes the install directory (agent.exe, nssm.exe, and the
-  log file). Safe to run even if the service was never installed.
+  via NSSM, deletes the install directory (agent.exe, nssm.exe, and the
+  log file), and removes the two per-slot firewall rules install.ps1
+  created. Safe to run even if the service was never installed.
 
 .EXAMPLE
   .\uninstall.ps1
@@ -42,4 +43,12 @@ if (Test-Path $InstallDir) {
     Remove-Item -Path $InstallDir -Recurse -Force
 }
 
-Write-Host "==> Done. Service and files removed."
+# symmetric with install.ps1's own firewall rule names
+Write-Host "==> Removing Windows Firewall rules"
+foreach ($ruleName in @("DcsWebguiAgent-SlotA", "DcsWebguiAgent-SlotB")) {
+    if (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue) {
+        Remove-NetFirewallRule -Name $ruleName
+    }
+}
+
+Write-Host "==> Done. Service, files, and firewall rules removed."

@@ -10,8 +10,9 @@
   the nssm.exe the release zip vendors next to this script when it
   matches, falling back to downloading one from nssm.cc only when that
   vendored copy is missing or stale. Sets the required config as
-  service-scoped environment variables, and starts it. No UI.
-  Status/output goes to a plain rotating log file.
+  service-scoped environment variables, creates a Windows Firewall rule
+  for each A/B slot, and starts it. No UI. Status/output goes to a plain
+  rotating log file.
 
   See docs/Why.md#why-does-installps1-only-ever-point-the-junction-at-slot-a
   for why the junction always resets to releases\a\ on every run.
@@ -176,6 +177,19 @@ if ($MissionAgentToken) {
 & $NssmExePath set $ServiceName Start SERVICE_AUTO_START
 & $NssmExePath set $ServiceName AppExit Default Restart
 & $NssmExePath set $ServiceName AppRestartDelay 5000
+
+# one rule per a/b slot, a rule pointed at the current junction never
+# matches, see docs/FAQ.md#why-does-a-windows-firewall-rule-need-two-copies-one-per-slot
+Write-Host "==> Configuring Windows Firewall"
+$FirewallRules = @(
+    @{ Name = "DcsWebguiAgent-SlotA"; Program = "$InstallDir\releases\a\agent.exe" }
+    @{ Name = "DcsWebguiAgent-SlotB"; Program = "$InstallDir\releases\b\agent.exe" }
+)
+foreach ($rule in $FirewallRules) {
+    if (-not (Get-NetFirewallRule -Name $rule.Name -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name $rule.Name -DisplayName $rule.Name -Direction Inbound -Action Allow -Program $rule.Program | Out-Null
+    }
+}
 
 Write-Host "==> Starting service"
 Start-Service -Name $ServiceName
