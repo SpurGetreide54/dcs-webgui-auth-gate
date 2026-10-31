@@ -41,13 +41,16 @@ fi
 
 # the archive's contents, named explicitly, an include list not a
 # glob with excludes, anything not named here never ships
-INCLUDE_LIST="src public launcher.js package.json package-lock.json LICENSE DISCLAIMER README.md .env.example docs"
+# scripts/release and scripts/windows are left out, maintainer-only
+# and the other OS's installer respectively
+INCLUDE_LIST="src public launcher.js package.json package-lock.json LICENSE DISCLAIMER README.md .env.example docs scripts/linux scripts/systemd"
 
 echo "==> Building auth-gate archive for $VERSION"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR" "$RELEASE_DIR"
 
 for entry in $INCLUDE_LIST; do
+  mkdir -p "$(dirname "$BUILD_DIR/$entry")"
   cp -R "$ROOT_DIR/$entry" "$BUILD_DIR/$entry"
 done
 
