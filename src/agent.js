@@ -322,6 +322,79 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
   res.json({ ok: true });
 }));
 
+// a trashed file's on-disk name is "<original name>.<Date.now()>", see
+// the trash route above, this splits it back into both parts
+function parseTrashEntryName(entryName) {
+  const match = entryName.match(/^(.+)\.(\d+)$/);
+  if (!match) return null;
+  return { name: match[1], trashedAt: new Date(Number(match[2])).toISOString() };
+}
+
+app.get("/missions/:instanceName/trash", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {
+  const trashDir = path.join(missionsDir(req.instanceDir), ".trash");
+  let entries;
+  try {
+    entries = await fs.readdir(trashDir, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") return res.json({ trash: [] });
+    return res.status(500).send(`Could not list trash: ${err.message}`);
+  }
+
+  const trash = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .map(async (entry) => {
+        const parsed = parseTrashEntryName(entry.name);
+        // an entry that doesn't parse predates this format or was
+        // placed there by hand, list only what this feature itself trashed
+        if (!parsed) return null;
+        const stat = await fs.stat(path.join(trashDir, entry.name));
+        return { trashName: entry.name, name: parsed.name, size: stat.size, trashedAt: parsed.trashedAt };
+      })
+  );
+  res.json({ trash: trash.filter(Boolean) });
+}));
+
+app.post(
+  "/missions/:instanceName/trash/restore",
+  checkToken,
+  requireInstanceDir,
+  express.json(),
+  asyncHandler(async (req, res) => {
+    const trashNames = Array.isArray(req.body?.trash) ? req.body.trash : [];
+    if (trashNames.length === 0) return res.status(400).send("No trash entries named.");
+
+    const targetDir = missionsDir(req.instanceDir);
+    const trashDir = path.join(targetDir, ".trash");
+    // same reasoning as safeMissionPath itself: reject every bad name
+    // before moving any file, so a bad name can't leave a half-applied batch
+    const seenDestinations = new Set();
+    const toRestore = [];
+    for (const trashName of trashNames) {
+      const resolved = safeMissionPath(trashDir, trashName);
+      if (!resolved) return res.status(400).send(`Invalid trash entry: ${trashName}`);
+      if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Trash entry not found: ${resolved.safeName}`);
+      const parsed = parseTrashEntryName(resolved.safeName);
+      if (!parsed) return res.status(400).send(`Unrecognized trash entry: ${resolved.safeName}`);
+      const destination = path.join(targetDir, parsed.name);
+      if (seenDestinations.has(destination) || (await isExistingFile(destination))) {
+        return res.status(409).send(`A mission named "${parsed.name}" already exists, remove it first.`);
+      }
+      seenDestinations.add(destination);
+      toRestore.push({ from: resolved.finalPath, to: destination, name: parsed.name });
+    }
+
+    try {
+      for (const { from, to } of toRestore) {
+        await fs.rename(from, to);
+      }
+    } catch (err) {
+      return res.status(500).send(`Could not restore from trash: ${err.message}`);
+    }
+    res.json({ ok: true, restored: toRestore.map((r) => r.name) });
+  })
+);
+
 // section: webgui control port, status, config write, relay
 
 app.get("/webgui/:instanceName/status", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {

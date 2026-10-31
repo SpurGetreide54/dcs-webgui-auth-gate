@@ -609,8 +609,34 @@ ${canSelect ? `<form id="mission-form" class="row-form" method="post" action="/s
 ${actions ? `<div class="mission-actions">${actions}</div>` : ""}`;
 }
 
+// the trash table: restore-only, gated by the same permission as trash itself
+function missionTrashSection(server, trash) {
+  const slug = encodeURIComponent(server.slug);
+
+  const rows = trash.length
+    ? trash
+        .map(
+          (t) => `<tr>
+        <td class="mission-select"><input type="checkbox" form="trash-form" name="trash" value="${escapeHtml(t.trashName)}"></td>
+        <td>${escapeHtml(t.name)}</td>
+        <td class="mission-size">${formatBytes(t.size)}</td>
+        <td class="mission-date">${escapeHtml(t.trashedAt.slice(0, 16).replace("T", " "))}</td>
+      </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4">Trash is empty.</td></tr>`;
+
+  return `<h2>Trash</h2>
+<form id="trash-form" class="row-form" method="post" action="/s/${slug}/missions/trash/restore"></form>
+<table>
+  <thead><tr><th></th><th>Name</th><th>Size</th><th>Trashed</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<div class="mission-actions"><button type="submit" form="trash-form">Restore selected</button></div>`;
+}
+
 // a server's mission list plus its own upload form, per-permission
-function missionsPage({ admin, server, access = {}, missions = [], error, notice }) {
+function missionsPage({ admin, server, access = {}, missions = [], trash = [], error, notice }) {
   const uploadForm = access.canUpload
     ? `<h2>Upload mission</h2>
 <form method="post" action="/s/${encodeURIComponent(server.slug)}/missions/upload" enctype="multipart/form-data">
@@ -624,7 +650,8 @@ function missionsPage({ admin, server, access = {}, missions = [], error, notice
     `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 ${notice ? `<p>${escapeHtml(notice)}</p>` : ""}
 ${access.canView || access.canDownload || access.canDelete ? missionListSection(server, access, missions) : ""}
-${uploadForm}`,
+${uploadForm}
+${access.canDelete ? missionTrashSection(server, trash) : ""}`,
     { admin, active: "dashboard", pageTitle: `Missions — ${server.name}` }
   );
 }

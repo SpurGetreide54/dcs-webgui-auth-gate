@@ -782,10 +782,19 @@ async function fetchMissionsList(instanceName) {
   return (await res.json()).missions;
 }
 
+// ask the agent for one instance's trashed-mission list
+async function fetchTrashList(instanceName) {
+  const url = new URL(`/missions/${encodeURIComponent(instanceName)}/trash`, MISSION_AGENT_URL);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  if (!res.ok) throw new Error(`agent returned ${res.status}`);
+  return (await res.json()).trash;
+}
+
 // render the missions page, loading the list only if this admin can view it
 async function renderMissionsPage(req, res, { status = 200, error, notice } = {}) {
   const access = loadMissionAccess(req);
   let missions = [];
+  let trash = [];
   let pageError = error;
   // the list is also needed to pick a mission for download/delete,
   // not shown only to admins with the view flag itself
@@ -795,12 +804,16 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
     } else {
       try {
         missions = await fetchMissionsList(req.dcsServer.instance_name);
+        // trash restore needs the same permission as trash itself
+        if (access.canDelete) trash = await fetchTrashList(req.dcsServer.instance_name);
       } catch (err) {
         pageError = pageError || `Could not reach the mission agent: ${err.message}`;
       }
     }
   }
-  res.status(status).send(views.missionsPage({ admin: req.admin, server: req.dcsServer, access, missions, error: pageError, notice }));
+  res
+    .status(status)
+    .send(views.missionsPage({ admin: req.admin, server: req.dcsServer, access, missions, trash, error: pageError, notice }));
 }
 
 app.get("/s/:slug/missions", requireServerAccess({ permission: "any-mission" }), (req, res) => {
@@ -910,6 +923,37 @@ app.post(
       return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
     }
     renderMissionsPage(req, res, { notice: names.length === 1 ? `Moved "${names[0]}" to trash.` : `Moved ${names.length} missions to trash.` });
+  })
+);
+
+app.post(
+  "/s/:slug/missions/trash/restore",
+  requireServerAccess({ permission: "delete" }),
+  express.urlencoded({ extended: false }),
+  asyncHandler(async (req, res) => {
+    const names = [].concat(req.body?.trash || []);
+    if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No trash entries selected." });
+    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    let restored = names;
+    try {
+      const agentRes = await fetch(new URL(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/trash/restore`, MISSION_AGENT_URL), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ trash: names }),
+      });
+      if (!agentRes.ok) {
+        const detail = await agentRes.text().catch(() => "");
+        return renderMissionsPage(req, res, { status: 502, error: `Mission agent rejected the restore: ${detail || agentRes.status}` });
+      }
+      // falls back to the raw trash names above if this ever comes back malformed
+      const body = await agentRes.json().catch(() => ({}));
+      if (Array.isArray(body.restored)) restored = body.restored;
+    } catch (err) {
+      return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
+    }
+    renderMissionsPage(req, res, {
+      notice: restored.length === 1 ? `Restored "${restored[0]}" from trash.` : `Restored ${restored.length} missions from trash.`,
+    });
   })
 );
 

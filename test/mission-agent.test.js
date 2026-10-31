@@ -706,6 +706,127 @@ test("trash 404s on a real subdirectory instead of renaming it into itself", asy
   assert.equal(stillUp.status, 200);
 });
 
+// section: trash listing and restore
+
+test("trash listing is empty before anything is trashed, and parses name/size/trashedAt after", async () => {
+  const instance = "Example_TrashList";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+
+  const emptyRes = await fetch(`${base}/missions/${instance}/trash`, { headers: authHeaders() });
+  assert.equal(emptyRes.status, 200);
+  assert.deepEqual(await emptyRes.json(), { trash: [] }, "no .trash dir yet must list as empty, not 404 or 500");
+
+  fs.writeFileSync(path.join(missionsDir, "listed.miz"), "listed bytes");
+  const trashRes = await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["listed.miz"] }),
+  });
+  assert.equal(trashRes.status, 200);
+
+  const listRes = await fetch(`${base}/missions/${instance}/trash`, { headers: authHeaders() });
+  const { trash } = await listRes.json();
+  assert.equal(trash.length, 1);
+  assert.equal(trash[0].name, "listed.miz", "the original name must survive, stripped of its trailing .<timestamp>");
+  assert.equal(trash[0].size, Buffer.byteLength("listed bytes"));
+  assert.match(trash[0].trashedAt, /^\d{4}-\d{2}-\d{2}T/, "trashedAt must be a real ISO timestamp, parsed from Date.now()");
+  assert.match(trash[0].trashName, /^listed\.miz\.\d+$/, "trashName is the real on-disk name, needed to restore this exact entry");
+});
+
+test("restore moves a trashed mission back into Missions/ under its original name", async () => {
+  const instance = "Example_TrashRestore";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "comeback.miz"), "comeback bytes");
+
+  await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["comeback.miz"] }),
+  });
+  const { trash } = await (await fetch(`${base}/missions/${instance}/trash`, { headers: authHeaders() })).json();
+  assert.equal(trash.length, 1);
+
+  const restoreRes = await fetch(`${base}/missions/${instance}/trash/restore`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ trash: [trash[0].trashName] }),
+  });
+  assert.equal(restoreRes.status, 200);
+  const restoreBody = await restoreRes.json();
+  assert.deepEqual(restoreBody.restored, ["comeback.miz"]);
+  assert.equal(fs.readFileSync(path.join(missionsDir, "comeback.miz"), "utf8"), "comeback bytes");
+  assert.equal(fs.existsSync(path.join(missionsDir, ".trash", trash[0].trashName)), false, "must no longer be in .trash/ after restoring");
+});
+
+test("restore refuses to overwrite a mission that already exists under that name", async () => {
+  const instance = "Example_TrashRestoreConflict";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "clash.miz"), "original bytes");
+  await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["clash.miz"] }),
+  });
+  // a new mission uploaded back under the same name after trashing
+  fs.writeFileSync(path.join(missionsDir, "clash.miz"), "newer bytes");
+  const { trash } = await (await fetch(`${base}/missions/${instance}/trash`, { headers: authHeaders() })).json();
+
+  const restoreRes = await fetch(`${base}/missions/${instance}/trash/restore`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ trash: [trash[0].trashName] }),
+  });
+  assert.equal(restoreRes.status, 409);
+  assert.equal(fs.readFileSync(path.join(missionsDir, "clash.miz"), "utf8"), "newer bytes", "the existing mission must survive untouched");
+  assert.equal(fs.existsSync(path.join(missionsDir, ".trash", trash[0].trashName)), true, "the trashed copy must stay in .trash/, not be lost");
+});
+
+test("restore refuses a batch that would restore two trashed entries to the same name", async () => {
+  const instance = "Example_TrashRestoreDupBatch";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "twice.miz"), "first version");
+  await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["twice.miz"] }),
+  });
+  fs.writeFileSync(path.join(missionsDir, "twice.miz"), "second version");
+  await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["twice.miz"] }),
+  });
+  const { trash } = await (await fetch(`${base}/missions/${instance}/trash`, { headers: authHeaders() })).json();
+  assert.equal(trash.length, 2, "both trashed copies of the same original name must be listed separately");
+
+  const restoreRes = await fetch(`${base}/missions/${instance}/trash/restore`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ trash: trash.map((t) => t.trashName) }),
+  });
+  assert.equal(restoreRes.status, 409, "restoring both at once would silently overwrite one with the other");
+  for (const entry of trash) {
+    assert.equal(fs.existsSync(path.join(missionsDir, ".trash", entry.trashName)), true, "neither trashed copy must be moved when the batch is refused");
+  }
+});
+
+test("restore rejects an unknown or invalid trash entry, and the agent survives the attempt", async () => {
+  for (const name of ["does-not-exist.miz.123", ".", "", "../../etc/passwd"]) {
+    const res = await fetch(`${base}/missions/${INSTANCE}/trash/restore`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ trash: [name] }),
+    });
+    assert.ok([400, 404].includes(res.status), `${JSON.stringify(name)} must be rejected, not crash the agent`);
+  }
+  const stillUp = await fetch(`${base}/missions/${INSTANCE}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200);
+});
+
 test("webgui-bundle streams a tar of the real WebGUI folder", async () => {
   const res = await fetch(`${base}/dcs-install/webgui-bundle?path=${encodeURIComponent(dcsInstallRoot)}`, {
     headers: authHeaders(),

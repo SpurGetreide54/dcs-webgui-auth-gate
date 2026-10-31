@@ -373,6 +373,27 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.doesNotMatch(downloadOnlyHtml, /Upload mission/, "no upload rights means no upload form");
     assert.match(downloadOnlyHtml, /<h2>Missions<\/h2>/, "download rights alone must still show the list to pick a mission from");
     assert.match(downloadOnlyHtml, /Download selected/, "download rights must show the download button");
+    assert.doesNotMatch(downloadOnlyHtml, /<h2>Trash<\/h2>/, "no delete rights means no trash section at all");
+
+    // delete rights gate both the trash section's visibility and the
+    // restore route itself, same permission as trashing
+    const deleteOnlyId = db
+      .prepare("INSERT INTO admins (username, password_hash) VALUES (?, ?)")
+      .run("deleteonlyadmin", auth.hashPassword("delete-only-long-password")).lastInsertRowid;
+    serversDb.setAccess(deleteOnlyId, trainingServerId, { canDeleteMissions: true });
+    const deleteOnlyCookie = await loginAs("deleteonlyadmin", "delete-only-long-password");
+    const deleteOnlyRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: deleteOnlyCookie } });
+    assert.equal(deleteOnlyRes.status, 200, "delete-only access must be enough to reach the missions page");
+    const deleteOnlyHtml = await deleteOnlyRes.text();
+    assert.match(deleteOnlyHtml, /<h2>Trash<\/h2>/, "delete rights must show the trash section");
+    assert.match(deleteOnlyHtml, /Restore selected/, "delete rights must show the restore button");
+
+    const forbiddenRestore = await fetch(`${base}/s/training/missions/trash/restore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: downloadOnlyCookie },
+      body: "trash=whatever.miz.123",
+    });
+    assert.equal(forbiddenRestore.status, 403, "download rights alone must not allow restoring from trash");
 
     // the real webgui's own static bundle is served under /s/<slug>/
     const webguiRes = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
