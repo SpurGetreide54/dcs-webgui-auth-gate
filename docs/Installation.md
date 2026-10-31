@@ -51,20 +51,18 @@ maintainer concern, not a normal install step.
 
 ### Windows Firewall
 
+`install.ps1` creates two program rules automatically,
+`DcsWebguiAgent-SlotA` and `DcsWebguiAgent-SlotB`, each pointed at one
+A/B slot's real resolved path (`releases\a\agent.exe` and
+`releases\b\agent.exe`). `uninstall.ps1` removes both. No manual step
+needed.
+
 `current` is a directory junction, a symlink-style path.<br>Windows
-Firewall does not match a program-path rule against a symlink path.<br>Point each rule at the real resolved target instead. Keep two rules,
-one per A/B slot, both always present:
-
-```
-releases\a\agent.exe
-releases\b\agent.exe
-```
-
-Whichever slot `current` points at next, a matching rule is already
-there.<br>A single port rule
-(`New-NetFirewallRule -Protocol TCP -LocalPort <AgentPort>`) avoids
-this entirely, at the cost of not scoping the hole to this one
-program.
+Firewall does not match a program-path rule against a symlink path,
+which is why there are two per-slot rules instead of one pointed at
+`current\agent.exe`.<br>Whichever slot `current` points at next, a
+matching rule is already there. See
+[FAQ](FAQ.md#why-does-a-windows-firewall-rule-need-two-copies-one-per-slot).
 
 ## Values that must match on both sides
 
