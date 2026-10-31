@@ -26,11 +26,12 @@ function cleanupSqlite(sqlitePath) {
 
 const AGENT_TOKEN = "test-agent-token";
 
-let db, serversDb, controlTokens, serverProxy;
+let db, serversDb, controlTokens, serverProxy, auth;
 let dummyAgent, dummyAgentPort;
 let lastAgentRequest;
 let sqlitePath;
 let allowedAdminId, otherAdminId, allowedServerId, otherServerId;
+let sessionTokenHash;
 
 test.before(async () => {
   dummyAgent = await startDummyHttpServer((req, res) => {
@@ -49,6 +50,7 @@ test.before(async () => {
   serversDb = require("../src/servers");
   controlTokens = require("../src/controlTokens");
   serverProxy = require("../src/serverProxy");
+  auth = require("../src/auth");
 
   allowedAdminId = db.prepare("INSERT INTO admins (username, password_hash) VALUES (?, ?)").run("allowed", "x").lastInsertRowid;
   otherAdminId = db.prepare("INSERT INTO admins (username, password_hash) VALUES (?, ?)").run("other", "x").lastInsertRowid;
@@ -59,6 +61,9 @@ test.before(async () => {
     .prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)")
     .run("other-server", "Other", "Example_Other").lastInsertRowid;
   serversDb.setAccess(allowedAdminId, allowedServerId, { canUploadMissions: false });
+
+  // a real, live session, the token-revocation tests below tamper with it
+  sessionTokenHash = auth.hashToken(auth.createSession(allowedAdminId));
 });
 
 test.after(async () => {
@@ -72,7 +77,7 @@ test("control-port proxy: valid token for a granted server reaches the agent, sc
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, sessionTokenHash);
 
   try {
     const res = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
@@ -90,7 +95,7 @@ test("control-port proxy: strips the browser's own token, cookie, and origin bef
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, sessionTokenHash);
 
   try {
     await fetch(`${base}/some/path`, {
@@ -108,7 +113,7 @@ test("control-port proxy: a websocket upgrade request is treated as an ordinary 
   const { app } = serverProxy.buildControlProxyApp();
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
-  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, sessionTokenHash);
 
   try {
     const upgradeStatus = await new Promise((resolve, reject) => {
@@ -187,7 +192,7 @@ test("control-port proxy: a token used before its TTL slides forward and survive
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, sessionTokenHash);
 
   try {
     // 4 minutes in, still within the original 5 minute ttl, simulates
@@ -212,7 +217,7 @@ test("control-port proxy: an unused token still expires after its flat TTL with 
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, sessionTokenHash);
 
   try {
     t.mock.timers.tick(6 * 60 * 1000); // past the 5-minute TTL, never used in between
@@ -229,7 +234,7 @@ test("control-port proxy: a repeatedly-used token still hits its absolute ceilin
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const token = controlTokens.mint(allowedAdminId, allowedServerId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, sessionTokenHash);
 
   try {
     // poll every 4 minutes, comfortably inside the sliding window so
@@ -243,6 +248,49 @@ test("control-port proxy: a repeatedly-used token still hits its absolute ceilin
       lastStatus = res.status;
     }
     assert.equal(lastStatus, 403, "a token must still hit its absolute ceiling even if it's always within its sliding window");
+  } finally {
+    server.close();
+  }
+});
+
+test("control-port proxy: deleting the minting session's row revokes its control token too", async () => {
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  // its own session, deleted below, so other tests' shared session is untouched
+  const ownSessionToken = auth.createSession(allowedAdminId);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, auth.hashToken(ownSessionToken));
+
+  try {
+    const beforeRes = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(beforeRes.status, 200, "sanity check: the token must work while its session is still live");
+
+    // logout, or a session evicted on password change, deletes the row outright
+    auth.destroySession(ownSessionToken);
+    const afterRes = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(afterRes.status, 403, "a control token must not outlive the session that minted it");
+  } finally {
+    server.close();
+  }
+});
+
+test("control-port proxy: an expired (but not deleted) minting session row also revokes its control token", async () => {
+  const { app } = serverProxy.buildControlProxyApp();
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const ownSessionToken = auth.createSession(allowedAdminId);
+  const ownSessionHash = auth.hashToken(ownSessionToken);
+  const token = controlTokens.mint(allowedAdminId, allowedServerId, ownSessionHash);
+
+  try {
+    // simulates the session's own 12h idle timeout lapsing, same
+    // isSessionHashLive() check either way, so this and the delete
+    // case above exercise both halves of its WHERE clause
+    db.prepare("UPDATE sessions SET expires_at = datetime('now', '-1 seconds') WHERE token_hash = ?").run(ownSessionHash);
+    const res = await fetch(`${base}/some/path`, { headers: { "X-Auth-Gate-Token": token } });
+    assert.equal(res.status, 403, "a control token tied to an expired session must be rejected, not just a deleted one");
   } finally {
     server.close();
   }

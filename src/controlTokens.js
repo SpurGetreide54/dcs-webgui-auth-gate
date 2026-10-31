@@ -20,12 +20,14 @@ function pruneExpired() {
   }
 }
 
-// create and store a fresh token for this admin and server
-function mint(adminId, serverId) {
+// create and store a fresh token for this admin and server, tied to
+// the session that minted it so the caller can recheck it's still live
+// see docs/Why.md#why-does-a-control-tokens-expiry-slide-forward
+function mint(adminId, serverId, sessionTokenHash) {
   pruneExpired();
   const token = crypto.randomBytes(24).toString("hex");
   const now = Date.now();
-  tokens.set(token, { adminId, serverId, mintedAt: now, expiresAt: now + TOKEN_TTL_MS });
+  tokens.set(token, { adminId, serverId, sessionTokenHash, mintedAt: now, expiresAt: now + TOKEN_TTL_MS });
   return token;
 }
 

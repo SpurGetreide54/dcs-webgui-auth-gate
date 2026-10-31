@@ -1000,7 +1000,7 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
   if (!webguiIndexTemplate) {
     return res.status(503).send("The DCS webgui bundle is not installed on this server yet.");
   }
-  const token = controlTokens.mint(req.admin.id, req.dcsServer.id);
+  const token = controlTokens.mint(req.admin.id, req.dcsServer.id, auth.hashToken(req.cookies[auth.SESSION_COOKIE]));
   const bootstrap = `<script>
   (function () {
     var TOKEN = ${JSON.stringify(token)};

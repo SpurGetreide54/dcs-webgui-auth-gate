@@ -111,6 +111,14 @@ function getSessionAdmin(token) {
   return { admin: row, needsCookieRefresh };
 }
 
+// true if a session with this token hash still exists and hasn't
+// expired, read-only: no join, no sliding-expiry update, unlike
+// getSessionAdmin, since callers here only need a liveness check
+function isSessionHashLive(tokenHash) {
+  const row = db.prepare("SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')").get(tokenHash);
+  return !!row;
+}
+
 // delete a session outright, e.g. on logout
 function destroySession(token) {
   if (!token) return;
@@ -161,6 +169,7 @@ module.exports = {
   pruneExpiredSessions,
   createSession,
   getSessionAdmin,
+  isSessionHashLive,
   destroySession,
   requireAuth,
   requireAccountManager,

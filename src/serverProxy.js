@@ -3,6 +3,7 @@ const express = require("express");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const controlTokens = require("./controlTokens");
 const serversDb = require("./servers");
+const auth = require("./auth");
 
 const CONTROL_PORT = Number(process.env.WEBGUI_CONTROL_PORT || 8088);
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
@@ -42,6 +43,12 @@ function buildControlProxyApp() {
     // re-check live access, even though the token already named this admin
     if (!serversDb.hasServerAccess(entry.adminId, entry.serverId)) {
       return res.status(403).send("Forbidden: access to this server was revoked.");
+    }
+    // the token itself never expires on logout or password change, so
+    // its minting session has to be rechecked here on every request
+    // see docs/Why.md#why-does-a-control-tokens-expiry-slide-forward
+    if (!auth.isSessionHashLive(entry.sessionTokenHash)) {
+      return res.status(403).send("Forbidden: the session this token belongs to is no longer live.");
     }
     const server = serversDb.getServerById(entry.serverId);
     if (!server) return res.status(404).send("Unknown server.");
