@@ -45,7 +45,10 @@ just because something keeps polling it.<br>Hitting that ceiling just
 means the next page load mints a fresh one, same as any other page
 load already does.<br>This doesn't weaken what the token protects
 either way: `serverProxy.js` re-checks live database access on every
-single proxied request, independent of token freshness.
+single proxied request, independent of token freshness, and also
+re-checks that the session which minted the token is still live
+(not logged out, not expired), so logout and password change evict
+the control channel too, not just the session cookie itself.
 
 ## Why is there only one shared control port?
 
