@@ -26,7 +26,11 @@
 
 .PARAMETER DcsSavedGamesRoot
   Path to the Windows user's "Saved Games" folder that holds every DCS
-  instance directory, e.g. C:\Users\dcsservice\Saved Games
+  instance directory, e.g. C:\Users\dcsservice\Saved Games. Optional,
+  defaults to the installing user's own "Saved Games" folder. Pass this
+  explicitly when the service should look under a different account's
+  folder instead, e.g. a dedicated dcsservice account DCS actually runs
+  under.
 
 .PARAMETER AgentPort
   Port the agent listens on. Must match MISSION_AGENT_URL's port on the
@@ -43,6 +47,9 @@
   there (see scripts/windows/nssm.exe in the repo).
 
 .EXAMPLE
+  .\install.ps1
+
+.EXAMPLE
   .\install.ps1 -DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"
 
 .EXAMPLE
@@ -53,7 +60,7 @@
 
 param(
     [string]$MissionAgentToken = "",
-    [Parameter(Mandatory=$true)][string]$DcsSavedGamesRoot,
+    [string]$DcsSavedGamesRoot = "$env:USERPROFILE\Saved Games",
     [int]$AgentPort = 4000,
     [string]$AgentExePath = "$PSScriptRoot\agent.exe",
     [string]$NssmSourcePath = "$PSScriptRoot\nssm.exe",
@@ -68,6 +75,12 @@ if (-not (Test-Path $AgentExePath)) {
 }
 if (-not (Test-Path $DcsSavedGamesRoot)) {
     throw "DcsSavedGamesRoot '$DcsSavedGamesRoot' does not exist."
+}
+# a non-blocking hint, not an error, the default is only a guess at
+# which account DCS actually runs under
+# see docs/Why.md#why-does-dcssavedgamesroot-default-to-the-installing-user
+if (-not (Get-ChildItem -Path $DcsSavedGamesRoot -Directory -ErrorAction SilentlyContinue)) {
+    Write-Host "==> Warning: DcsSavedGamesRoot '$DcsSavedGamesRoot' has no DCS instance folders yet. If DCS runs under a different account, pass -DcsSavedGamesRoot explicitly."
 }
 
 Write-Host "==> Creating install directory $InstallDir"
