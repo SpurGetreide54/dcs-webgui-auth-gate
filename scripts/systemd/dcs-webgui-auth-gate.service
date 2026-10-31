@@ -19,6 +19,11 @@ EnvironmentFile=/var/www/dcs-webgui-auth-gate/.env
 ExecStart=/usr/bin/node launcher.js
 Restart=always
 RestartSec=5
+# catches a native crash (segfault, V8 fatal error) that never reaches
+# uncaughtException, no JS runs to log it, only an OS-level redirect can
+# see docs/Why.md#why-does-the-service-unit-redirect-stdout-stderr-to-the-app-log
+StandardOutput=append:/var/www/dcs-webgui-auth-gate/auth-gate.log
+StandardError=append:/var/www/dcs-webgui-auth-gate/auth-gate.log
 
 [Install]
 WantedBy=multi-user.target

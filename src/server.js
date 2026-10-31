@@ -9,6 +9,7 @@ const fsSync = require("node:fs");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const tar = require("tar");
+const util = require("node:util");
 const db = require("./db");
 const auth = require("./auth");
 const serversDb = require("./servers");
@@ -43,6 +44,13 @@ app.use("/assets", express.static(path.join(__dirname, "..", "public"), { maxAge
 // answers the browser's own /favicon.ico fallback request, so a page
 // with no <link rel="icon"> of its own (the real dcs webgui) doesn't 404
 app.get("/favicon.ico", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "logo.png")));
+
+// express 4 can't catch a rejected promise on its own, so every async
+// handler below is wrapped in this to forward the rejection to next()
+// see docs/Why.md#why-does-every-async-handler-need-asynchandler
+function asyncHandler(fn) {
+  return (req, res, next) => fn(req, res, next).catch(next);
+}
 
 // how many admin accounts exist, used to gate /setup
 function adminCount() {
@@ -94,7 +102,7 @@ app.get("/login", (req, res) => {
   res.send(views.loginPage(flash.readFlash(req, res)));
 });
 
-app.post("/login", express.urlencoded({ extended: false }), async (req, res) => {
+app.post("/login", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     flash.setFlash(res, { error: "Username and password required." });
@@ -120,7 +128,7 @@ app.post("/login", express.urlencoded({ extended: false }), async (req, res) => 
   const token = auth.createSession(admin.id);
   setSessionCookie(res, token);
   res.redirect("/");
-});
+}));
 
 app.post("/logout", express.urlencoded({ extended: false }), (req, res) => {
   auth.destroySession(req.cookies[auth.SESSION_COOKIE]);
@@ -219,7 +227,7 @@ accountsRouter.get("/", (req, res) => {
 
 // self-service password change, available to every admin
 // see docs/Why.md#why-does-changing-your-password-sign-out-every-other-session
-accountsRouter.post("/change-password", express.urlencoded({ extended: false }), async (req, res) => {
+accountsRouter.post("/change-password", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (!current_password || !new_password || !confirm_password) {
     flash.setFlash(res, { error: "All password fields are required." });
@@ -242,7 +250,7 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
   db.prepare("DELETE FROM sessions WHERE admin_id = ? AND token_hash != ?").run(req.admin.id, auth.hashToken(currentToken));
   flash.setFlash(res, { notice: "Password changed. You're still signed in here; any other sessions were signed out." });
   res.redirect("/admin/accounts");
-});
+}));
 
 // everything below here is site-admin only
 
@@ -464,7 +472,7 @@ async function buildWebguiPortProposal() {
   return { alreadyConfigured: statuses.filter((s) => s.webguiPort !== null), proposals };
 }
 
-serversRouter.get("/webgui-ports", async (req, res) => {
+serversRouter.get("/webgui-ports", asyncHandler(async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
     return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
   }
@@ -474,9 +482,9 @@ serversRouter.get("/webgui-ports", async (req, res) => {
   } catch (err) {
     res.status(502).send(loadServersPageData(req, { error: `Could not reach the mission agent: ${err.message}` }));
   }
-});
+}));
 
-serversRouter.post("/webgui-ports/confirm", async (req, res) => {
+serversRouter.post("/webgui-ports/confirm", asyncHandler(async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
@@ -503,7 +511,7 @@ serversRouter.post("/webgui-ports/confirm", async (req, res) => {
     flash.setFlash(res, { error: `Could not reach the mission agent: ${err.message}` });
     res.redirect("/admin/servers");
   }
-});
+}));
 
 // section: webgui bundle sync
 // pulls the real dcs webgui spa out of a dcs world server install
@@ -529,7 +537,7 @@ serversRouter.get("/webgui-sync", (req, res) => {
 
 // two path segments deliberately, a bare "/webgui-sync" would be
 // shadowed by the earlier POST "/:id" route matching "webgui-sync" as an id
-serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), async (req, res) => {
+serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
@@ -572,7 +580,7 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
     flash.setFlash(res, { error: `Sync failed: ${err.message}` });
     res.redirect("/admin/servers/webgui-sync");
   }
-});
+}));
 
 app.use("/admin/servers", serversRouter);
 
@@ -592,7 +600,7 @@ updateRouter.get("/", (req, res) => {
   );
 });
 
-updateRouter.post("/check", async (req, res) => {
+updateRouter.post("/check", asyncHandler(async (req, res) => {
   try {
     const hasUpdate = await updateCheck.checkForUpdate();
     const updateState = updateCheck.getUpdateState();
@@ -603,7 +611,7 @@ updateRouter.post("/check", async (req, res) => {
     flash.setFlash(res, { error: `Check failed: ${err.message}` });
   }
   res.redirect("/admin/update");
-});
+}));
 
 updateRouter.post("/", (req, res) => {
   // guards against a double-click firing a second applyUpdate() while
@@ -682,7 +690,7 @@ async function fetchAgentLogEntries() {
   return parseLogLines(await res.text());
 }
 
-logsRouter.get("/", async (req, res) => {
+logsRouter.get("/", asyncHandler(async (req, res) => {
   const requested = Array.isArray(req.query.source) ? req.query.source : req.query.source ? [req.query.source] : ["app", "agent"];
   const sources = new Set(requested.filter((s) => s === "app" || s === "agent"));
   if (sources.size === 0) {
@@ -716,7 +724,7 @@ logsRouter.get("/", async (req, res) => {
   entries = entries.slice(-300);
 
   res.send(views.logsPage({ admin: req.admin, entries, agentError, filters: { sources, since, verbose } }));
-});
+}));
 
 app.use("/admin/logs", logsRouter);
 
@@ -804,7 +812,7 @@ app.post(
       next();
     });
   },
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const missionsUrl = `/s/${encodeURIComponent(req.params.slug)}/missions`;
     if (!req.file) {
       flash.setFlash(res, { error: "No .miz file provided." });
@@ -838,14 +846,14 @@ app.post(
     }
     flash.setFlash(res, { notice: `Uploaded ${req.file.originalname}.` });
     res.redirect(missionsUrl);
-  }
+  })
 );
 
 app.post(
   "/s/:slug/missions/download",
   requireServerAccess({ permission: "download" }),
   express.urlencoded({ extended: false }),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const names = [].concat(req.body?.mission || []);
     if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No missions selected." });
     if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
@@ -867,14 +875,14 @@ app.post(
       if (!res.headersSent) return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
       res.end();
     }
-  }
+  })
 );
 
 app.post(
   "/s/:slug/missions/trash",
   requireServerAccess({ permission: "delete" }),
   express.urlencoded({ extended: false }),
-  async (req, res) => {
+  asyncHandler(async (req, res) => {
     const names = [].concat(req.body?.mission || []);
     if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No missions selected." });
     if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
@@ -892,7 +900,7 @@ app.post(
       return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
     }
     renderMissionsPage(req, res, { notice: names.length === 1 ? `Moved "${names[0]}" to trash.` : `Moved ${names.length} missions to trash.` });
-  }
+  })
 );
 
 // section: the real dcs webgui itself, reverse-proxied and rewritten
@@ -1045,6 +1053,32 @@ app.use("/s/:slug", requireServerAccess(), express.static(webguiRoot, { index: f
 
 app.use((req, res) => res.status(404).send("Not found."));
 
+// catches whatever asyncHandler forwarded, or any other next(err) call;
+// must be registered last, after every route and the 404 above
+// see docs/Why.md#why-does-every-async-handler-need-asynchandler
+app.use((err, req, res, next) => {
+  console.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err.message}`);
+  if (res.headersSent) return res.end();
+  res.status(500).send("Internal server error.");
+});
+
+// logs a crash that reached neither asyncHandler nor the error
+// middleware above, then exits; no graceful close attempted
+// see docs/Why.md#why-does-the-crash-handler-exit-immediately-with-no-graceful-close
+function logFatalAndExit(kind, reasonOrError) {
+  const err = reasonOrError instanceof Error ? reasonOrError : null;
+  console.error(`Fatal ${kind}: ${err ? err.message : util.inspect(reasonOrError)}`);
+  console.debug(
+    `Fatal ${kind} detail: ${util.inspect({
+      stack: err ? err.stack : util.inspect(reasonOrError),
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage(),
+      version: process.version,
+    })}`
+  );
+  process.exit(1);
+}
+
 // start every listener this app owns, and wire up a graceful shutdown
 function start() {
   const httpServer = app.listen(PORT, () => {
@@ -1064,6 +1098,8 @@ function start() {
       });
     });
   }
+  process.on("unhandledRejection", (reason) => logFatalAndExit("unhandledRejection", reason));
+  process.on("uncaughtException", (err) => logFatalAndExit("uncaughtException", err));
 }
 
 // only true for `node src/server.js` directly, launcher.js requires

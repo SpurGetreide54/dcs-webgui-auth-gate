@@ -124,6 +124,13 @@ const app = express();
 // drop the x-powered-by header, no need to advertise the framework
 app.disable("x-powered-by");
 
+// express 4 can't catch a rejected promise on its own, so every async
+// handler below is wrapped in this to forward the rejection to next()
+// see docs/Why.md#why-does-every-async-handler-need-asynchandler
+function asyncHandler(fn) {
+  return (req, res, next) => fn(req, res, next).catch(next);
+}
+
 // express middleware: require a valid bearer token on every request
 function checkToken(req, res, next) {
   const header = req.get("authorization") || "";
@@ -196,7 +203,7 @@ const upload = multer({
   limits: { fileSize: MAX_MISSION_BYTES, files: 1 },
 });
 
-app.post("/upload", checkToken, upload.single("mission"), async (req, res) => {
+app.post("/upload", checkToken, upload.single("mission"), asyncHandler(async (req, res) => {
   const instanceName = req.body?.instance_name;
   const instanceDir = resolveInstanceDir(instanceName);
   if (!instanceDir) return res.status(400).send("Unknown or invalid instance_name.");
@@ -222,9 +229,9 @@ app.post("/upload", checkToken, upload.single("mission"), async (req, res) => {
   }
 
   res.json({ ok: true, path: finalPath });
-});
+}));
 
-app.get("/missions/:instanceName", checkToken, requireInstanceDir, async (req, res) => {
+app.get("/missions/:instanceName", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {
   const targetDir = missionsDir(req.instanceDir);
   let entries;
   try {
@@ -243,9 +250,9 @@ app.get("/missions/:instanceName", checkToken, requireInstanceDir, async (req, r
       })
   );
   res.json({ missions });
-});
+}));
 
-app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, express.json(), async (req, res) => {
+app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
   const names = Array.isArray(req.body?.missions) ? req.body.missions : [];
   if (names.length === 0) return res.status(400).send("No missions named.");
 
@@ -287,9 +294,9 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
     archive.file(finalPath, { name: safeName });
   }
   archive.finalize();
-});
+}));
 
-app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, express.json(), async (req, res) => {
+app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
   const names = Array.isArray(req.body?.missions) ? req.body.missions : [];
   if (names.length === 0) return res.status(400).send("No missions named.");
 
@@ -313,16 +320,16 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
     return res.status(500).send(`Could not move to trash: ${err.message}`);
   }
   res.json({ ok: true });
-});
+}));
 
 // section: webgui control port, status, config write, relay
 
-app.get("/webgui/:instanceName/status", checkToken, requireInstanceDir, async (req, res) => {
+app.get("/webgui/:instanceName/status", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {
   const status = await readWebguiPort(req.instanceDir);
   res.json(status);
-});
+}));
 
-app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, express.json(), async (req, res) => {
+app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
   const port = Number(req.body?.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return res.status(400).json({ error: "port must be an integer in 1..65535" });
@@ -344,7 +351,7 @@ app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, ex
     await fs.writeFile(cfgPath, `${line}\n`, "utf8");
   }
   res.json({ ok: true, webguiPort: port, created: true });
-});
+}));
 
 // the actual control-port proxy, routed per instance from above
 const webguiProxyMiddleware = createProxyMiddleware({
@@ -381,7 +388,7 @@ app.use("/webgui/:instanceName", checkToken, requireInstanceDir, webguiProxyMidd
 // copying it into webgui-static/ by hand
 // see docs/Why.md#why-isnt-the-dcs-install-path-confined-to-a-fixed-root
 
-app.get("/dcs-install/webgui-bundle", checkToken, async (req, res) => {
+app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) => {
   const installPath = req.query.path;
   if (!installPath || typeof installPath !== "string") {
     return res.status(400).send("Missing path query parameter.");
@@ -401,7 +408,7 @@ app.get("/dcs-install/webgui-bundle", checkToken, async (req, res) => {
     res.end(`Failed to read webgui bundle: ${err.message}`);
   });
   stream.pipe(res);
-});
+}));
 
 // section: self-update, stage and commit
 // relayed through the auth-gate (see src/updateCheck.js) since this
@@ -432,7 +439,7 @@ function otherAgentSlot(slot) {
 // the staged build arrives as a raw binary body, not multipart
 const selfUpdateUpload = express.raw({ type: "application/octet-stream", limit: MAX_MISSION_BYTES });
 
-app.post("/self-update/stage", checkToken, selfUpdateUpload, async (req, res) => {
+app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async (req, res) => {
   const expectedSha256 = req.get("X-Sha256");
   if (!expectedSha256) return res.status(400).send("Missing X-Sha256 header.");
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).send("No file body received.");
@@ -458,9 +465,9 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, async (req, res) =>
     return res.status(500).send(`Could not stage update: ${err.message}`);
   }
   res.json({ ok: true, slot: idleSlot });
-});
+}));
 
-app.post("/self-update/commit", checkToken, async (req, res) => {
+app.post("/self-update/commit", checkToken, asyncHandler(async (req, res) => {
   const idleSlot = otherAgentSlot(readActiveAgentSlot());
   const idleSlotDir = path.join(RELEASES_DIR, idleSlot);
   if (!fsSync.existsSync(path.join(idleSlotDir, "agent.exe"))) {
@@ -490,13 +497,13 @@ app.post("/self-update/commit", checkToken, async (req, res) => {
   // skip-exit exists only so a test's http round trip survives it
   if (!process.env.AGENT_SELF_UPDATE_SKIP_EXIT) res.on("finish", () => process.exit(1));
   res.json({ ok: true, activeSlot: idleSlot });
-});
+}));
 
 // section: logs, a tail of this agent's own log file
 // nssm's own appstdout/appstderr redirection (install.ps1) is what
 // actually writes and rotates agent_log_file, this just reads it back
 
-app.get("/logs", checkToken, async (req, res) => {
+app.get("/logs", checkToken, asyncHandler(async (req, res) => {
   let raw;
   try {
     raw = await fs.readFile(AGENT_LOG_FILE, "utf8");
@@ -506,10 +513,36 @@ app.get("/logs", checkToken, async (req, res) => {
   }
   const lines = raw.split("\n").filter(Boolean).slice(-MAX_LOG_READ_LINES);
   res.type("text/plain").send(lines.join("\n"));
-});
+}));
 
 // anything not matched above is a plain 404
 app.use((req, res) => res.status(404).send("Not found."));
+
+// catches whatever asyncHandler forwarded, or any other next(err) call;
+// must be registered last, after every route and the 404 above
+// see docs/Why.md#why-does-every-async-handler-need-asynchandler
+app.use((err, req, res, next) => {
+  console.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err.message}`);
+  if (res.headersSent) return res.end();
+  res.status(500).send("Internal server error.");
+});
+
+// logs a crash that reached neither asyncHandler nor the error
+// middleware above, then exits; no graceful close attempted
+// see docs/Why.md#why-does-the-crash-handler-exit-immediately-with-no-graceful-close
+function logFatalAndExit(kind, reasonOrError) {
+  const err = reasonOrError instanceof Error ? reasonOrError : null;
+  console.error(`Fatal ${kind}: ${err ? err.message : util.inspect(reasonOrError)}`);
+  console.debug(
+    `Fatal ${kind} detail: ${util.inspect({
+      stack: err ? err.stack : util.inspect(reasonOrError),
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage(),
+      version: process.version,
+    })}`
+  );
+  process.exit(1);
+}
 
 // only listen when run directly, tests import the app instead
 // see docs/Why.md#why-doesnt-the-control-port-proxy-handle-websocket-upgrades
@@ -517,6 +550,8 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`mission-agent listening on :${PORT}`);
   });
+  process.on("unhandledRejection", (reason) => logFatalAndExit("unhandledRejection", reason));
+  process.on("uncaughtException", (err) => logFatalAndExit("uncaughtException", err));
 }
 
 // expose the express app itself, for both real use and tests

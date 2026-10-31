@@ -136,7 +136,7 @@ test.after(async () => {
   for (const suffix of ["", ".1"]) fs.rmSync(authGateLogPath + suffix, { force: true });
 });
 
-test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, logout", async () => {
+test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, logout", async (t) => {
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -269,12 +269,28 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.doesNotMatch(capturedPopupInnerHtml, /<img/, "a server name must never reach popup.innerHTML as a live html sink");
     assert.match(capturedPopupInnerHtml, /&lt;img src=x onerror=alert\(1\)&gt;/, "the server name must render escaped instead");
 
+    // crash safety net: an error thrown inside an async handler must
+    // return 500, not take the whole process down with it
+    // see docs/Why.md#why-does-every-async-handler-need-asynchandler
+    const verifyPasswordMock = t.mock.method(auth, "verifyPassword", () => {
+      throw new Error("simulated crash inside an async handler");
+    });
+    const crashRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=serveradmin&password=another-long-password",
+      redirect: "manual",
+    });
+    assert.equal(crashRes.status, 500, "a thrown error inside an async handler must return 500, not crash the process");
+    verifyPasswordMock.mock.restore();
+
     const loginRes = await fetch(`${base}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "username=serveradmin&password=another-long-password",
       redirect: "manual",
     });
+    assert.equal(loginRes.status, 302, "the next request after a caught crash must still succeed, the process must still be alive");
     const serverAdminCookie = extractCookie(loginRes);
     assert.ok(serverAdminCookie);
 

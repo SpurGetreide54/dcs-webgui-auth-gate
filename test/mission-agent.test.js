@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
 
 const tar = require("tar");
@@ -454,6 +455,24 @@ test("list returns .miz files with name/size/mtime, excluding non-.miz files", a
 test("list rejects requests with no token", async () => {
   const res = await fetch(`${base}/missions/${INSTANCE}`);
   assert.equal(res.status, 401);
+});
+
+test("list: an error thrown inside the async handler returns 500, and the agent survives it", async (t) => {
+  const instance = "Example_ListCrash";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "one.miz"), "fake miz one");
+
+  // see docs/Why.md#why-does-every-async-handler-need-asynchandler
+  t.mock.method(fsp, "stat", () => {
+    throw new Error("simulated crash inside an async handler");
+  });
+  const crashRes = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
+  assert.equal(crashRes.status, 500, "a thrown error inside an async handler must return 500, not crash the process");
+  t.mock.reset();
+
+  const stillUp = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
+  assert.equal(stillUp.status, 200, "the next request after a caught crash must still succeed, the process must still be alive");
 });
 
 // section: mission download
