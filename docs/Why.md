@@ -703,6 +703,24 @@ fix, the first time it ever actually fired.<br>`%%` is the escape for
 a literal `%` in any `ExecStart=` line, same as it would be for `%i`,
 `%n`, or any other specifier.
 
+## Why does DcsSavedGamesRoot default to the installing user?
+
+DCS server installs conventionally run as whatever account was used
+to install the service, and the service itself always runs as
+LocalSystem (no `-ObjectName` is ever set in the NSSM registration
+block below), so there's no ACL mismatch between the installing
+user's own "Saved Games" folder and the account the service runs
+under.<br>Auto-detecting which account DCS actually runs under was
+considered and rejected: the installing user's own folder is right
+for the common case (one admin installs both DCS and this agent), and
+a dedicated-account setup (the `dcsservice` examples throughout this
+script and its docs) already needs `-DcsSavedGamesRoot` passed
+explicitly for other reasons, so there's no real case that falls
+through a gap.<br>The post-check warning (an empty-but-existing
+folder) is a hint, not a hard failure, since an empty folder is also
+just what a brand new DCS install looks like before its first server
+is ever created.
+
 ## Why does install.ps1 only ever point the junction at slot a?
 
 The junction is what makes the A/B self-update system work on the

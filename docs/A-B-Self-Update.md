@@ -99,7 +99,9 @@ steps.
 
 ### mission-agent side (on the physical host)
 
-Re-run `install.ps1` once:
+Re-run `install.ps1` once, with whatever `-DcsSavedGamesRoot` the
+original install used (it now defaults to the installing user's own
+"Saved Games" folder if omitted — see [Installation](Installation.md)):
 
 ```
 .\install.ps1 -DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"

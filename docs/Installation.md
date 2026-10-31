@@ -34,10 +34,12 @@ maintainer concern, not a normal install step.
 2. Unpack it on the physical host.
 3. Install it as a Windows service:
    ```
-   .\install.ps1 -DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"
+   .\install.ps1
    ```
    This wraps `agent.exe` with NSSM, so Windows restarts it on crash
-   and on boot.
+   and on boot. Defaults to the installing user's own "Saved Games"
+   folder; pass `-DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"`
+   instead when DCS runs under a dedicated account.
 4. Bind it only to the interface reachable from the auth-gate VM.
    Keep it off the host's internet-facing side.
 5. Read the generated token, and copy it into the auth-gate's
