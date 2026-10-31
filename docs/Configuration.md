@@ -9,16 +9,24 @@ auth-gate also reads `.env` in its own working directory.<br>See
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `PORT` | No | `3000` | |
-| `SQLITE_PATH` | No | `./data/auth-gate.sqlite` | |
 | `MISSION_AGENT_URL` | Yes | none | Base URL of the mission-agent. |
 | `MISSION_AGENT_TOKEN` | Yes | none | Must match the mission-agent's own token. See [Installation](Installation.md). |
 | `MAX_MISSION_BYTES` | No | `209715200` (200 MB) | Largest `.miz` upload accepted. |
 | `COOKIE_SECURE` | No | `true` | Set to `false` only for local HTTP-only development. Production needs real HTTPS in front, or login loops back to the login page forever. |
 | `WEBGUI_CONTROL_PORT` | No | `8088` | Must match the reverse proxy's second server block. See [Installation](Installation.md). |
-| `WEBGUI_STATIC_PATH` | No | repo-relative `webgui-static/` | Set this explicitly in a production A/B deployment. See [A/B Self-Update](A-B-Self-Update.md). |
 | `BRAND_NAME` | No | `DCS Auth Gate` | Shown in the navbar. |
-| `ACTIVE_SLOT_PATH` | Production only | repo-relative `active-slot` | Required for A/B self-update. See [A/B Self-Update](A-B-Self-Update.md). |
-| `AUTH_GATE_LOG_PATH` | Production only | repo-relative `auth-gate.log` | Required for A/B self-update. See [A/B Self-Update](A-B-Self-Update.md). |
+| `AUTH_GATE_STATE_DIR` | Production only | none | Required for A/B self-update. Derives `webgui-static/`, `active-slot`, `auth-gate.log`, and `auth-gate.sqlite` as fixed sub-paths of this one directory. See [A/B Self-Update](A-B-Self-Update.md). |
+
+### Deprecated, still work
+
+Each still overrides its one path individually, taking priority over `AUTH_GATE_STATE_DIR`. Kept only for existing deployments; new ones should set `AUTH_GATE_STATE_DIR` instead.
+
+| Variable | Default | Replaced by |
+|---|---|---|
+| `SQLITE_PATH` | `./local-only/data/auth-gate.sqlite` | `<AUTH_GATE_STATE_DIR>/auth-gate.sqlite` |
+| `WEBGUI_STATIC_PATH` | repo-relative `webgui-static/` | `<AUTH_GATE_STATE_DIR>/webgui-static` |
+| `ACTIVE_SLOT_PATH` | repo-relative `active-slot` | `<AUTH_GATE_STATE_DIR>/active-slot` |
+| `AUTH_GATE_LOG_PATH` | repo-relative `auth-gate.log` | `<AUTH_GATE_STATE_DIR>/auth-gate.log` |
 
 ## mission-agent (`src/agent.js`)
 

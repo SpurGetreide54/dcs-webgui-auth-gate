@@ -102,6 +102,23 @@ setup, so production overrides it with `AUTH_GATE_LOG_PATH` in `.env`,
 set once during the A/B migration alongside `ACTIVE_SLOT_PATH` and
 `WEBGUI_STATIC_PATH`.
 
+## Why does AUTH_GATE_STATE_DIR not replace the older vars?
+
+`WEBGUI_STATIC_PATH`, `ACTIVE_SLOT_PATH`, `AUTH_GATE_LOG_PATH`, and
+`SQLITE_PATH` were four independent values a production `.env` had to
+get right, each pointing outside either A/B slot.<br>`AUTH_GATE_STATE_DIR`
+replaces that with one directory, deriving the other four as fixed
+sub-paths (`<dir>/webgui-static`, `<dir>/active-slot`,
+`<dir>/auth-gate.log`, `<dir>/auth-gate.sqlite`).
+
+Renaming the old vars outright would break every existing deployment's
+`.env` on upgrade with no warning. Instead, `src/stateDir.js` lets any
+old var still set win over `AUTH_GATE_STATE_DIR` for that one path, and
+the server logs a deprecation warning at startup (listing exactly
+which old vars are still in play) without refusing to start. A future
+version can drop the old vars once deployments have had time to
+migrate.
+
 ## Why is each log line a single JSON object?
 
 It's what makes a structured, chat-style rendering possible on

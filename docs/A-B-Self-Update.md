@@ -52,20 +52,25 @@ steps.
 
 ### auth-gate side (on the VM)
 
-1. Add these three lines to `.env`, if not already there:
+1. Add this line to `.env`, if not already there:
    ```
-   WEBGUI_STATIC_PATH=/var/www/dcs-webgui-auth-gate/webgui-static
-   ACTIVE_SLOT_PATH=/var/www/dcs-webgui-auth-gate/active-slot
-   AUTH_GATE_LOG_PATH=/var/www/dcs-webgui-auth-gate/auth-gate.log
+   AUTH_GATE_STATE_DIR=/var/www/dcs-webgui-auth-gate
    ```
-   Each value must point outside either A/B slot's own directory. A
-   value left at its slot-relative default breaks differently per
-   variable. See [FAQ](FAQ.md) for `ACTIVE_SLOT_PATH` specifically.
+   It must point outside either A/B slot's own directory — the
+   install root itself, sibling to `releases/`. A value left at a
+   slot-relative default breaks every path it derives. See
+   [FAQ](FAQ.md) for the active-slot pointer specifically.
 
-   `AUTH_GATE_LOG_PATH` must also match the hardcoded `LOG_FILE` in
-   `scripts/systemd/dcs-webgui-auth-gate-rollback.service` exactly.
-   That unit runs as root, separately from the main service, and
-   cannot read `.env`.
+   This value must also match the hardcoded `STATE_FILE`/`LOG_FILE`
+   paths in `scripts/systemd/dcs-webgui-auth-gate-rollback.service`
+   exactly (`<AUTH_GATE_STATE_DIR>/active-slot` and
+   `<AUTH_GATE_STATE_DIR>/auth-gate.log`). That unit runs as root,
+   separately from the main service, and cannot read `.env`.
+
+   (The older `WEBGUI_STATIC_PATH`/`ACTIVE_SLOT_PATH`/
+   `AUTH_GATE_LOG_PATH`/`SQLITE_PATH` vars still work individually
+   instead, see [Configuration](Configuration.md), but a fresh setup
+   should use `AUTH_GATE_STATE_DIR`.)
 
 2. Create both slot directories.<br>Seed slot A with the code already
    running, so the first real update has something to diff against:
