@@ -376,6 +376,8 @@ app.post(
       if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Trash entry not found: ${resolved.safeName}`);
       const parsed = parseTrashEntryName(resolved.safeName);
       if (!parsed) return res.status(400).send(`Unrecognized trash entry: ${resolved.safeName}`);
+      // on disk already, or claimed earlier in this same batch, either
+      // way a silent fs.rename below would overwrite it
       const destination = path.join(targetDir, parsed.name);
       if (seenDestinations.has(destination) || (await isExistingFile(destination))) {
         return res.status(409).send(`A mission named "${parsed.name}" already exists, remove it first.`);

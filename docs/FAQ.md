@@ -24,7 +24,9 @@ cycle before it is live.
 
 ## Why doesn't "delete" on a mission actually delete the file?
 
-It moves the file to a `.trash/` folder inside the mission folder.<br>It never unlinks it.
+It moves the file to a `.trash/` folder inside the mission folder.<br>It never unlinks it. The missions page's own Trash section can move it
+back out, but nothing in the app ever empties `.trash/` permanently —
+that's done by hand on the host, outside this app.
 
 ## Why can't a `<form>` wrap a table row?
 

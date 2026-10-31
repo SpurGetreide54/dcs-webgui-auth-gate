@@ -25,7 +25,7 @@ Four separate grants, per admin, per server:
 | `view` | Reaching that server's missions page at all. |
 | `upload` | Uploading a `.miz` file. |
 | `download` | Downloading one or more missions. |
-| `delete` | Moving a mission to trash. See [FAQ](FAQ.md) for why this never actually deletes a file. |
+| `delete` | Moving a mission to trash, and restoring one back out of it. See [FAQ](FAQ.md) for why this never actually deletes a file. |
 
 An admin with `upload` but not `view` still cannot reach the missions
 page.<br>Grant `view` alongside any of the other three.
