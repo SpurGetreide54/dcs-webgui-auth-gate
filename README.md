@@ -71,6 +71,16 @@ top of one still in flight. See
 [`docs/A-B-Self-Update.md`](docs/A-B-Self-Update.md) for the one-time
 setup this needs.
 
+## Diagnostics
+
+A sidebar icon (`/admin/diag`, site admins only) surfaces config
+mismatches and recent failures early — an unreachable or
+misconfigured mission agent, a self-update that rolled back, an
+empty `webgui-static/`, and so on — each already documented, surfaced
+sooner and more clearly instead of waiting for the feature that
+depends on it to fail first. Hidden when nothing's active; pin it
+visible from `/admin/settings` like the update icon.
+
 ## More docs
 
 - [`docs/Home.md`](docs/Home.md) — the full wiki: architecture,

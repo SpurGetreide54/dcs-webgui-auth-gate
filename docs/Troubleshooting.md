@@ -6,14 +6,17 @@ Each entry states a symptom, then the fix.
 
 `webgui-static/` is empty. Populate it.<br>Copy a real DCS webgui bundle
 in by hand, or run `/admin/servers/webgui-sync`.<br>See
-[Installation](Installation.md).
+[Installation](Installation.md). `/admin/diag` flags this before an
+admin has to hit the 503 to find out.
 
 ## The mission-agent rejects every request
 
 `MISSION_AGENT_TOKEN` does not match on both sides.<br>In production,
 read `agent-token.txt` in the agent's install directory for the real
 value. Compare it against the auth-gate's own env value.<br>In local
-development, check both env values directly.
+development, check both env values directly. `/admin/diag` flags an
+unreachable or misconfigured agent before a feature that depends on
+it fails with a generic error.
 
 ## Need to rotate or recover the mission-agent token
 

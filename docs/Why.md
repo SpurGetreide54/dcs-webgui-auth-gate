@@ -242,6 +242,24 @@ cooldown guard against double-triggering `applyUpdate()`, confirmed in
 production: a double-click once fired two full update cycles 24
 seconds apart.
 
+## Why does diagnostics mirror updateCheck.js's own shape?
+
+`src/diagnostics.js` (`/admin/diag`) needed the exact same shape
+`updateCheck.js` already has: an immediate first run, then
+`setInterval(...).unref()` so it never keeps the process alive on its
+own, swallowing each cycle's own errors into `console.warn`, and
+always recording the attempt into a single-row table either way
+(`diagnostics_state`, same `id = 1` convention as `update_state`).
+Rather than invent a second pattern for the same problem, it reuses
+the proven one.
+
+This did introduce one coupling the other direction: a successful
+`applyUpdate()` is also the signal that clears a previously-detected
+rollback (a fresh update with no new rollback is the "resolved"
+signal). `updateCheck.js` requires `diagnostics.js` for that, but only
+inside `applyUpdate()` itself, not at module load time, so the two
+files never form an actual circular require.
+
 ## Why is signed_updates.json the trust root instead of GitHub itself?
 
 It's attached as a release asset on GitHub, signed with an Ed25519

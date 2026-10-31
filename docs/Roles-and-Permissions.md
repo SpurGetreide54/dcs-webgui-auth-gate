@@ -6,7 +6,7 @@ An account with `can_manage_accounts`. A site admin:
 
 - creates, edits, and deletes other admin accounts
 - grants or revokes server access and mission permissions
-- reaches `/admin/update` and `/admin/settings`
+- reaches `/admin/update`, `/admin/diag`, and `/admin/settings`
 
 The app always keeps at least one site admin. Deleting the last one
 is blocked.
