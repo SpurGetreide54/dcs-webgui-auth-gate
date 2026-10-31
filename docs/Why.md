@@ -583,6 +583,34 @@ Leaving `better-sqlite3`'s native handles to garbage collection or
 finalizers has crashed the process during teardown instead of exiting
 cleanly, so shutdown closes the database explicitly before exiting.
 
+## Why does every async handler need asyncHandler?
+
+Express 4 wraps a synchronous handler's own throw in a try/catch, but
+has no idea an `async` handler's returned promise can reject, so a
+rejection inside one becomes an unhandled rejection instead of a
+caught error, taking the whole process down on the very next bug, not
+just the one that happened to be found and fixed first.<br>Confirmed
+present-day, not just a future risk: before this fix, `GET
+/missions/:instanceName`'s `Promise.all`/`fs.stat` call, `POST
+/missions/:instanceName/trash`'s `fs.mkdir`, and several other routes
+in both `src/server.js` and `src/agent.js` ran with no `try`/`catch`
+at all.<br>`(req, res, next) => fn(req, res, next).catch(next)` is
+hand-rolled rather than a dependency (`express-async-handler` or
+similar) because it's one line and both files already minimize their
+own dependency surface.
+
+## Why does the crash handler exit immediately with no graceful close?
+
+Reaching `unhandledRejection`/`uncaughtException` at all means a bug
+got past every `try`/`catch` and `asyncHandler`, so the process is in
+an unknown state; attempting a graceful shutdown (closing the DB,
+draining in-flight requests) risks hanging or corrupting further
+rather than just exiting.<br>Logging first, two-tier (`console.error`
+for a short always-visible line, `console.debug` for the full detail
+behind `/admin/logs`'s verbose filter) matters more here than a clean
+shutdown, since the service supervisor (`Restart=always`) brings the
+process back up immediately either way.
+
 ## Why does launcher.js never update itself?
 
 It's deliberately tiny: read which slot is active, run that slot's
@@ -612,6 +640,19 @@ in `src/updateCheck.js` re-stringifies the same keys (everything except
 `{...signed, signature}` here keeps that order intact end to end;
 reordering the fields would make a genuinely valid manifest fail
 verification.
+
+## Why does the service unit redirect stdout/stderr to the app log?
+
+A true native crash (a segfault, a V8 fatal error) never reaches
+`uncaughtException`, since no JS runs at all to catch it; the OS-level
+`StandardOutput=append:`/`StandardError=append:` redirect is the only
+thing that can still capture it.<br>It's pointed at the same
+`auth-gate.log` file `AUTH_GATE_LOG_PATH` already writes structured
+lines to, mirroring the Windows side's already-working
+`AGENT_LOG_FILE`/NSSM `AppStdout`/`AppStderr` pairing, so one crash
+dump can land mid-file without a viewer change: `appLog.js`'s
+`readRecentEntries` already renders a line that fails to parse as
+JSON as a raw row instead of breaking the page.
 
 ## Why is the rollback a separate systemd unit?
 
