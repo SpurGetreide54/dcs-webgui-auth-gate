@@ -257,6 +257,20 @@ stay: the db cooldown survives a restart, so a crash mid-update still
 blocks a retry for the rest of its 60 seconds; the in-process flag
 covers whatever that fixed window doesn't.
 
+## Why does update_state track last_succeeded_at separately from last_checked_at?
+
+A check that fails every hour must still update `last_checked_at`
+every time it runs, or `/admin/update`'s "Last checked" label and the
+failure's own log line would be the only trace that anything happened
+at all. But the "update check keeps failing" diagnostic
+(`isUpdateCheckStale()`) needs to know the last genuine success, not
+the last attempt — reading `last_checked_at` for that would mean a
+check that always fails but always updates that timestamp can never
+be detected as stale, defeating the diagnostic entirely.
+`last_succeeded_at` is set only on `checkForUpdate()`'s success path
+(an update found, or confirmed already current — anything that didn't
+throw), never from its catch branch.
+
 ## Why does diagnostics mirror updateCheck.js's own shape?
 
 `src/diagnostics.js` (`/admin/diag`) needed the exact same shape
