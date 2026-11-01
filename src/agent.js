@@ -348,7 +348,11 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
 function parseTrashEntryName(entryName) {
   const match = entryName.match(/^(.+)\.(\d+)$/);
   if (!match) return null;
-  return { name: match[1], trashedAt: new Date(Number(match[2])).toISOString() };
+  const trashedAt = new Date(Number(match[2]));
+  // a digit run beyond the Date range (a hand-placed entry), treated
+  // the same as a name that doesn't match the regex at all
+  if (Number.isNaN(trashedAt.getTime())) return null;
+  return { name: match[1], trashedAt: trashedAt.toISOString() };
 }
 
 app.get("/missions/:instanceName/trash", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {

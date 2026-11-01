@@ -838,6 +838,30 @@ test("trash listing is empty before anything is trashed, and parses name/size/tr
   assert.match(trash[0].trashName, /^listed\.miz\.\d+$/, "trashName is the real on-disk name, needed to restore this exact entry");
 });
 
+test("trash listing skips a hand-placed entry with an out-of-range numeric suffix instead of 500ing", async () => {
+  const instance = "Example_TrashHugeSuffix";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  const trashDir = path.join(missionsDir, ".trash");
+  fs.mkdirSync(trashDir, { recursive: true });
+  // beyond Date's +-8.64e15 range, new Date(Number(...)) is Invalid Date
+  fs.writeFileSync(path.join(trashDir, "bad.miz.99999999999999999999"), "bad bytes");
+  fs.writeFileSync(path.join(trashDir, "good.miz.1700000000000"), "good bytes");
+
+  const listRes = await fetch(`${base}/missions/${instance}/trash`, { headers: authHeaders() });
+  assert.equal(listRes.status, 200, "an unparseable entry must not 500 the whole listing");
+  const { trash } = await listRes.json();
+  assert.equal(trash.length, 1, "only the normal entry must be listed, the unparseable one skipped");
+  assert.equal(trash[0].name, "good.miz");
+
+  const restoreRes = await fetch(`${base}/missions/${instance}/trash/restore`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ trash: ["bad.miz.99999999999999999999"] }),
+  });
+  assert.equal(restoreRes.status, 400, "restoring the unparseable entry must 400, not 500");
+  assert.match(await restoreRes.text(), /Unrecognized trash entry/);
+});
+
 test("restore moves a trashed mission back into Missions/ under its original name", async () => {
   const instance = "Example_TrashRestore";
   const missionsDir = path.join(instanceDir(instance), "Missions");
