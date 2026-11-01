@@ -711,6 +711,13 @@ and `releases/b/`, so systemd's `ExecStart` targets it directly and
 never needs to change across updates. Changing it is a manual,
 deliberate step (edit it over SSH, restart the service by hand).
 
+It does read `process.env.ACTIVE_SLOT_PATH`/`AUTH_GATE_STATE_DIR`
+directly, the same precedence `stateDir.js` uses for that one path.
+Reading an env var needs no package, so this doesn't break the
+zero-dependency rule above, and without it a custom `--state-dir`
+install would have the launcher and the real app disagreeing about
+where the A/B flip lives.
+
 ## Why is the node.exe zip's sha256 checked into the script instead of fetched fresh?
 
 It's pinned against nodejs.org's own `SHASUMS256.txt` for this
