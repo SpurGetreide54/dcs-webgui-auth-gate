@@ -863,15 +863,35 @@ actually in it.
 
 ## Why is key-state/rotation a separate signed record?
 
-`signed_updates.json` already has its own trust root (the one
-`PUBLIC_KEY_PEM` in `src/updateCheck.js`), checked on every routine
-release.<br>Folding key rotation into that same file would force its
+`signed_updates.json` already has its own trust root (`key_state`'s
+primary key, checked on every routine release).<br>Folding key
+rotation into that same file would force its
 signature to become conditional — dual-signed only in months a
 rotation happens to land — and would recouple release cadence to
 rotation cadence for no reason. A separate record, on its own fixed
 `key-state` tag, overwritten in place, lets a leaked key get revoked
 the moment it's noticed, with no new app version and no change to how
 `signed_updates.json` itself is built or signed.
+
+## Why does verifyManifest read key_state instead of a hardcoded constant?
+
+Key rotation only matters if revoking a leaked key actually changes
+which key the update path trusts, not just a record in
+`key_state`.<br>`verifyManifest()` now reads
+`key_state.primary_public_key_pem` fresh on every check, so a
+rotation applied by the hourly `checkKeyState()` poll takes effect on
+the very next update check, with no new app release. Secondary is
+never accepted here, only primary, matching the existing
+single-signature manifest format; secondary stays reserved for
+vouching a primary rotation record, which already carries two
+signatures.
+
+A production deployment was already live when this was wired up,
+trusting only the old hardcoded key. That release's own manifest had
+to stay signed with the old key for that reason alone; only the
+release after it could sign with the new primary key, by explicit
+`sign-updates.js --key` override, documented in
+`local-only/release-process.md`.
 
 ## Why does key_state seed rotated_at with a fixed date instead of install time?
 
