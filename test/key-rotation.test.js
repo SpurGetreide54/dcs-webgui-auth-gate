@@ -413,6 +413,25 @@ test(
   }
 );
 
+test("rotate-key.js primary-draft refuses to overwrite a pending draft, instead of silently replacing it", () => {
+  const { execFileSync } = require("node:child_process");
+  const keysDir = path.join(__dirname, "..", "local-only", "keys");
+  const releaseDir = path.join(__dirname, "..", "local-only", "release");
+  const rotateScript = path.join(__dirname, "..", "scripts", "release", "rotate-key.js");
+  const draftPath = path.join(releaseDir, "key_state.draft.json");
+  const primaryNextPath = path.join(keysDir, "key-rotation-primary.next.pem");
+  const primaryNextPubPath = path.join(keysDir, "key-rotation-primary.next.pub.pem");
+  const run = () => execFileSync(process.execPath, [rotateScript, "primary-draft"], { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+  try {
+    run();
+    assert.throws(run, /already pending/);
+  } finally {
+    fs.rmSync(draftPath, { force: true });
+    fs.rmSync(primaryNextPath, { force: true });
+    fs.rmSync(primaryNextPubPath, { force: true });
+  }
+});
+
 test(
   "rotate-key.js accumulates two real rotations into one published history, not an overwrite",
   {

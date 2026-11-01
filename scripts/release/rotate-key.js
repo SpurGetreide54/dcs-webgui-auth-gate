@@ -99,6 +99,15 @@ function rotateSecondary() {
 // keypair into *.next.pem (untouched until primary-finalize confirms
 // secondary's vouch), self-signs, and drafts the record for signing
 function rotatePrimaryDraft() {
+  // refuse rather than back up: a second draft makes the first
+  // draft's vouch signature useless anyway, so silently backing it
+  // up would hide that a first draft was already pending, not
+  // preserve anything worth keeping
+  const existing = [DRAFT_PATH, keyPath("primary", ".next"), pubKeyPath("primary", ".next")].filter(fs.existsSync);
+  if (existing.length > 0) {
+    throw new Error(`A primary draft is already pending: ${existing.join(", ")}. Finalize it with primary-finalize, or delete these files first.`);
+  }
+
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
   const newPublicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
 
