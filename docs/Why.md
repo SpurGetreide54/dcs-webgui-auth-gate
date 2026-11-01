@@ -545,6 +545,20 @@ the current password first, then signing out every other session, is
 what lets the real account owner kick out anyone (or anything
 hijacked) still logged in elsewhere.
 
+## Why does /s/:slug redirect to add its own trailing slash?
+
+Express's default non-strict routing already matches a bare `GET
+/s/foo` to the same `app.get("/s/:slug/", ...)` handler that serves
+`/s/foo/`, so the index HTML loads either way.<br>The problem is the
+browser's address bar, not the server: it stays at `/s/foo`, and the
+served page's own relative asset URLs (`js/app.js`, `styles.css`)
+resolve against that missing segment, landing on `/s/js/app.js`, which
+`requireServerAccess` then answers with "Unknown server." for the slug
+`js`.<br>The handler checks `req.path` first (it reports
+`/s/foo` or `/s/foo/` exactly as received, unlike `req.originalUrl`
+which also carries the query string) and redirects 302, not 301, so a
+later slug rename is never cached by the browser.
+
 ## Why is webgui-static/ synced explicitly rather than automatically?
 
 This is an explicit admin action, the same shape as the webgui-ports
