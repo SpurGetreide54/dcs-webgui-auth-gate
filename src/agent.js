@@ -9,6 +9,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const crypto = require("node:crypto");
+const { pipeline } = require("node:stream/promises");
 const util = require("node:util");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const tar = require("tar");
@@ -279,11 +280,10 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
     const stream = fsSync.createReadStream(finalPath);
     // a file removed or replaced by something unreadable after the
     // isExistingFile check above would otherwise crash the agent
-    stream.on("error", (err) => {
+    return pipeline(stream, res).catch((err) => {
       if (!res.headersSent) res.status(500);
       res.end(`Failed to read mission: ${err.message}`);
     });
-    return stream.pipe(res);
   }
 
   // more than one gets bundled, unmodified, into one outer zip
@@ -291,15 +291,17 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
   res.set("Content-Type", "application/zip");
   // already-compressed .miz files, re-compressing just burns cpu
   const archive = archiver("zip", { zlib: { level: 0 } });
-  archive.on("error", (err) => {
+  // the pipeline has to start before finalize(), since archiver
+  // buffers internally until finalize() signals end
+  const done = pipeline(archive, res).catch((err) => {
     if (!res.headersSent) res.status(500);
     res.end(`Failed to build zip: ${err.message}`);
   });
-  archive.pipe(res);
   for (const { safeName, finalPath } of resolvedPaths) {
     archive.file(finalPath, { name: safeName });
   }
   archive.finalize();
+  await done;
 }));
 
 app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
@@ -483,11 +485,10 @@ app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) 
 
   res.set("Content-Type", "application/x-tar");
   const stream = tar.c({ cwd: webguiDir }, ["."]);
-  stream.on("error", (err) => {
+  await pipeline(stream, res).catch((err) => {
     if (!res.headersSent) res.status(500);
     res.end(`Failed to read webgui bundle: ${err.message}`);
   });
-  stream.pipe(res);
 }));
 
 // section: self-update, stage and commit

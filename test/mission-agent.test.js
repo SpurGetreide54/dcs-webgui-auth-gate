@@ -494,6 +494,48 @@ test("download of a single selected mission streams the raw .miz back unmodified
   assert.equal(body.toString("utf8"), "solo mission bytes", "a single selection must come back byte-for-byte, not re-wrapped in another zip");
 });
 
+test("download: aborting the client mid-stream destroys the server-side file handle instead of leaking it", async () => {
+  const instance = "Example_DownloadAbort";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  // large enough that the first chunk arrives well before the whole
+  // file would finish streaming, giving room to abort mid-transfer
+  fs.writeFileSync(path.join(missionsDir, "big.miz"), crypto.randomBytes(5 * 1024 * 1024));
+
+  const originalCreateReadStream = fs.createReadStream;
+  let capturedStream;
+  fs.createReadStream = function (...args) {
+    capturedStream = originalCreateReadStream.apply(fs, args);
+    return capturedStream;
+  };
+
+  try {
+    const http = require("node:http");
+    const body = JSON.stringify({ missions: ["big.miz"] });
+    await new Promise((resolve, reject) => {
+      const req = http.request(
+        `${base}/missions/${instance}/download`,
+        { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }) },
+        (res) => {
+          res.once("data", () => {
+            // the client walks away mid-transfer, never reading the rest
+            req.destroy();
+          });
+        }
+      );
+      req.on("error", resolve); // destroying our own request is expected to surface as an error here
+      req.write(body);
+      req.end();
+      setTimeout(resolve, 200);
+    });
+
+    assert.ok(capturedStream, "the download route must have opened a read stream");
+    assert.ok(capturedStream.destroyed, "the server-side read stream must be destroyed once the client aborts, not left open");
+  } finally {
+    fs.createReadStream = originalCreateReadStream;
+  }
+});
+
 test("download Content-Disposition carries an ascii fallback and the real UTF-8 name", async () => {
   const instance = "Example_DownloadUnicodeName";
   const missionsDir = path.join(instanceDir(instance), "Missions");
