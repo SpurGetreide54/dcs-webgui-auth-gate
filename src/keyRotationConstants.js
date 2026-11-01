@@ -16,4 +16,8 @@ MCowBQYDK2VwAyEAWRCq+xpQ+cgcwx2ZGdvssx5Sg7910b9gff4jmL8lGTk=
 -----END PUBLIC KEY-----
 `;
 
-module.exports = { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM };
+// fixed seed for key_state's rotated_at columns, older than any real
+// rotation will ever be, the date the two keys above were created
+const INITIAL_KEY_ROTATED_AT = "2026-11-01T00:00:00.000Z";
+
+module.exports = { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT };

@@ -94,6 +94,32 @@ test("getKeyState starts seeded with the two hardcoded placeholder/real public k
   assert.equal(state.secondary_next_target_rotation_at, null);
 });
 
+test("getKeyState's seeded rotated_at values are the fixed INITIAL_KEY_ROTATED_AT constant, not install time", () => {
+  const { INITIAL_KEY_ROTATED_AT } = require("../src/keyRotationConstants");
+  const state = keyRotation.getKeyState();
+  assert.equal(state.primary_rotated_at, INITIAL_KEY_ROTATED_AT);
+  assert.equal(state.secondary_rotated_at, INITIAL_KEY_ROTATED_AT);
+});
+
+test("verifyKeyState accepts a record dated well before 'now' as long as it's after a freshly seeded row's fixed seed", () => {
+  const { INITIAL_KEY_ROTATED_AT } = require("../src/keyRotationConstants");
+  const { publicKey: newSecondaryPub, privateKey: newSecondaryPriv } = freshKeypair();
+  const { privateKey: currentPrimaryPriv, publicKey: currentPrimaryPub } = freshKeypair();
+  const currentState = {
+    primary_public_key_pem: pem(currentPrimaryPub),
+    primary_rotated_at: INITIAL_KEY_ROTATED_AT,
+    secondary_public_key_pem: pem(freshKeypair().publicKey),
+    secondary_rotated_at: INITIAL_KEY_ROTATED_AT,
+  };
+  // a record dated shortly after the seed, long before this test's real "now"
+  const record = signRecord(
+    { rotated_slot: "secondary", new_public_key_pem: pem(newSecondaryPub), rotated_at: "2026-11-02T00:00:00.000Z" },
+    newSecondaryPriv,
+    currentPrimaryPriv
+  );
+  assert.equal(keyRotation.verifyKeyState(record, currentState), true);
+});
+
 test(
   "the hardcoded PRIMARY_PUBLIC_KEY_PEM/SECONDARY_PUBLIC_KEY_PEM must be real ed25519 keys, not left as placeholders",
   () => {

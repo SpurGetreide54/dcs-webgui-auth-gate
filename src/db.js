@@ -9,7 +9,7 @@ const { SQLITE_PATH } = require("./stateDir");
 
 // the key-rotation trust root's two initial public keys, for seeding
 // key_state below
-const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM } = require("./keyRotationConstants");
+const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT } = require("./keyRotationConstants");
 
 // a fresh clone has no local-only/ on disk at all, make sure it exists
 fs.mkdirSync(path.dirname(SQLITE_PATH), { recursive: true });
@@ -148,7 +148,7 @@ db.prepare("INSERT OR IGNORE INTO diagnostics_state (id) VALUES (1)").run();
 db.prepare(
   `INSERT OR IGNORE INTO key_state (id, primary_public_key_pem, primary_rotated_at, secondary_public_key_pem, secondary_rotated_at)
    VALUES (1, ?, ?, ?, ?)`
-).run(PRIMARY_PUBLIC_KEY_PEM, new Date().toISOString(), SECONDARY_PUBLIC_KEY_PEM, new Date().toISOString());
+).run(PRIMARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT);
 
 // guarded migration from the old upstream_url/mission_folder_key
 // columns, see docs/FAQ.md#why-does-this-project-exist-at-all for why
