@@ -2,7 +2,7 @@
 # builds auth-gate-<version>.tar.gz and .zip, same contents in both,
 # what updateCheck.js extracts into a fresh a/b slot and what a manual
 # install unpacks by hand, node_modules is rebuilt fresh, never copied
-# see docs/Why.md#why-is-node-modules-rebuilt-fresh-instead-of-copied
+# see docs/Why.md#why-is-node_modules-rebuilt-fresh-instead-of-copied
 #
 # Usage: sh scripts/build-auth-gate-archive.sh [--audit-level <level>]
 #   --audit-level: npm audit severity that fails the build. Default

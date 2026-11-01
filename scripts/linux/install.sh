@@ -247,7 +247,7 @@ WEBGUI_STATIC_PATH="$AUTH_GATE_STATE_DIR/webgui-static"
 ACTIVE_SLOT_PATH="$AUTH_GATE_STATE_DIR/active-slot"
 AUTH_GATE_LOG_PATH="$AUTH_GATE_STATE_DIR/auth-gate.log"
 # the service unit's own stdout/stderr redirect, not AUTH_GATE_LOG_PATH
-# see docs/Why.md#why-does-the-service-unit-redirect-stdout-stderr-to-their-own-file-not-the-app-log
+# see docs/Why.md#why-does-the-service-unit-redirect-stdoutstderr-to-their-own-file-not-the-app-log
 NATIVE_CRASH_LOG_PATH="$AUTH_GATE_STATE_DIR/auth-gate-native-crash.log"
 
 # section: write .env, every other existing line untouched

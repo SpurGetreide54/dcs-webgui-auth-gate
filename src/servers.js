@@ -30,7 +30,7 @@ function getAccessibleServers(adminId) {
   return db
     .prepare(
       // server_id is selected explicitly, not left to servers.*'s own id
-      // see docs/Why.md#why-does-getaccessibleservers-select-server-id-explicitly
+      // see docs/Why.md#why-does-getaccessibleservers-select-server_id-explicitly
       `SELECT servers.*, admin_server_access.server_id, admin_server_access.can_upload_missions,
               admin_server_access.can_view_missions, admin_server_access.can_download_missions,
               admin_server_access.can_delete_missions

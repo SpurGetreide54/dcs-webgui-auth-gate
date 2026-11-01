@@ -1,6 +1,6 @@
 // the a/b self-update system's brain: hourly github polling, ed25519
 // manifest verification, and staging a verified release into the
-// idle slot, see docs/Why.md#why-is-signed-updates-json-the-trust-root
+// idle slot, see docs/Why.md#why-is-signed_updatesjson-the-trust-root-instead-of-github-itself
 
 // node built-ins, the tar library, and the db and active-slot modules
 const crypto = require("node:crypto");
@@ -57,7 +57,7 @@ async function fetchJson(url) {
 }
 
 // fetch the latest release's manifest, refusing one that fails verification
-// see docs/Why.md#why-is-fetchverifiedmanifest-always-re-fetched
+// see docs/Why.md#why-is-fetchverifiedmanifest-always-re-fetched-instead-of-cached
 async function fetchVerifiedManifest() {
   const release = await fetchJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/latest`);
   const asset = (release.assets || []).find((a) => a.name === "signed_updates.json");

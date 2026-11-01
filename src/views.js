@@ -26,7 +26,7 @@ const ICONS_DIR = path.join(PUBLIC_DIR, "icons");
 const iconCache = new Map();
 
 // read and cache one svg icon's markup, inlined rather than <img src>
-// see docs/Why.md#why-are-icons-inlined-instead-of-referenced-via-img
+// see docs/Why.md#why-are-icons-inlined-instead-of-referenced-via-img-src
 function inlineIcon(filename, dir = ICONS_DIR) {
   const key = `${dir}/${filename}`;
   if (!iconCache.has(key)) {

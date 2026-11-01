@@ -1,7 +1,7 @@
 #!/bin/sh
 # builds src/agent.js into a standalone windows agent.exe, using node's
 # own single executable application (sea) support, safe to run from any os
-# see docs/Why.md#why-is-the-nodeexe-zips-sha256-checked-into-the-script
+# see docs/Why.md#why-is-the-nodeexe-zips-sha256-checked-into-the-script-instead-of-fetched-fresh
 #
 # Usage: sh scripts/build-agent-exe.sh
 # Output: local-only/release/agent/agent-<version>.exe

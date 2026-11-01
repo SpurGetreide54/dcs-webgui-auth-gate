@@ -15,7 +15,7 @@ const tar = require("tar");
 const archiver = require("archiver");
 
 // wrap console.* into the same ndjson line shape as src/appLog.js
-// see docs/Why.md#why-does-agentjs-duplicate-applogjss-log-format
+// see docs/Why.md#why-does-agentjs-duplicate-applogjss-log-format-instead-of-importing-it
 function installConsoleCapture() {
   const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
   // write one captured console call as an ndjson line
@@ -44,7 +44,7 @@ const MAX_LOG_READ_LINES = 1000;
 
 // resolve this agent's own bearer token, generating and persisting
 // one on first start if none was given
-// see docs/Why.md#why-does-the-agent-persist-its-own-generated-token
+// see docs/Why.md#why-does-the-agent-persist-its-own-generated-token-instead-of-requiring-one-upfront
 function resolveAgentToken() {
   if (process.env.MISSION_AGENT_TOKEN) return process.env.MISSION_AGENT_TOKEN;
 
@@ -315,7 +315,7 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
     resolvedPaths.push(resolved);
   }
 
-  // move aside, never unlink, see docs/Why.md#why-does-the-mission-agent-have-no-accounts
+  // move aside, never unlink, see docs/Why.md#why-does-the-mission-agent-have-no-accounts-just-a-shared-bearer-token
   const trashDir = path.join(targetDir, ".trash");
   await fs.mkdir(trashDir, { recursive: true });
   try {
@@ -573,7 +573,7 @@ app.post("/self-update/commit", checkToken, asyncHandler(async (req, res) => {
     return res.status(500).send(`Could not flip to the new build: ${err.message}`);
   }
 
-  // deliberate restart, not a crash, see docs/Why.md#why-does-the-agent-use-a-current-junction
+  // deliberate restart, not a crash, see docs/Why.md#why-does-the-agent-use-a-current-junction-instead-of-nssms-own-config
   // skip-exit exists only so a test's http round trip survives it
   if (!process.env.AGENT_SELF_UPDATE_SKIP_EXIT) res.on("finish", () => process.exit(1));
   res.json({ ok: true, activeSlot: idleSlot });

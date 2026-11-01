@@ -527,7 +527,7 @@ serversRouter.post("/webgui-ports/confirm", asyncHandler(async (req, res) => {
 
 // section: webgui bundle sync
 // pulls the real dcs webgui spa out of a dcs world server install
-// already on the host, see docs/Why.md#why-is-webgui-static-synced-explicitly
+// already on the host, see docs/Why.md#why-is-webgui-static-synced-explicitly-rather-than-automatically
 
 // ask the agent for a tarball of one install's own WebGUI folder
 async function fetchWebguiBundle(installPath) {
@@ -562,7 +562,7 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
 
   // extract into a scratch dir and validate before touching the live
   // webgui-static/ at all, then swap via two fast same-filesystem renames
-  // see docs/Why.md#why-must-the-webgui-sync-scratch-dir-be-a-sibling-of-webguiroot
+  // see docs/Why.md#why-must-the-webgui-sync-scratch-directory-be-a-sibling-of-webguiroot
   const tmpDir = `${webguiRoot}.sync-tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const hadExisting = fsSync.existsSync(webguiRoot);
   const backupDir = `${webguiRoot}.sync-backup-${Date.now()}`;
@@ -1054,7 +1054,7 @@ let webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 app.get("/s/:slug/", requireServerAccess(), (req, res) => {
   // a bare /s/<slug> still matches this route, but the browser's
   // address bar needs the trailing slash too or its own relative
-  // asset urls resolve wrong, see docs/Why.md#why-does-s-slug-redirect-to-add-its-own-trailing-slash
+  // asset urls resolve wrong, see docs/Why.md#why-does-sslug-redirect-to-add-its-own-trailing-slash
   if (!req.path.endsWith("/")) {
     return res.redirect(302, `${req.path}/${req.url.slice(req.path.length)}`);
   }
@@ -1207,7 +1207,7 @@ function start() {
   diagnostics.startDiagnosticsCheck();
   keyRotation.startKeyStateCheck();
   // explicit db.close() on shutdown
-  // see docs/Why.md#why-does-shutdown-call-db-close-explicitly
+  // see docs/Why.md#why-does-shutdown-call-dbclose-explicitly
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
       controlProxyServer.close(() => {

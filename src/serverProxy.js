@@ -19,7 +19,7 @@ function buildControlProxyApp() {
 
   // reflect the request's own origin so a cross-origin fetch's cors
   // preflight succeeds, safe here since auth rides on the opaque
-  // token alone, see docs/Why.md#why-is-it-safe-to-reflect-the-origin
+  // token alone, see docs/Why.md#why-is-it-safe-to-reflect-the-request-origin
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin) res.set("Access-Control-Allow-Origin", origin);
@@ -46,7 +46,7 @@ function buildControlProxyApp() {
     }
     // the token itself never expires on logout or password change, so
     // its minting session has to be rechecked here on every request
-    // see docs/Why.md#why-does-a-control-tokens-expiry-slide-forward
+    // see docs/Why.md#why-does-a-control-tokens-expiry-slide-forward-instead-of-using-a-fixed-ttl
     if (!auth.isSessionHashLive(entry.sessionTokenHash)) {
       return res.status(403).send("Forbidden: the session this token belongs to is no longer live.");
     }

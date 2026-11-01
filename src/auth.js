@@ -14,7 +14,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
 
 // every expiry/window check below compares against sqlite's own
-// datetime('now'), never a js Date, see docs/Why.md#why-does-every-expiry-use-sqlites-own-datetime
+// datetime('now'), never a js Date, see docs/Why.md#why-does-every-expiry-use-sqlites-own-datetime-instead-of-js-date
 
 // hash a plain password for storage
 function hashPassword(password) {

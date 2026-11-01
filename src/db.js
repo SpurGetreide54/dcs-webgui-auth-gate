@@ -167,7 +167,7 @@ db.prepare(
 }
 
 // guarded migration adding view/download/delete as their own columns
-// see docs/Why.md#why-does-the-permission-migration-backfill-from-upload
+// see docs/Why.md#why-does-the-permission-migration-backfill-from-can_upload_missions
 for (const table of ["admin_server_access", "invite_server_access"]) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!columns.includes("can_view_missions")) {
