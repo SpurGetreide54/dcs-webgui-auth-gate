@@ -287,6 +287,9 @@ if [ ! -f "$ACTIVE_SLOT_PATH" ]; then
     echo "==> $ROOT_DIR/node_modules not found. A release download already includes it; a git checkout needs npm install first." >&2
     exit 1
   fi
+  # a stale node_modules from a prior failed/partial run would
+  # otherwise nest under itself instead of being replaced
+  rm -rf "$INSTALL_DIR/releases/a/node_modules"
   cp -r "$ROOT_DIR/node_modules" "$INSTALL_DIR/releases/a/node_modules"
   chown -R "$SERVICE_ACCOUNT:$SERVICE_ACCOUNT" "$INSTALL_DIR/releases"
 else
