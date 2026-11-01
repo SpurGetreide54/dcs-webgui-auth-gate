@@ -37,6 +37,17 @@
   Port the agent listens on. Must match MISSION_AGENT_URL's port on the
   auth-gate side.
 
+.PARAMETER AgentBindAddress
+  Local interface the agent listens on. Optional, defaults to "" (bind
+  every interface). Pass the address of the interface reachable from the
+  auth-gate VM to narrow it, e.g. a hypervisor-internal virtual switch
+  address.
+
+.PARAMETER AuthGateAddress
+  Remote address the Windows Firewall rules restrict inbound connections
+  to. Optional, defaults to "" (any source may connect). Pass the
+  auth-gate VM's address to narrow it.
+
 .PARAMETER AgentExePath
   Path to the built agent.exe (see scripts/build-agent-exe.sh, run elsewhere
   and copied to this host). Defaults to agent.exe sitting next to this script.
@@ -63,6 +74,8 @@ param(
     [string]$MissionAgentToken = "",
     [string]$DcsSavedGamesRoot = "$env:USERPROFILE\Saved Games",
     [int]$AgentPort = 4000,
+    [string]$AgentBindAddress = "",
+    [string]$AuthGateAddress = "",
     [string]$AgentExePath = "$PSScriptRoot\agent.exe",
     [string]$NssmSourcePath = "$PSScriptRoot\nssm.exe",
     [string]$InstallDir = "C:\Program Files\dcs-webgui-agent",
@@ -82,6 +95,11 @@ if (-not (Test-Path $DcsSavedGamesRoot)) {
 # see docs/Why.md#why-does-dcssavedgamesroot-default-to-the-installing-user
 if (-not (Get-ChildItem -Path $DcsSavedGamesRoot -Directory -ErrorAction SilentlyContinue)) {
     Write-Host "==> Warning: DcsSavedGamesRoot '$DcsSavedGamesRoot' has no DCS instance folders yet. If DCS runs under a different account, pass -DcsSavedGamesRoot explicitly."
+}
+# same non-blocking-hint style, see
+# docs/Why.md#why-are-bind-address-and-firewall-remote-address-two-separate-install-params
+if (-not $AgentBindAddress -or -not $AuthGateAddress) {
+    Write-Host "==> Warning: -AgentBindAddress and/or -AuthGateAddress not set. The agent is reachable from any source on any interface until both are passed."
 }
 
 Write-Host "==> Creating install directory $InstallDir"
@@ -167,6 +185,9 @@ $envLines = @(
 if ($MissionAgentToken) {
     $envLines += "MISSION_AGENT_TOKEN=$MissionAgentToken"
 }
+if ($AgentBindAddress) {
+    $envLines += "AGENT_BIND_ADDRESS=$AgentBindAddress"
+}
 & $NssmExePath set $ServiceName AppEnvironmentExtra ($envLines -join "`n")
 
 & $NssmExePath set $ServiceName AppStdout "$InstallDir\agent.log"
@@ -187,7 +208,11 @@ $FirewallRules = @(
 )
 foreach ($rule in $FirewallRules) {
     if (-not (Get-NetFirewallRule -Name $rule.Name -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -Name $rule.Name -DisplayName $rule.Name -Direction Inbound -Action Allow -Program $rule.Program | Out-Null
+        if ($AuthGateAddress) {
+            New-NetFirewallRule -Name $rule.Name -DisplayName $rule.Name -Direction Inbound -Action Allow -Program $rule.Program -RemoteAddress $AuthGateAddress | Out-Null
+        } else {
+            New-NetFirewallRule -Name $rule.Name -DisplayName $rule.Name -Direction Inbound -Action Allow -Program $rule.Program | Out-Null
+        }
     }
 }
 

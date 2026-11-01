@@ -48,8 +48,14 @@ maintainer concern, not a normal install step.
    and on boot. Defaults to the installing user's own "Saved Games"
    folder; pass `-DcsSavedGamesRoot "C:\Users\dcsservice\Saved Games"`
    instead when DCS runs under a dedicated account.
-4. Bind it only to the interface reachable from the auth-gate VM.
-   Keep it off the host's internet-facing side.
+4. Bind it only to the interface reachable from the auth-gate VM, and
+   restrict the firewall rules to that VM's address:
+   ```
+   .\install.ps1 -AgentBindAddress "10.0.0.5" -AuthGateAddress "10.0.0.10"
+   ```
+   Omitting either leaves the agent reachable from any source on any
+   interface, with a warning at install time. Keep it off the host's
+   internet-facing side.
 5. Read the generated token, and copy it into the auth-gate's
    `MISSION_AGENT_TOKEN`:
    ```

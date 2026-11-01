@@ -641,8 +641,11 @@ function logFatalAndExit(kind, reasonOrError) {
 // only listen when run directly, tests import the app instead
 // see docs/Why.md#why-doesnt-the-control-port-proxy-handle-websocket-upgrades
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`mission-agent listening on :${PORT}`);
+  // undefined (bind-all) unless install.ps1 narrowed it with
+  // -AgentBindAddress, see docs/Why.md#why-are-bind-address-and-firewall-remote-address-two-separate-install-params
+  const bindAddress = process.env.AGENT_BIND_ADDRESS || undefined;
+  app.listen(PORT, bindAddress, () => {
+    console.log(`mission-agent listening on ${bindAddress || "0.0.0.0"}:${PORT}`);
   });
   process.on("unhandledRejection", (reason) => logFatalAndExit("unhandledRejection", reason));
   process.on("uncaughtException", (err) => logFatalAndExit("uncaughtException", err));

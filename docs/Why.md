@@ -922,6 +922,19 @@ re-registering further down, is what actually makes re-running this
 script safe.<br>The full stop-and-remove-via-NSSM teardown still runs
 again later, right before re-registering the service.
 
+## Why are bind address and firewall remote-address two separate install params?
+
+`-AgentBindAddress` and `-AuthGateAddress` cover two independent
+axes: bind address is which local interface the agent listens on,
+firewall remote-address is which remote address may connect.<br>A
+host could need one without the other — a single-NIC host has
+nothing to bind narrower, but still wants the firewall scoped — so
+collapsing them into one parameter would force a false coupling.<br>
+Both default to open, with a loud warning rather than a refusal to
+install, matching this script's existing `-DcsSavedGamesRoot`
+precedent: an unattended re-install must not start failing just
+because these two optional flags weren't repeated.
+
 ## Why are both NSSM checksums pinned instead of fetched fresh?
 
 Both were verified once against the real nssm.cc download and pinned
