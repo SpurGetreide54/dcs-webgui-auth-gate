@@ -9,7 +9,7 @@ const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pipeline } = require("node:stream/promises");
-const { Readable } = require("node:stream");
+const { Readable, Transform } = require("node:stream");
 const tar = require("tar");
 const db = require("./db");
 const activeSlot = require("./activeSlot");
@@ -78,14 +78,17 @@ function findDownload(manifest, artifact) {
 async function downloadAndVerify(url, sha256, destPath) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(destPath));
-  const actual = await new Promise((resolve, reject) => {
-    const hash = crypto.createHash("sha256");
-    fs.createReadStream(destPath)
-      .on("data", (chunk) => hash.update(chunk))
-      .on("end", () => resolve(hash.digest("hex")))
-      .on("error", reject);
+  // hash each chunk as it flows through, instead of re-reading the
+  // whole file back off disk once the write finishes
+  const hash = crypto.createHash("sha256");
+  const hasher = new Transform({
+    transform(chunk, _encoding, callback) {
+      hash.update(chunk);
+      callback(null, chunk);
+    },
   });
+  await pipeline(Readable.fromWeb(res.body), hasher, fs.createWriteStream(destPath));
+  const actual = hash.digest("hex");
   if (actual !== sha256) throw new Error(`${url}: sha256 mismatch (expected ${sha256}, got ${actual}).`);
 }
 
@@ -352,6 +355,7 @@ module.exports = {
   CHECK_INTERVAL_MS,
   getCurrentVersion,
   isVersionGreater,
+  downloadAndVerify,
   verifyManifest,
   fetchVerifiedManifest,
   checkForUpdate,

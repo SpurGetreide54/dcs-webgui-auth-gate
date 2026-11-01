@@ -67,6 +67,30 @@ test("getCurrentVersion reads package.json's own version", () => {
   assert.equal(updateCheck.getCurrentVersion(), pkg.version);
 });
 
+test("downloadAndVerify hashes the stream as it writes, instead of re-reading the file afterward", async () => {
+  const body = Buffer.from("fake release artifact bytes");
+  const sha256 = crypto.createHash("sha256").update(body).digest("hex");
+  dummyGithubRespond = (req, res) => res.end(body);
+  const destPath = path.join(os.tmpdir(), `update-check-test-download-${crypto.randomBytes(6).toString("hex")}.bin`);
+  try {
+    await updateCheck.downloadAndVerify(dummyGithubBase, sha256, destPath);
+    assert.ok(fs.readFileSync(destPath).equals(body), "the written file must contain exactly the downloaded bytes");
+  } finally {
+    fs.rmSync(destPath, { force: true });
+  }
+});
+
+test("downloadAndVerify rejects a tampered body with the same sha256 mismatch message as before", async () => {
+  const body = Buffer.from("different bytes than expected");
+  dummyGithubRespond = (req, res) => res.end(body);
+  const destPath = path.join(os.tmpdir(), `update-check-test-download-${crypto.randomBytes(6).toString("hex")}.bin`);
+  try {
+    await assert.rejects(() => updateCheck.downloadAndVerify(dummyGithubBase, "f".repeat(64), destPath), /sha256 mismatch/);
+  } finally {
+    fs.rmSync(destPath, { force: true });
+  }
+});
+
 // the one test that can catch a mismatch between key_state's seeded
 // primary key and the real private key, skipped (not failed) where
 // that gitignored private key doesn't exist on this machine
