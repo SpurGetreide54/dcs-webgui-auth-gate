@@ -208,6 +208,10 @@ function contentDispositionValue(filename) {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_MISSION_BYTES, files: 1 },
+  // multer's own default reads multipart filenames as latin1, which
+  // mangles anything non-ASCII, see
+  // docs/Why.md#why-does-multer-need-defparamcharset-utf8
+  defParamCharset: "utf8",
 });
 
 app.post("/upload", checkToken, upload.single("mission"), asyncHandler(async (req, res) => {

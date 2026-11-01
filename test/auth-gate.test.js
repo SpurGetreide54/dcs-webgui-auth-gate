@@ -582,6 +582,20 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(uploadCall.authorization, `Bearer ${AGENT_TOKEN}`, "agent must receive the shared bearer token");
     assert.match(uploadCall.body.toString("latin1"), /training/, "instance_name must be forwarded to the agent");
 
+    // a non-ASCII mission name must reach the agent unmangled, not
+    // doubly garbled by multer's latin1 default on either hop
+    const unicodeName = "Übung_Überflug.miz";
+    const unicodeForm = new FormData();
+    unicodeForm.append("mission", new Blob([Buffer.from("fake miz bytes")], { type: "application/octet-stream" }), unicodeName);
+    const unicodeUploadRes = await fetch(`${base}/s/training/missions/upload`, {
+      method: "POST",
+      headers: { Cookie: siteAdminCookie },
+      body: unicodeForm,
+    });
+    assert.equal(unicodeUploadRes.status, 200);
+    const unicodeUploadCall = lastAgentCall("POST", "/upload");
+    assert.match(unicodeUploadCall.body.toString("utf8"), new RegExp(unicodeName.replace(/[.]/g, "\\.")), "the real UTF-8 filename must reach the agent, not a latin1-mangled one");
+
     // the page re-render after rejection still legitimately calls the
     // agent's list endpoint, so only the /upload call count must stay flat
     const uploadCallCountBefore = dummyAgentCalls.filter((c) => c.method === "POST" && c.url === "/upload").length;

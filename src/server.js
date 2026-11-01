@@ -818,6 +818,8 @@ function requireServerAccess({ permission } = {}) {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_MISSION_BYTES, files: 1 },
+  // see docs/Why.md#why-does-multer-need-defparamcharset-utf8
+  defParamCharset: "utf8",
   fileFilter(req, file, cb) {
     cb(null, file.originalname.toLowerCase().endsWith(".miz"));
   },

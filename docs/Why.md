@@ -463,6 +463,18 @@ fallback (non-ASCII bytes replaced, `"`/`\` backslash-escaped per
 quoted-string syntax) for the clients that ignore `filename*`, and
 the real UTF-8 name in `filename*` for the ones that don't.
 
+## Why does multer need defParamCharset: "utf8"?
+
+multer's own default, `'latin1'`, reads a multipart filename's UTF-8
+bytes as latin1, mangling anything non-ASCII — the deployer community
+is German-speaking, so names like `Übung` are expected, not an edge
+case.<br>Without this, the gate's own upload route mangles the name
+once, then forwards it to the agent in a new `FormData` that fetch
+re-encodes as UTF-8, which the agent's multer (with the same default)
+decodes as latin1 a second time, doubly garbling the file on
+disk.<br>Both multer instances — the gate's upload route and the
+agent's `/upload` — need the fix, not just one.
+
 ## Why isn't the DCS install path confined to a fixed root?
 
 Unlike `instanceName`, which is confined under `SAVED_GAMES_ROOT`,

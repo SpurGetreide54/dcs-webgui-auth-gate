@@ -86,6 +86,18 @@ test("writes a valid .miz upload into <instance>/Missions", async () => {
   assert.equal(written, "fake miz contents");
 });
 
+test("writes a non-ASCII .miz filename to disk unmangled", async () => {
+  const name = "Übung_Überflug.miz";
+  const res = await fetch(`${base}/upload`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: uploadForm(name, INSTANCE),
+  });
+  assert.equal(res.status, 200);
+  const written = fs.readdirSync(path.join(instanceDir(), "Missions"));
+  assert.ok(written.includes(name), `expected "${name}" on disk, got: ${written.join(", ")}`);
+});
+
 test("rejects an instance_name with path-traversal characters", async () => {
   const res = await fetch(`${base}/upload`, {
     method: "POST",
