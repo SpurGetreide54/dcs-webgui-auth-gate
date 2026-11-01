@@ -12,7 +12,13 @@ It is not a session: the sessions table requires a logged-in
 unsigned because everything it ever carries (a validation error, an
 invite URL) is something the same browser's own user is about to see
 again anyway, so there's nothing sensitive in that user tampering with
-their own cookie before their own next page load.
+their own cookie before their own next page load.<br>That assumption
+doesn't quite cover `inviteUrl`: unlike `error`/`notice`, which are
+only ever displayed as text, it becomes a real `<a href>`, and the
+cookie's own origin isn't guaranteed to be the same browser's own
+tampering (a sibling subdomain could set it too). `readFlash()` in
+`src/flash.js` only lets it through when it starts with `http://` or
+`https://`, closing that gap without needing to sign the cookie.
 
 ## Why is the active slot pointer a flat file?
 
