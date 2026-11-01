@@ -411,6 +411,18 @@ shared bearer token can't tell admins apart, so nothing here can
 destroy a mission file outright.<br>A leaked token can add files and
 move files into `Missions/.trash/`, never erase one for good.
 
+## Why does a colliding upload auto-rename instead of overwriting?
+
+`upload` only ever lists as "Uploading a `.miz` file" in
+`docs/Roles-and-Permissions.md`; nothing says it can replace an
+existing mission, and delete is otherwise "move aside, never
+unlink."<br>An admin with only `upload` overwriting a same-named
+mission outright would bypass both `delete`'s permission gate and
+its trash-not-unlink guarantee.<br>Auto-renaming the *new* upload to
+`<name>(1).miz`, `<name>(2).miz`, ... — file-manager style, the
+existing mission on disk never touched — avoids that bypass without
+needing a new permission or a confirm-overwrite round trip.
+
 ## Why does the agent check typeof before every path operation?
 
 `path.basename`, `path.join`, and friends throw `ERR_INVALID_ARG_TYPE`

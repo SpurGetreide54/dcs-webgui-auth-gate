@@ -943,11 +943,16 @@ app.post(
         flash.setFlash(res, { error: `Mission agent rejected the upload: ${detail || agentRes.status}` });
         return res.redirect(missionsUrl);
       }
+      const agentBody = await agentRes.json();
+      const notice =
+        agentBody.safeName === req.file.originalname
+          ? `Uploaded ${agentBody.safeName}.`
+          : `Uploaded as ${agentBody.safeName} (a mission named "${req.file.originalname}" already existed).`;
+      flash.setFlash(res, { notice });
     } catch (err) {
       flash.setFlash(res, { error: `Could not reach the mission agent: ${err.message}` });
       return res.redirect(missionsUrl);
     }
-    flash.setFlash(res, { notice: `Uploaded ${req.file.originalname}.` });
     res.redirect(missionsUrl);
   })
 );

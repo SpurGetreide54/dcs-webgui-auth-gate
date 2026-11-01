@@ -98,6 +98,31 @@ test("writes a non-ASCII .miz filename to disk unmangled", async () => {
   assert.ok(written.includes(name), `expected "${name}" on disk, got: ${written.join(", ")}`);
 });
 
+test("a colliding upload is saved as name(1).miz, never overwriting the existing mission", async () => {
+  const instance = "Example_UploadCollision";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "dupe.miz"), "original bytes");
+
+  const form = new FormData();
+  form.append("instance_name", instance);
+  form.append("mission", new Blob([Buffer.from("colliding bytes")]), "dupe.miz");
+  const res = await fetch(`${base}/upload`, { method: "POST", headers: authHeaders(), body: form });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.safeName, "dupe(1).miz");
+  assert.equal(fs.readFileSync(path.join(missionsDir, "dupe.miz"), "utf8"), "original bytes", "the existing mission must never be touched");
+  assert.equal(fs.readFileSync(path.join(missionsDir, "dupe(1).miz"), "utf8"), "colliding bytes");
+
+  // a second collision must take the next free suffix
+  const form2 = new FormData();
+  form2.append("instance_name", instance);
+  form2.append("mission", new Blob([Buffer.from("second colliding bytes")]), "dupe.miz");
+  const res2 = await fetch(`${base}/upload`, { method: "POST", headers: authHeaders(), body: form2 });
+  const body2 = await res2.json();
+  assert.equal(body2.safeName, "dupe(2).miz");
+});
+
 test("rejects an instance_name with path-traversal characters", async () => {
   const res = await fetch(`${base}/upload`, {
     method: "POST",

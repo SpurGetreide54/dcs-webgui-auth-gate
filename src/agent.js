@@ -200,6 +200,19 @@ async function isExistingFile(filePath) {
   }
 }
 
+// find the first unused "<name>(n).ext" for a colliding upload, so a
+// same-name upload never overwrites an existing mission, see
+// docs/Why.md#why-does-a-colliding-upload-auto-rename-instead-of-overwriting
+async function uniqueMissionName(targetDir, safeName) {
+  const ext = path.extname(safeName);
+  const base = safeName.slice(0, -ext.length);
+  let candidate = safeName;
+  for (let n = 1; await isExistingFile(path.join(targetDir, candidate)); n++) {
+    candidate = `${base}(${n})${ext}`;
+  }
+  return candidate;
+}
+
 // an RFC 6266 Content-Disposition value: a quoted ascii fallback for
 // clients that don't decode filename*, plus the real name for ones that do
 // see docs/Why.md#why-does-content-disposition-carry-two-filenames
@@ -230,11 +243,15 @@ app.post("/upload", checkToken, upload.single("mission"), asyncHandler(async (re
   const targetDir = missionsDir(instanceDir);
   const resolved = safeMissionPath(targetDir, req.file.originalname);
   if (!resolved) return res.status(400).send("Invalid filename.");
-  const { finalPath } = resolved;
+
+  await fs.mkdir(targetDir, { recursive: true });
+  // a same-name collision is saved alongside the existing mission
+  // under a (1), (2), ... suffix, never overwriting it
+  const uniqueName = await uniqueMissionName(targetDir, resolved.safeName);
+  const finalPath = path.join(targetDir, uniqueName);
 
   const tmpPath = `${finalPath}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   try {
-    await fs.mkdir(targetDir, { recursive: true });
     await fs.writeFile(tmpPath, req.file.buffer);
     // atomic write, dcs never sees a partial file
     await fs.rename(tmpPath, finalPath);
@@ -243,7 +260,7 @@ app.post("/upload", checkToken, upload.single("mission"), asyncHandler(async (re
     return res.status(500).send(`Write failed: ${err.message}`);
   }
 
-  res.json({ ok: true, path: finalPath });
+  res.json({ ok: true, path: finalPath, safeName: uniqueName });
 }));
 
 app.get("/missions/:instanceName", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {

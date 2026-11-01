@@ -30,6 +30,11 @@ Four separate grants, per admin, per server:
 An admin with `upload` but not `view` still cannot reach the missions
 page.<br>Grant `view` alongside any of the other three.
 
+Uploading a `.miz` whose name already exists never overwrites it: the
+new upload is saved alongside the existing mission under a `(1)`,
+`(2)`, ... suffix instead, file-manager style. `upload` alone can
+never remove or replace a mission; only `delete` can.
+
 ## Where this is managed
 
 All of the above is managed from a popup on each admin's row in
