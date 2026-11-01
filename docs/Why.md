@@ -246,7 +246,16 @@ re-grants view.
 `update_state` didn't originally track this.<br>It's needed for the
 cooldown guard against double-triggering `applyUpdate()`, confirmed in
 production: a double-click once fired two full update cycles 24
-seconds apart.
+seconds apart.<br>That db cooldown's own window is a fixed 60 seconds,
+shorter than `applyUpdate()` can genuinely run (download, extract,
+`npm install`, two agent relay calls of up to 60 seconds each), so a
+second click after the window lifts but while the first run is still
+going needs its own guard: an in-process `updateInFlight` flag,
+`src/updateCheck.js`'s `isUpdateInFlight()`, set for as long as this
+process's own `applyUpdate()` call is actually running. Both guards
+stay: the db cooldown survives a restart, so a crash mid-update still
+blocks a retry for the rest of its 60 seconds; the in-process flag
+covers whatever that fixed window doesn't.
 
 ## Why does diagnostics mirror updateCheck.js's own shape?
 
