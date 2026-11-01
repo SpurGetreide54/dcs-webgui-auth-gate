@@ -97,8 +97,8 @@ app.get("/setup", (req, res) => {
 app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
   if (adminCount() > 0) return res.status(404).send("Not found.");
   const { username, password } = req.body;
-  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < 12) {
-    flash.setFlash(res, { error: "Username required, password must be at least 12 characters." });
+  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < auth.MIN_PASSWORD_LENGTH) {
+    flash.setFlash(res, { error: `Username required, password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
     return res.redirect("/setup");
   }
   const info = db
@@ -175,8 +175,9 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
     flash.setFlash(res, { error: "All fields are required." });
     return res.redirect(`/invite/${req.params.token}`);
   }
-  if (password.length < 12) {
-    flash.setFlash(res, { error: "Password must be at least 12 characters." });
+  const passwordError = auth.validateNewPassword(password);
+  if (passwordError) {
+    flash.setFlash(res, { error: passwordError });
     return res.redirect(`/invite/${req.params.token}`);
   }
   if (password !== confirm_password) {
@@ -257,8 +258,8 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
     flash.setFlash(res, { error: "Current password is incorrect." });
     return res.redirect("/admin/accounts");
   }
-  if (new_password.length < 12) {
-    flash.setFlash(res, { error: "New password must be at least 12 characters." });
+  if (new_password.length < auth.MIN_PASSWORD_LENGTH) {
+    flash.setFlash(res, { error: `New password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
     return res.redirect("/admin/accounts");
   }
   if (new_password !== confirm_password) {
@@ -332,8 +333,8 @@ accountsRouter.post("/invites/:id/revoke", auth.requireAccountManager, (req, res
 
 accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const { username, password, can_manage_accounts } = req.body;
-  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < 12) {
-    flash.setFlash(res, { error: "Username required, password must be at least 12 characters." });
+  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < auth.MIN_PASSWORD_LENGTH) {
+    flash.setFlash(res, { error: `Username required, password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
     return res.redirect("/admin/accounts");
   }
   try {
@@ -747,18 +748,7 @@ const LOG_WINDOWS_MS = { "15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000, "6h": 6 * 
 
 // parse a raw ndjson log file's text into entry objects
 function parseLogLines(text) {
-  return text
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed && typeof parsed.t === "string" && typeof parsed.msg === "string") return parsed;
-      } catch {
-        // fall through to the raw case below
-      }
-      return { t: null, level: "raw", msg: line };
-    });
+  return text.split("\n").filter(Boolean).map(appLog.parseLogLine);
 }
 
 // fetch and parse the mission-agent's own log entries

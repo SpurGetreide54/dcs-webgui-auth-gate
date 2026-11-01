@@ -12,6 +12,8 @@ const COOKIE_REFRESH_THRESHOLD_SECONDS = 60 * 60;
 const SESSION_COOKIE = "dcs_session";
 const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
+// the one place this rule is defined; server.js and views.js both read it
+const MIN_PASSWORD_LENGTH = 12;
 
 // every expiry/window check below compares against sqlite's own
 // datetime('now'), never a js Date, see docs/Why.md#why-does-every-expiry-use-sqlites-own-datetime-instead-of-js-date
@@ -19,6 +21,16 @@ const RATE_LIMIT_MAX_ATTEMPTS = 5;
 // hash a plain password for storage
 function hashPassword(password) {
   return bcrypt.hashSync(password, BCRYPT_COST);
+}
+
+// the one place the minimum-length rule is checked, shared by every
+// handler that accepts a new password; returns the error message, or
+// null if the password is acceptable
+function validateNewPassword(password) {
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  return null;
 }
 
 // check a plain password against a stored hash
@@ -164,8 +176,10 @@ function requireAccountManager(req, res, next) {
 module.exports = {
   SESSION_COOKIE,
   DUMMY_PASSWORD_HASH,
+  MIN_PASSWORD_LENGTH,
   hashPassword,
   verifyPassword,
+  validateNewPassword,
   hashToken,
   isRateLimited,
   recordLoginAttempt,

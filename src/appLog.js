@@ -66,9 +66,20 @@ function installConsoleCapture() {
   };
 }
 
-// read back the last maxLines of the log file, parsed
+// parse one ndjson log line: json with a t/msg pair, else a raw row
 // a line that fails to parse (old plain-text content, a hand edit)
 // renders as a raw row instead of breaking the page
+function parseLogLine(line) {
+  try {
+    const parsed = JSON.parse(line);
+    if (parsed && typeof parsed.t === "string" && typeof parsed.msg === "string") return parsed;
+  } catch {
+    // fall through to the raw case below
+  }
+  return { t: null, level: "raw", msg: line };
+}
+
+// read back the last maxLines of the log file, parsed
 function readRecentEntries(maxLines) {
   let raw;
   try {
@@ -78,16 +89,8 @@ function readRecentEntries(maxLines) {
     throw err;
   }
   const lines = raw.split("\n").filter(Boolean).slice(-maxLines);
-  return lines.map((line) => {
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed && typeof parsed.t === "string" && typeof parsed.msg === "string") return parsed;
-    } catch {
-      // fall through to the raw case below
-    }
-    return { t: null, level: "raw", msg: line };
-  });
+  return lines.map(parseLogLine);
 }
 
-// expose the path and both public functions to callers
-module.exports = { LOG_PATH, installConsoleCapture, readRecentEntries };
+// expose the path and all public functions to callers
+module.exports = { LOG_PATH, installConsoleCapture, readRecentEntries, parseLogLine };
