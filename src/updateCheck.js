@@ -121,6 +121,13 @@ function setUpdateState({ lastCheckedAt, availableVersion, changelogUrl, needsSe
   ).run(lastCheckedAt, availableVersion, changelogUrl, needsServiceUpdate ? 1 : 0);
 }
 
+// records that checkForUpdate completed without throwing, read by
+// isUpdateCheckStale instead of last_checked_at, which also updates
+// on a failed attempt
+function recordUpdateCheckSucceeded(at) {
+  db.prepare("UPDATE update_state SET last_succeeded_at = ? WHERE id = 1").run(at);
+}
+
 // the hourly poll, also callable directly for an admin's "check now"
 // see docs/Why.md#why-does-checkforupdate-re-throw-its-own-errors
 async function checkForUpdate() {
@@ -137,6 +144,7 @@ async function checkForUpdate() {
       changelogUrl: hasUpdate ? manifest.changelog_url : null,
       needsServiceUpdate: hasUpdate ? Boolean(manifest.needs_service_update) : false,
     });
+    recordUpdateCheckSucceeded(now);
     return hasUpdate;
   } catch (err) {
     setUpdateState({ lastCheckedAt: now, availableVersion: null, changelogUrl: null, needsServiceUpdate: false });

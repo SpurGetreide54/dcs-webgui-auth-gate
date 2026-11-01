@@ -150,8 +150,8 @@ function startDiagnosticsCheck() {
 // true if the hourly update check hasn't succeeded within
 // multiplier * its own interval, read live, no column of its own
 function isUpdateCheckStale(updateState, updateCheckIntervalMs, multiplier) {
-  if (!updateState.last_checked_at) return true;
-  const age = Date.now() - new Date(updateState.last_checked_at).getTime();
+  if (!updateState.last_succeeded_at) return true;
+  const age = Date.now() - new Date(updateState.last_succeeded_at).getTime();
   return age > updateCheckIntervalMs * multiplier;
 }
 

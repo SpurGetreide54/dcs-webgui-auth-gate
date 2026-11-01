@@ -269,6 +269,7 @@ test(
     assert.equal(state.available_version, "9.9.9-test");
     assert.equal(state.changelog_url, "https://example.test/changelog");
     assert.ok(state.last_checked_at);
+    assert.ok(state.last_succeeded_at);
   }
 );
 
@@ -367,8 +368,10 @@ test("checkForUpdate rejects and still records the attempt when the check fails"
   });
   serveManifest(manifest);
 
+  const before = updateCheck.getUpdateState();
   await assert.rejects(() => updateCheck.checkForUpdate(), /signature verification/);
   const after = updateCheck.getUpdateState();
   assert.ok(after.last_checked_at, "a failed check must still record that an attempt was made");
+  assert.equal(after.last_succeeded_at, before.last_succeeded_at, "a failed check must not touch the last-succeeded timestamp");
   assert.equal(after.available_version, null);
 });

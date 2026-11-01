@@ -190,14 +190,26 @@ test("clearRollback survives a rescan of the same unchanged log, but a genuinely
 
 test("isUpdateCheckStale", () => {
   const hourMs = 60 * 60 * 1000;
-  assert.equal(diagnostics.isUpdateCheckStale({ last_checked_at: null }, hourMs, 3), true, "never checked counts as stale");
+  assert.equal(diagnostics.isUpdateCheckStale({ last_succeeded_at: null }, hourMs, 3), true, "never succeeded counts as stale");
   assert.equal(
-    diagnostics.isUpdateCheckStale({ last_checked_at: new Date().toISOString() }, hourMs, 3),
+    diagnostics.isUpdateCheckStale({ last_succeeded_at: new Date().toISOString() }, hourMs, 3),
     false,
-    "just checked is not stale"
+    "just succeeded is not stale"
   );
   const fourHoursAgo = new Date(Date.now() - 4 * hourMs).toISOString();
-  assert.equal(diagnostics.isUpdateCheckStale({ last_checked_at: fourHoursAgo }, hourMs, 3), true, "past 3x the interval is stale");
+  assert.equal(
+    diagnostics.isUpdateCheckStale({ last_succeeded_at: fourHoursAgo }, hourMs, 3),
+    true,
+    "past 3x the interval since the last success is stale"
+  );
+
+  // the actual bug: a check that keeps failing but still updates
+  // last_checked_at every time must not look fresh because of that
+  assert.equal(
+    diagnostics.isUpdateCheckStale({ last_checked_at: new Date().toISOString(), last_succeeded_at: fourHoursAgo }, hourMs, 3),
+    true,
+    "a recent failed attempt must not mask an old last success"
+  );
 });
 
 test("getActiveIssues assembles every currently-active issue, dismissed rollback excluded", () => {
@@ -208,8 +220,8 @@ test("getActiveIssues assembles every currently-active issue, dismissed rollback
   fs.rmSync(authGateLogPath, { force: true });
 
   const hourMs = 60 * 60 * 1000;
-  const freshUpdateState = { last_checked_at: new Date().toISOString() };
-  const staleUpdateState = { last_checked_at: new Date(Date.now() - 10 * hourMs).toISOString() };
+  const freshUpdateState = { last_succeeded_at: new Date().toISOString() };
+  const staleUpdateState = { last_succeeded_at: new Date(Date.now() - 10 * hourMs).toISOString() };
 
   // nothing configured yet, no rollback, update check fresh, static populated
   let issues = fresh.getActiveIssues({ updateState: freshUpdateState, updateCheckIntervalMs: hourMs, staleMultiplier: 3 });

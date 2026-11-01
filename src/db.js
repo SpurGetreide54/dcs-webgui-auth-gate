@@ -192,5 +192,15 @@ for (const table of ["admin_server_access", "invite_server_access"]) {
   }
 }
 
+// guarded migration adding last_succeeded_at, split from
+// last_checked_at so a check that fails every time doesn't look fresh
+// see docs/Why.md#why-does-update_state-track-last_succeeded_at-separately-from-last_checked_at
+{
+  const columns = db.prepare("PRAGMA table_info(update_state)").all().map((c) => c.name);
+  if (!columns.includes("last_succeeded_at")) {
+    db.exec("ALTER TABLE update_state ADD COLUMN last_succeeded_at TEXT");
+  }
+}
+
 // expose the open, migrated database connection to every other module
 module.exports = db;
