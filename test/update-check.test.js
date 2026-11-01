@@ -8,7 +8,7 @@ const path = require("node:path");
 
 // a throwaway keypair, generated fresh per test, distinct from the
 // real one at local-only/keys/, proves verifyManifest() rejects any
-// key other than the one matching its own hardcoded public key
+// key other than key_state's currently trusted primary key
 function freshKeypair() {
   return crypto.generateKeyPairSync("ed25519");
 }
@@ -43,7 +43,7 @@ let dummyGithub, dummyGithubBase;
 let dummyGithubRespond; // set per test to control what the dummy "GitHub API" returns
 let sqlitePath;
 
-const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "update-signing-key.pem");
+const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem");
 
 test.before(async () => {
   dummyGithub = await startDummyHttpServer((req, res) => dummyGithubRespond(req, res));
@@ -67,12 +67,12 @@ test("getCurrentVersion reads package.json's own version", () => {
   assert.equal(updateCheck.getCurrentVersion(), pkg.version);
 });
 
-// the one test that can catch a mismatch between the hardcoded public
-// key and the real private key, skipped (not failed) where that
-// gitignored private key doesn't exist on this machine
+// the one test that can catch a mismatch between key_state's seeded
+// primary key and the real private key, skipped (not failed) where
+// that gitignored private key doesn't exist on this machine
 test(
-  "verifyManifest accepts a manifest signed with the real local-only/keys/ private key",
-  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  "verifyManifest accepts a manifest signed with the real local-only/keys/ primary private key",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
   () => {
     const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
     const manifest = signManifest(privateKey, {
@@ -81,9 +81,47 @@ test(
       needs_service_update: false,
       downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "d".repeat(64) }],
     });
-    assert.equal(updateCheck.verifyManifest(manifest), true, "the hardcoded PUBLIC_KEY_PEM in src/updateCheck.js must match local-only/keys/update-signing-key.pem");
+    assert.equal(updateCheck.verifyManifest(manifest), true, "key_state's seeded PRIMARY_PUBLIC_KEY_PEM must match local-only/keys/key-rotation-primary.pem");
   }
 );
+
+test("verifyManifest follows a primary rotation: the old key stops working, the new key starts", () => {
+  const db = require("../src/db");
+  const keyRotation = require("../src/keyRotation");
+
+  const before = db.prepare("SELECT primary_public_key_pem, primary_rotated_at FROM key_state WHERE id = 1").get();
+  const { publicKey: oldPub, privateKey: oldPriv } = freshKeypair();
+  const { publicKey: newPub, privateKey: newPriv } = freshKeypair();
+  db.prepare("UPDATE key_state SET primary_public_key_pem = ? WHERE id = 1").run(
+    oldPub.export({ type: "spki", format: "pem" }).toString()
+  );
+
+  try {
+    const signed = {
+      version: "1.2.3",
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "e".repeat(64) }],
+    };
+    const signedWithOld = signManifest(oldPriv, signed);
+    assert.equal(updateCheck.verifyManifest(signedWithOld), true);
+
+    keyRotation.applyKeyStateRecord({
+      rotated_slot: "primary",
+      new_public_key_pem: newPub.export({ type: "spki", format: "pem" }).toString(),
+      rotated_at: new Date().toISOString(),
+    });
+
+    assert.equal(updateCheck.verifyManifest(signedWithOld), false, "the old key must stop working once rotated away from");
+    assert.equal(updateCheck.verifyManifest(signManifest(newPriv, signed)), true, "the new key must work immediately, no new release needed");
+  } finally {
+    // restore key_state so later tests in this file see the original seed
+    db.prepare("UPDATE key_state SET primary_public_key_pem = ?, primary_rotated_at = ? WHERE id = 1").run(
+      before.primary_public_key_pem,
+      before.primary_rotated_at
+    );
+  }
+});
 
 test("verifyManifest rejects a manifest signed with the wrong key", () => {
   const { privateKey } = freshKeypair(); // not the real app key
@@ -214,7 +252,7 @@ function serveManifest(manifest) {
 
 test(
   "checkForUpdate resolves true and records the new version when a newer signed release is available",
-  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
   async () => {
     const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
     const manifest = signManifest(privateKey, {
@@ -236,7 +274,7 @@ test(
 
 test(
   "checkForUpdate resolves false when the latest release matches the current version",
-  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
   async () => {
     const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
     const manifest = signManifest(privateKey, {
@@ -256,7 +294,7 @@ test(
 
 test(
   "checkForUpdate rejects a downgrade: a lower, validly-signed version is not an update",
-  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/update-signing-key.pem not present on this machine" : false },
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
   async () => {
     const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
     const manifest = signManifest(privateKey, {

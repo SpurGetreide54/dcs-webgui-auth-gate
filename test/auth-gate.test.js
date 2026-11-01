@@ -917,7 +917,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       };
     }
 
-    // signed with a throwaway key the hardcoded public key never
+    // signed with a throwaway key key_state's trusted key never
     // accepts, deterministic regardless of whether the real key exists
     serveDummyManifest(
       { version: "9.9.9-bad", changelog_url: "https://example.test/changelog", needs_service_update: false, downloads: [] },
@@ -928,7 +928,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     // a genuinely newer, properly-signed release, only runs where the
     // real signing key exists, same gating convention as update-check.test.js
-    const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "update-signing-key.pem");
+    const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem");
     if (fs.existsSync(REAL_PRIVATE_KEY_PATH)) {
       serveDummyManifest(
         {

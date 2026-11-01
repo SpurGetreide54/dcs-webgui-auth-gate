@@ -164,6 +164,7 @@ module.exports = {
   KEY_STATE_TAG,
   getKeyState,
   verifyKeyState,
+  applyKeyStateRecord,
   checkKeyState,
   startKeyStateCheck,
   computeNextTargetRotationAt,

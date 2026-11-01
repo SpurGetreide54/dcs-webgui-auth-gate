@@ -16,7 +16,7 @@ const db = require("./db");
 const activeSlot = require("./activeSlot");
 const { GITHUB_REPO } = require("./updateConstants");
 
-// section: constants and the trust root
+// section: constants
 
 // overridable so tests can point this at a local dummy server instead
 // of the real github api
@@ -25,14 +25,6 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
 const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 
-// public half of this project's keypair, the private half never
-// leaves local-only/keys/ on the releaser's own machine
-const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEA1W0lrUvQR5XTlepPzmtWsz2XYkIetU/dA7n79B1bTAY=
------END PUBLIC KEY-----
-`;
-const PUBLIC_KEY = crypto.createPublicKey(PUBLIC_KEY_PEM);
-
 // read this install's own current version from package.json
 function getCurrentVersion() {
   return require("../package.json").version;
@@ -40,13 +32,22 @@ function getCurrentVersion() {
 
 // section: fetching and verifying the signed manifest
 
-// true if the manifest's signature matches everything else in it
+// the currently trusted signing key, read fresh from key_state so a
+// primary rotation takes effect immediately, see
+// docs/Why.md#why-does-verifymanifest-read-key_state-instead-of-a-hardcoded-constant
+function getTrustedPublicKey() {
+  const row = db.prepare("SELECT primary_public_key_pem FROM key_state WHERE id = 1").get();
+  return crypto.createPublicKey(row.primary_public_key_pem);
+}
+
+// true if the manifest's signature matches everything else in it,
+// secondary is never accepted here, only primary
 function verifyManifest(manifest) {
   // the signature covers everything except itself
   const { signature, ...signed } = manifest;
   if (typeof signature !== "string") return false;
   const message = Buffer.from(JSON.stringify(signed));
-  return crypto.verify(null, message, PUBLIC_KEY, Buffer.from(signature, "hex"));
+  return crypto.verify(null, message, getTrustedPublicKey(), Buffer.from(signature, "hex"));
 }
 
 // fetch a url and parse its response as json
@@ -296,7 +297,6 @@ async function applyUpdate() {
 // tests and src/updateCheck.js's own callers reach for
 module.exports = {
   GITHUB_REPO,
-  PUBLIC_KEY_PEM,
   CHECK_INTERVAL_MS,
   getCurrentVersion,
   verifyManifest,
