@@ -84,10 +84,9 @@ function dismissRollback() {
   updateDiagnosticsState({ rollback_dismissed_at: new Date().toISOString() });
 }
 
-// called by updateCheck.js right after a successful flip: marks the
-// current rollback resolved the same way an admin dismiss would,
-// instead of erasing it, so the unchanged log line already sitting
-// in auth-gate.log doesn't get re-detected as brand new on restart
+// called by updateCheck.js right after a successful flip, marking
+// the current rollback resolved instead of erasing it
+// see docs/Why.md#why-does-diagnostics-mirror-updatecheckjss-own-shape
 function clearRollback() {
   const state = getDiagnosticsState();
   if (!state.rollback_detected_at) return;

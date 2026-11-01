@@ -289,6 +289,14 @@ signal). `updateCheck.js` requires `diagnostics.js` for that, but only
 inside `applyUpdate()` itself, not at module load time, so the two
 files never form an actual circular require.
 
+`clearRollback()` marks the rollback resolved rather than erasing
+`rollback_detected_at` outright. Erasing it would make a follow-up
+check think no rollback had ever happened, when what actually
+happened is the update succeeded and the rollback is now stale.
+Marking it dismissed reuses the same field an admin's own manual
+dismiss already writes, keeping the history intact through the one
+state transition the diagnostics table already has.
+
 ## Why is signed_updates.json the trust root instead of GitHub itself?
 
 It's attached as a release asset on GitHub, signed with an Ed25519
