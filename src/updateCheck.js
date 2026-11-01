@@ -8,7 +8,6 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const tar = require("tar");
@@ -218,15 +217,6 @@ async function stageAuthGateSlot(archivePath, slotDir) {
   }
 }
 
-// install the newly staged slot's production dependencies
-function runNpmInstall(cwd) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("npm", ["install", "--omit=dev"], { cwd, stdio: "inherit" });
-    child.on("error", reject);
-    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`npm install exited with code ${code}`))));
-  });
-}
-
 // section: relaying the agent's own update through this process
 
 // see docs/Why.md#why-is-the-agent-relay-timeout-only-60-seconds
@@ -288,9 +278,10 @@ async function applyUpdate() {
       const appRoot = path.join(__dirname, "..", "..", "..");
       const slotDir = path.join(appRoot, "releases", idleSlot);
       await stageAuthGateSlot(authGateArchive, slotDir);
-      console.debug(`Update: staged into slot ${idleSlot}, running npm install...`);
-      await runNpmInstall(slotDir);
-      console.debug("Update: npm install finished.");
+      console.debug(`Update: staged into slot ${idleSlot}.`);
+      // node_modules is already complete and correct here, extracted
+      // straight from the archive's own npm ci, see
+      // docs/Why.md#why-doesnt-applyupdate-run-npm-install-in-the-new-slot
 
       const agentDownload = findDownload(manifest, "agent");
       const agentExe = path.join(scratchDir, "agent.exe");
