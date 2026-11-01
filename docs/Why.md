@@ -443,6 +443,20 @@ route rename the Missions directory into itself (`EINVAL`) after
 already moving earlier names in the same request, which is why every
 name in a trash request is still validated before any file is moved.
 
+## Why do download, trash and restore require .miz, like upload already did?
+
+Upload and the mission list already restricted to `.miz`; download,
+trash and restore did not, only enforcing containment and rejecting
+dot-led names.<br>This tool only ever manages missions, not arbitrary
+files that happen to sit in the same folder, so a user with
+`download` or `delete` could otherwise reach a `.lua`, `.trk`, or
+leftover `.tmp` file the UI never lists.<br>`safeMissionPath`'s
+`requireMiz` option stays optional rather than unconditional, because
+restore resolves a *trash entry's* own on-disk name first (ending in
+`.<timestamp>`, never `.miz`), then separately checks the parsed
+*original* name against the same rule once `parseTrashEntryName` has
+split the suffix back off.
+
 ## Why does agent.js duplicate appLog.js's log format instead of importing it?
 
 This file builds standalone into `agent.exe` with zero dependency on

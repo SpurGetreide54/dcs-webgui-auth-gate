@@ -169,7 +169,7 @@ function missionsDir(instanceDir) {
 
 // turn admin-typed-adjacent input into a safe path inside targetDir
 // shared by upload, download, and trash below
-function safeMissionPath(targetDir, filename) {
+function safeMissionPath(targetDir, filename, { requireMiz = false } = {}) {
   // a non-string entry would otherwise throw inside path.basename below
   // see docs/Why.md#why-does-the-agent-check-typeof-before-every-path-operation
   if (typeof filename !== "string") return null;
@@ -179,6 +179,10 @@ function safeMissionPath(targetDir, filename) {
   // hidden entry such as .trash), never a real mission
   // see docs/Why.md#why-does-safemissionpath-reject-empty-and-dot-led-names
   if (!safeName || safeName.startsWith(".")) return null;
+  // callers resolving a trash entry's own on-disk name (ending in
+  // .<timestamp>, not .miz) leave this off, see
+  // docs/Why.md#why-do-download-trash-and-restore-require-miz-like-upload-already-did
+  if (requireMiz && !safeName.toLowerCase().endsWith(".miz")) return null;
   const finalPath = path.join(targetDir, safeName);
   const resolvedTarget = path.resolve(targetDir);
   const resolvedFinal = path.resolve(finalPath);
@@ -270,7 +274,7 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
   const targetDir = missionsDir(req.instanceDir);
   const resolvedPaths = [];
   for (const name of names) {
-    const resolved = safeMissionPath(targetDir, name);
+    const resolved = safeMissionPath(targetDir, name, { requireMiz: true });
     if (!resolved) return res.status(400).send(`Invalid mission name: ${name}`);
     if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
     resolvedPaths.push(resolved);
@@ -316,7 +320,7 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
   const targetDir = missionsDir(req.instanceDir);
   const resolvedPaths = [];
   for (const name of names) {
-    const resolved = safeMissionPath(targetDir, name);
+    const resolved = safeMissionPath(targetDir, name, { requireMiz: true });
     if (!resolved) return res.status(400).send(`Invalid mission name: ${name}`);
     if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Mission not found: ${resolved.safeName}`);
     resolvedPaths.push(resolved);
@@ -401,6 +405,10 @@ app.post(
       if (!(await isExistingFile(resolved.finalPath))) return res.status(404).send(`Trash entry not found: ${resolved.safeName}`);
       const parsed = parseTrashEntryName(resolved.safeName);
       if (!parsed) return res.status(400).send(`Unrecognized trash entry: ${resolved.safeName}`);
+      // a trash entry whose original name wasn't .miz is exactly as
+      // unsupported, from the restorer's point of view, as one that
+      // doesn't parse at all
+      if (!parsed.name.toLowerCase().endsWith(".miz")) return res.status(400).send(`Unrecognized trash entry: ${resolved.safeName}`);
       // on disk already, or claimed earlier in this same batch, either
       // way a silent fs.rename below would overwrite it
       const destination = path.join(targetDir, parsed.name);

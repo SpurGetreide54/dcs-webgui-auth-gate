@@ -598,13 +598,15 @@ test("download rejects an unknown mission name", async () => {
   assert.equal(res.status, 404);
 });
 
-// path.basename() reduces the traversal to a plain "passwd" first,
-// so 404 (no such mission) is the correct, safe outcome, not 400
+// path.basename() reduces the traversal to a plain filename first,
+// so 404 (no such mission) is the correct, safe outcome, not 400;
+// a name distinct from the upload traversal test's own "passwd.miz"
+// leftover, so this doesn't accidentally find a real file
 test("download: a path-traversal mission name reduces to a plain filename and 404s, never escapes the folder", async () => {
   const res = await fetch(`${base}/missions/${INSTANCE}/download`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ missions: ["../../../etc/passwd"] }),
+    body: JSON.stringify({ missions: ["../../../etc/download-traversal-probe.miz"] }),
   });
   assert.equal(res.status, 404);
 });
@@ -639,15 +641,62 @@ test("download rejects a non-string mission name, and the agent survives the att
   assert.equal(stillUp.status, 200);
 });
 
-test("download 404s on a real subdirectory instead of streaming it", async () => {
-  const instance = "Example_SubdirDownload";
+test("download rejects a non-.miz file in Missions/, not just .miz ones", async () => {
+  const instance = "Example_DownloadNonMiz";
   const missionsDir = path.join(instanceDir(instance), "Missions");
-  fs.mkdirSync(path.join(missionsDir, "a-subdir"), { recursive: true });
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "notes.lua"), "not a mission");
 
   const res = await fetch(`${base}/missions/${instance}/download`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ missions: ["a-subdir"] }),
+    body: JSON.stringify({ missions: ["notes.lua"] }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test("trash rejects a non-.miz file in Missions/, not just .miz ones", async () => {
+  const instance = "Example_TrashNonMiz";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "notes.lua"), "not a mission");
+
+  const res = await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["notes.lua"] }),
+  });
+  assert.equal(res.status, 400);
+  assert.equal(fs.existsSync(path.join(missionsDir, "notes.lua")), true, "a rejected non-.miz file must be left in place, not moved aside");
+});
+
+test("restore rejects a hand-placed trash entry whose original name wasn't .miz", async () => {
+  const instance = "Example_RestoreNonMiz";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  const trashDir = path.join(missionsDir, ".trash");
+  fs.mkdirSync(trashDir, { recursive: true });
+  fs.writeFileSync(path.join(trashDir, "notes.txt.1700000000000"), "not a mission");
+
+  const res = await fetch(`${base}/missions/${instance}/trash/restore`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ trash: ["notes.txt.1700000000000"] }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /Unrecognized trash entry/);
+});
+
+test("download 404s on a real subdirectory instead of streaming it", async () => {
+  const instance = "Example_SubdirDownload";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  // named like a mission so this test exercises the directory check
+  // itself, not the separate .miz-extension gate
+  fs.mkdirSync(path.join(missionsDir, "a-subdir.miz"), { recursive: true });
+
+  const res = await fetch(`${base}/missions/${instance}/download`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["a-subdir.miz"] }),
   });
   assert.equal(res.status, 404);
 
@@ -755,12 +804,13 @@ test("trash rejects an unknown mission name", async () => {
   assert.equal(res.status, 404);
 });
 
-// same basename-neutralizes-it-first reasoning as the download test above
+// same basename-neutralizes-it-first reasoning as the download test
+// above, and the same reason for a distinct, non-colliding name
 test("trash: a path-traversal mission name reduces to a plain filename and 404s, never escapes the folder", async () => {
   const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ missions: ["../../../etc/passwd"] }),
+    body: JSON.stringify({ missions: ["../../../etc/trash-traversal-probe.miz"] }),
   });
   assert.equal(res.status, 404);
 });
@@ -796,15 +846,17 @@ test("trash rejects a non-string mission name, and the agent survives the attemp
 test("trash 404s on a real subdirectory instead of renaming it into itself", async () => {
   const instance = "Example_SubdirTrash";
   const missionsDir = path.join(instanceDir(instance), "Missions");
-  fs.mkdirSync(path.join(missionsDir, "a-subdir"), { recursive: true });
+  // named like a mission so this test exercises the directory check
+  // itself, not the separate .miz-extension gate
+  fs.mkdirSync(path.join(missionsDir, "a-subdir.miz"), { recursive: true });
 
   const res = await fetch(`${base}/missions/${instance}/trash`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ missions: ["a-subdir"] }),
+    body: JSON.stringify({ missions: ["a-subdir.miz"] }),
   });
   assert.equal(res.status, 404);
-  assert.equal(fs.existsSync(path.join(missionsDir, "a-subdir")), true, "the subdirectory must be left untouched");
+  assert.equal(fs.existsSync(path.join(missionsDir, "a-subdir.miz")), true, "the subdirectory must be left untouched");
 
   const stillUp = await fetch(`${base}/missions/${instance}`, { headers: authHeaders() });
   assert.equal(stillUp.status, 200);
