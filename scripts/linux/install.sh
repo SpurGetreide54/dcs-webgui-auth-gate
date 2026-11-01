@@ -240,12 +240,15 @@ fi
 [ "$WEBGUI_CONTROL_PORT_SET" -eq 1 ] || [ "$MODE" = "complex" ] || WEBGUI_CONTROL_PORT=$WEBGUI_CONTROL_PORT_CURRENT
 [ "$AUTH_GATE_STATE_DIR_SET" -eq 1 ] || [ "$MODE" = "complex" ] || AUTH_GATE_STATE_DIR=$AUTH_GATE_STATE_DIR_CURRENT
 
-# section: AUTH_GATE_STATE_DIR's four derived paths, computed once,
+# section: AUTH_GATE_STATE_DIR's five derived paths, computed once,
 # used below for chown targets and the rollback unit's own hardcoded
 # paths, see docs/Why.md#why-does-auth_gate_state_dir-not-replace-the-older-vars
 WEBGUI_STATIC_PATH="$AUTH_GATE_STATE_DIR/webgui-static"
 ACTIVE_SLOT_PATH="$AUTH_GATE_STATE_DIR/active-slot"
 AUTH_GATE_LOG_PATH="$AUTH_GATE_STATE_DIR/auth-gate.log"
+# the service unit's own stdout/stderr redirect, not AUTH_GATE_LOG_PATH
+# see docs/Why.md#why-does-the-service-unit-redirect-stdout-stderr-to-their-own-file-not-the-app-log
+NATIVE_CRASH_LOG_PATH="$AUTH_GATE_STATE_DIR/auth-gate-native-crash.log"
 
 # section: write .env, every other existing line untouched
 echo "==> Writing $ENV_PATH"
@@ -301,8 +304,8 @@ sed \
   -e "s#^Group=.*#Group=$SERVICE_ACCOUNT#" \
   -e "s#^WorkingDirectory=.*#WorkingDirectory=$INSTALL_DIR#" \
   -e "s#^EnvironmentFile=.*#EnvironmentFile=$ENV_PATH#" \
-  -e "s#^StandardOutput=append:.*#StandardOutput=append:$AUTH_GATE_LOG_PATH#" \
-  -e "s#^StandardError=append:.*#StandardError=append:$AUTH_GATE_LOG_PATH#" \
+  -e "s#^StandardOutput=append:.*#StandardOutput=append:$NATIVE_CRASH_LOG_PATH#" \
+  -e "s#^StandardError=append:.*#StandardError=append:$NATIVE_CRASH_LOG_PATH#" \
   "$SCRIPT_DIR/../systemd/$SERVICE_UNIT_NAME.service" > "$SERVICE_UNIT_PATH"
 sed \
   -e "s#STATE_FILE=$INSTALL_DIR_DEFAULT/active-slot#STATE_FILE=$ACTIVE_SLOT_PATH#" \
@@ -323,3 +326,4 @@ else
 fi
 echo "    Status:  systemctl status $SERVICE_UNIT_NAME"
 echo "    Log:     $AUTH_GATE_LOG_PATH"
+echo "    Native crash log: $NATIVE_CRASH_LOG_PATH"
