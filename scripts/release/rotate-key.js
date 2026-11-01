@@ -11,6 +11,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { keyStateMessage } = require("../../src/keyRotationConstants");
 
 const KEYS_DIR = path.join(__dirname, "..", "..", "local-only", "keys");
 const RELEASE_DIR = path.join(__dirname, "..", "..", "local-only", "release");
@@ -30,11 +31,6 @@ function keyPath(slot, suffix = "") {
 // the public key file for a slot, optionally a ".next" draft copy
 function pubKeyPath(slot, suffix = "") {
   return path.join(KEYS_DIR, `key-rotation-${slot}${suffix}.pub.pem`);
-}
-
-// fixed key order matters here, same message shape src/keyRotation.js verifies
-function keyStateMessage({ rotated_slot, new_public_key_pem, rotated_at }) {
-  return Buffer.from(JSON.stringify({ rotated_slot, new_public_key_pem, rotated_at }));
 }
 
 // every rotation record ever appended, oldest first, empty if this is

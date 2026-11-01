@@ -359,6 +359,61 @@ test(
 );
 
 test(
+  "a primary rotation drafted by rotate-key.js, vouched by sign-key-state-with-secondary.js, finalized by rotate-key.js, verifies with the real verifyKeyState() -- all three keyStateMessage call sites agreeing byte for byte",
+  {
+    skip: !fs.existsSync(path.join(__dirname, "..", "local-only", "keys", "key-rotation-secondary.pem"))
+      ? "local-only/keys/key-rotation-secondary.pem not present on this machine"
+      : false,
+  },
+  () => {
+    const { execFileSync } = require("node:child_process");
+    const keysDir = path.join(__dirname, "..", "local-only", "keys");
+    const releaseDir = path.join(__dirname, "..", "local-only", "release");
+    const rotateScript = path.join(__dirname, "..", "scripts", "release", "rotate-key.js");
+    const signScript = path.join(__dirname, "..", "scripts", "release", "sign-key-state-with-secondary.js");
+    const draftPath = path.join(releaseDir, "key_state.draft.json");
+    const primaryPath = path.join(keysDir, "key-rotation-primary.pem");
+    const primaryPubPath = path.join(keysDir, "key-rotation-primary.pub.pem");
+    const primaryNextPath = path.join(keysDir, "key-rotation-primary.next.pem");
+    const primaryNextPubPath = path.join(keysDir, "key-rotation-primary.next.pub.pem");
+    const secondaryPubPath = path.join(keysDir, "key-rotation-secondary.pub.pem");
+    const historyPath = path.join(keysDir, "key-rotation-history.json");
+    const finalPath = path.join(releaseDir, "key_state.json");
+    const backupPrimary = fs.existsSync(primaryPath) ? fs.readFileSync(primaryPath) : null;
+    const backupPrimaryPub = fs.existsSync(primaryPubPath) ? fs.readFileSync(primaryPubPath) : null;
+    const backupHistory = fs.existsSync(historyPath) ? fs.readFileSync(historyPath) : null;
+    try {
+      execFileSync(process.execPath, [rotateScript, "primary-draft"], { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+      const vouchSignature = execFileSync(process.execPath, [signScript, "--draft", draftPath, "--secondary-key", path.join(keysDir, "key-rotation-secondary.pem")], {
+        cwd: path.join(__dirname, ".."),
+        stdio: "pipe",
+      })
+        .toString()
+        .trim();
+      execFileSync(process.execPath, [rotateScript, "primary-finalize", "--vouch-signature", vouchSignature], { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+
+      const history = JSON.parse(fs.readFileSync(finalPath, "utf8"));
+      const record = history.at(-1);
+      const currentState = { secondary_public_key_pem: fs.readFileSync(secondaryPubPath, "utf8"), primary_rotated_at: "2020-01-01T00:00:00.000Z" };
+      assert.equal(
+        keyRotation.verifyKeyState(record, currentState),
+        true,
+        "a primary rotation drafted, vouched, and finalized by the real scripts must verify against the real verifyKeyState()"
+      );
+    } finally {
+      if (backupPrimary) fs.writeFileSync(primaryPath, backupPrimary);
+      if (backupPrimaryPub) fs.writeFileSync(primaryPubPath, backupPrimaryPub);
+      if (backupHistory) fs.writeFileSync(historyPath, backupHistory);
+      else fs.rmSync(historyPath, { force: true });
+      fs.rmSync(primaryNextPath, { force: true });
+      fs.rmSync(primaryNextPubPath, { force: true });
+      fs.rmSync(draftPath, { force: true });
+      fs.rmSync(finalPath, { force: true });
+    }
+  }
+);
+
+test(
   "rotate-key.js accumulates two real rotations into one published history, not an overwrite",
   {
     skip: !fs.existsSync(path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem"))

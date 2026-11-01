@@ -7,6 +7,7 @@ const crypto = require("node:crypto");
 const db = require("./db");
 const { GITHUB_REPO } = require("./updateConstants");
 const { CHECK_INTERVAL_MS } = require("./updateCheck");
+const { keyStateMessage } = require("./keyRotationConstants");
 
 // section: constants
 
@@ -62,12 +63,6 @@ async function fetchKeyStateHistory() {
 }
 
 // section: verifying a rotation record
-
-// the record's signed payload, fixed key order, same reasoning as
-// sign-updates.js's own manifest signing
-function keyStateMessage({ rotated_slot, new_public_key_pem, rotated_at }) {
-  return Buffer.from(JSON.stringify({ rotated_slot, new_public_key_pem, rotated_at }));
-}
 
 // true only if every one of a rotation record's checks pass: the new
 // key's own self-signature, the surviving slot's vouching signature,

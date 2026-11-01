@@ -16,6 +16,7 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { keyStateMessage } = require("../../src/keyRotationConstants");
 
 // reads --draft and --secondary-key off the command line
 function parseArgs(argv) {
@@ -36,11 +37,6 @@ function parseArgs(argv) {
   if (!args.draftPath) throw new Error("--draft is required.");
   if (!args.secondaryKeyPath) throw new Error("--secondary-key is required.");
   return args;
-}
-
-// the same fixed-key-order message rotate-key.js and src/keyRotation.js sign/verify
-function keyStateMessage({ rotated_slot, new_public_key_pem, rotated_at }) {
-  return Buffer.from(JSON.stringify({ rotated_slot, new_public_key_pem, rotated_at }));
 }
 
 // reads the draft and the secondary key, prints only the signature

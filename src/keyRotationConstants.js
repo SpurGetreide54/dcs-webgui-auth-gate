@@ -19,4 +19,10 @@ MCowBQYDK2VwAyEAWRCq+xpQ+cgcwx2ZGdvssx5Sg7910b9gff4jmL8lGTk=
 // rotation will ever be, the date the two keys above were created
 const INITIAL_KEY_ROTATED_AT = "2026-11-01T00:00:00.000Z";
 
-module.exports = { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT };
+// the record's signed payload, fixed key order, same reasoning as
+// sign-updates.js's own manifest signing
+function keyStateMessage({ rotated_slot, new_public_key_pem, rotated_at }) {
+  return Buffer.from(JSON.stringify({ rotated_slot, new_public_key_pem, rotated_at }));
+}
+
+module.exports = { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT, keyStateMessage };
