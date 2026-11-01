@@ -1321,3 +1321,33 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     server.close();
   }
 });
+
+test("getSessionAdmin only writes expires_at once the session is inside the cookie-refresh window, not on every call", () => {
+  const adminId = db.prepare("SELECT id FROM admins WHERE username = ?").get("siteadmin").id;
+  const token = auth.createSession(adminId);
+  const tokenHash = auth.hashToken(token);
+
+  // a fresh session is nowhere near the 1h cookie-refresh window,
+  // so two calls in a row must leave expires_at untouched
+  const before = db.prepare("SELECT expires_at FROM sessions WHERE token_hash = ?").get(tokenHash).expires_at;
+  const first = auth.getSessionAdmin(token);
+  assert.equal(first.needsCookieRefresh, false);
+  const afterFirst = db.prepare("SELECT expires_at FROM sessions WHERE token_hash = ?").get(tokenHash).expires_at;
+  assert.equal(afterFirst, before, "expires_at must not move while well outside the cookie-refresh window");
+  const second = auth.getSessionAdmin(token);
+  assert.equal(second.needsCookieRefresh, false);
+  const afterSecond = db.prepare("SELECT expires_at FROM sessions WHERE token_hash = ?").get(tokenHash).expires_at;
+  assert.equal(afterSecond, before, "a second call still inside the window must not write either");
+
+  // push the session to inside the window (less than 1h left), the
+  // next call must now slide it back out to the full session TTL
+  db.prepare("UPDATE sessions SET expires_at = datetime('now', '+30 minutes') WHERE token_hash = ?").run(tokenHash);
+  const third = auth.getSessionAdmin(token);
+  assert.equal(third.needsCookieRefresh, true);
+  const afterThird = db.prepare("SELECT expires_at FROM sessions WHERE token_hash = ?").get(tokenHash).expires_at;
+  // sqlite's datetime('now') format has no timezone suffix, so it
+  // must be parsed as UTC explicitly, see
+  // docs/Why.md#why-does-every-expiry-use-sqlites-own-datetime-instead-of-js-date
+  const afterThirdMs = new Date(`${afterThird.replace(" ", "T")}Z`).getTime();
+  assert.ok(afterThirdMs > Date.now() + 11 * 60 * 60 * 1000, "a request inside the window must slide expires_at back out near the full 12h TTL");
+});

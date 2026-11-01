@@ -193,7 +193,13 @@ reissued once an hour of real idle time has actually passed, same
 cadence as `src/controlTokens.js`'s own slide.<br>`requireAuth` takes
 `onCookieRefreshNeeded` as a parameter, rather than importing
 `setSessionCookie` directly, because that function (and the `secure`
-cookie flag it needs) lives in `server.js`, not `auth.js`.
+cookie flag it needs) lives in `server.js`, not `auth.js`.<br>The
+`sessions.expires_at` DB write piggybacks on the same flag now,
+instead of running on every authenticated request: once a request
+already falls inside the cookie-refresh window, sliding the DB row
+in step costs nothing extra, and outside that window there's nothing
+for the write to accomplish that the next in-window request won't
+also do.
 
 ## Why does getAccessibleServers select server_id explicitly?
 

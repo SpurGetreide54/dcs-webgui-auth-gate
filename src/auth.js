@@ -90,6 +90,7 @@ function createSession(adminId) {
 // see docs/Why.md#why-does-getsessionadmin-report-a-cookie-refresh-flag
 function getSessionAdmin(token) {
   if (!token) return null;
+  const tokenHash = hashToken(token);
   const row = db
     .prepare(
       `SELECT admins.*,
@@ -98,15 +99,19 @@ function getSessionAdmin(token) {
        JOIN admins ON admins.id = sessions.admin_id
        WHERE sessions.token_hash = ? AND sessions.expires_at > datetime('now')`
     )
-    .get(SESSION_TTL_SECONDS - COOKIE_REFRESH_THRESHOLD_SECONDS, hashToken(token));
+    .get(SESSION_TTL_SECONDS - COOKIE_REFRESH_THRESHOLD_SECONDS, tokenHash);
   if (!row) return null;
   const needsCookieRefresh = !!row.needs_cookie_refresh;
   delete row.needs_cookie_refresh;
 
-  // sliding expiry, touch the session on every authenticated request
-  db.prepare(
-    `UPDATE sessions SET expires_at = datetime('now', '+' || ? || ' seconds') WHERE token_hash = ?`
-  ).run(SESSION_TTL_SECONDS, hashToken(token));
+  // sliding expiry, but only touch the session row once it's within
+  // the same cookie-refresh window the caller already checks, instead
+  // of writing on every authenticated request
+  if (needsCookieRefresh) {
+    db.prepare(
+      `UPDATE sessions SET expires_at = datetime('now', '+' || ? || ' seconds') WHERE token_hash = ?`
+    ).run(SESSION_TTL_SECONDS, tokenHash);
+  }
 
   return { admin: row, needsCookieRefresh };
 }
