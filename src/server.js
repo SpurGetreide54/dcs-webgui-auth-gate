@@ -254,10 +254,17 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
     flash.setFlash(res, { error: "All password fields are required." });
     return res.redirect("/admin/accounts");
   }
+  if (auth.isRateLimited(req, req.admin.username, "change-password")) {
+    flash.setFlash(res, { error: "Too many attempts. Try again later." });
+    return res.redirect("/admin/accounts");
+  }
+  auth.pruneOldLoginAttempts();
+  auth.recordLoginAttempt(req, req.admin.username, "change-password");
   if (!(await auth.verifyPassword(current_password, req.admin.password_hash))) {
     flash.setFlash(res, { error: "Current password is incorrect." });
     return res.redirect("/admin/accounts");
   }
+  auth.clearLoginAttempts(req, req.admin.username, "change-password");
   if (new_password.length < auth.MIN_PASSWORD_LENGTH) {
     flash.setFlash(res, { error: `New password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
     return res.redirect("/admin/accounts");

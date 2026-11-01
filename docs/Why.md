@@ -601,6 +601,18 @@ the current password first, then signing out every other session, is
 what lets the real account owner kick out anyone (or anything
 hijacked) still logged in elsewhere.
 
+## Why does change-password use a separate rate-limit bucket from login?
+
+Change-password now rate limits the current-password check, through
+the same `login_attempts` machinery `/login` uses (`rateLimitKey`'s
+`purpose` parameter, default `"login"` so every existing `/login`
+call site stays untouched), under its own `"change-password"` prefix
+rather than sharing `/login`'s bucket.<br>A stolen-session attacker
+guessing the current password here would otherwise also lock the
+real owner out of `/login` itself, which is the one path that still
+works once the session is dead.<br>Keyed on `req.admin.username`
+(the authenticated identity, from the session), not a body field.
+
 ## Why does /s/:slug redirect to add its own trailing slash?
 
 Express's default non-strict routing already matches a bare `GET

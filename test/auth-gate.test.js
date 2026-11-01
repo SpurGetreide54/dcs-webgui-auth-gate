@@ -748,6 +748,18 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
     assert.match(await lastAttempt.text(), /Too many attempts/, "6th attempt within the window should be rate-limited");
 
+    // change-password rate limiting, under its own bucket, same scope
+    // as the login rate-limit test above (clear-on-success isn't tested either)
+    let lastChangePasswordAttempt;
+    for (let i = 0; i < 6; i++) {
+      lastChangePasswordAttempt = await postAndFollowFlash(`${base}/admin/accounts/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+        body: "current_password=wrong-password&new_password=another-long-password&confirm_password=another-long-password",
+      });
+    }
+    assert.match(await lastChangePasswordAttempt.text(), /Too many attempts/, "6th wrong-current-password submit within the window should be rate-limited");
+
     // login lockout must not count successful logins, and must clear on a
     // success, isolated via a fresh X-Forwarded-For from the blocks above
     const lockoutProbeHeaders = { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.1" };

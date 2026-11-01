@@ -49,13 +49,15 @@ function hashToken(token) {
 }
 
 // build the rate-limit bucket key for one ip and username pair
-function rateLimitKey(req, username) {
-  return `${req.ip}:${username.toLowerCase()}`;
+// purpose keeps separate rate-limit buckets under one shared table,
+// see docs/Why.md#why-does-change-password-use-a-separate-rate-limit-bucket-from-login
+function rateLimitKey(req, username, purpose = "login") {
+  return `${purpose}:${req.ip}:${username.toLowerCase()}`;
 }
 
 // true once this ip/username pair has hit too many attempts recently
-function isRateLimited(req, username) {
-  const key = rateLimitKey(req, username);
+function isRateLimited(req, username, purpose = "login") {
+  const key = rateLimitKey(req, username, purpose);
   const row = db
     .prepare(
       `SELECT COUNT(*) AS n FROM login_attempts
@@ -66,8 +68,8 @@ function isRateLimited(req, username) {
 }
 
 // record one login attempt against this ip and username pair
-function recordLoginAttempt(req, username) {
-  db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(rateLimitKey(req, username));
+function recordLoginAttempt(req, username, purpose = "login") {
+  db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(rateLimitKey(req, username, purpose));
 }
 
 // delete attempts outside the window, called opportunistically on login
@@ -78,8 +80,8 @@ function pruneOldLoginAttempts() {
 }
 
 // clear this ip/username pair's recorded login attempts
-function clearLoginAttempts(req, username) {
-  db.prepare("DELETE FROM login_attempts WHERE key = ?").run(rateLimitKey(req, username));
+function clearLoginAttempts(req, username, purpose = "login") {
+  db.prepare("DELETE FROM login_attempts WHERE key = ?").run(rateLimitKey(req, username, purpose));
 }
 
 // delete expired session rows, called opportunistically on login,
