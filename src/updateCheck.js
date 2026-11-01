@@ -174,6 +174,7 @@ function getUpdateCooldownUntil() {
 // is genuinely still in flight, see docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
 let updateInFlight = false;
 
+// read-only check of the flag above, exposed so callers can tell
 function isUpdateInFlight() {
   return updateInFlight;
 }

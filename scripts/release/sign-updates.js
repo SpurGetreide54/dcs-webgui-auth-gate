@@ -21,6 +21,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { GITHUB_REPO } = require("../../src/updateConstants");
 
+// turn the cli's --flags into a plain args object, with required-field checks
 function parseArgs(argv) {
   const args = { needsServiceUpdate: false };
   for (let i = 0; i < argv.length; i++) {
@@ -63,14 +64,17 @@ function parseArgs(argv) {
   return args;
 }
 
+// hash one file's contents for the manifest's own sha256 field
 function sha256File(filePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
+// build this artifact's github releases download url
 function downloadUrl(tag, filename) {
   return `https://github.com/${GITHUB_REPO}/releases/download/${tag}/${filename}`;
 }
 
+// parse args, build and sign the manifest, then write it out
 function main() {
   const args = parseArgs(process.argv.slice(2));
 
