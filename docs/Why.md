@@ -1017,15 +1017,6 @@ before the feature's first real use: no `key_state.json` had ever been
 published, so there was no live consumer of the old single-record
 format to migrate.
 
-## Why does key-rotation-history.json live outside local-only/release/?
-
-`local-only/release/` holds build artifacts for the version currently
-being cut, and gets swept into `local-only/release-archive/` before
-every routine version release.<br>The rotation history must survive
-that sweep untouched, since it is a durable record of every rotation
-ever made, not a build artifact of any one release, so it lives next
-to the key material itself in `local-only/keys/` instead.
-
 ## Why does verifyManifest read key_state instead of a hardcoded constant?
 
 Key rotation only matters if revoking a leaked key actually changes
@@ -1077,8 +1068,8 @@ that doesn't exist here.
 The secondary private key is the only thing that makes rotating
 primary a real two-key decision rather than theater.<br>As long as it
 is read only by a script the user runs themselves, in their own
-terminal, it never has to pass through an AI coding session, no
-matter where the rest of the tooling lives. That's why
+terminal, it never has to pass through any other machine, service, or
+automated tool, no matter where the rest of the tooling lives. That's why
 `sign-key-state-with-secondary.js` is a separate, minimal script that
 reads the key and prints only the resulting signature — never the key
 itself, never a finished, publishable file — leaving the actual

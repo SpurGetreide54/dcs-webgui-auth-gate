@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// user-run-only, never from an ai coding session: the secondary
-// private key never leaving this script is the whole point of it
+// user-run-only: the secondary private key never leaving this
+// script is the whole point of it
 // see docs/Why.md#why-is-tooling-split-into-automatable-and-user-run-only-halves
 //
 // reads a pending primary-rotation draft, signs it with the secondary

@@ -17,8 +17,9 @@ const RELEASE_DIR = path.join(__dirname, "..", "..", "local-only", "release");
 const DRAFT_PATH = path.join(RELEASE_DIR, "key_state.draft.json");
 const FINAL_PATH = path.join(RELEASE_DIR, "key_state.json");
 
-// the durable append-only log every rotation gets added to
-// see docs/Why.md#why-does-key-rotation-historyjson-live-outside-local-onlyrelease
+// the durable append-only log every rotation gets added to, kept
+// beside the key material since release build output doesn't survive
+// between releases
 const HISTORY_PATH = path.join(KEYS_DIR, "key-rotation-history.json");
 
 // the private key file for a slot, optionally a ".next" draft copy
@@ -121,7 +122,7 @@ function rotatePrimaryDraft() {
 
   console.log(`Wrote ${DRAFT_PATH}`);
   console.log("");
-  console.log("Next, run this yourself, in your own terminal -- the secondary key never belongs in an AI session:");
+  console.log("Next, run this yourself, in your own terminal; the secondary key must never be pasted into a script or tool:");
   console.log(`  node scripts/release/sign-key-state-with-secondary.js --draft ${DRAFT_PATH} --secondary-key <path to your secondary key>`);
   console.log("Then come back with its printed signature for:");
   console.log("  node scripts/release/rotate-key.js primary-finalize --vouch-signature <that signature>");
