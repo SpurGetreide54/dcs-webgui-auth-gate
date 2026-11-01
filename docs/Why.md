@@ -1017,6 +1017,15 @@ before the feature's first real use: no `key_state.json` had ever been
 published, so there was no live consumer of the old single-record
 format to migrate.
 
+## Why does key-rotation-history.json live outside local-only/release/?
+
+`local-only/release/` holds build artifacts for the version currently
+being cut, and gets swept into `local-only/release-archive/` before
+every routine version release.<br>The rotation history must survive
+that sweep untouched, since it is a durable record of every rotation
+ever made, not a build artifact of any one release, so it lives next
+to the key material itself in `local-only/keys/` instead.
+
 ## Why does verifyManifest read key_state instead of a hardcoded constant?
 
 Key rotation only matters if revoking a leaked key actually changes
@@ -1034,8 +1043,7 @@ A production deployment was already live when this was wired up,
 trusting only the old hardcoded key. That release's own manifest had
 to stay signed with the old key for that reason alone; only the
 release after it could sign with the new primary key, by explicit
-`sign-updates.js --key` override, documented in
-`local-only/release-process.md`.
+`sign-updates.js --key` override.
 
 ## Why does key_state seed rotated_at with a fixed date instead of install time?
 

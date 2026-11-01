@@ -1,7 +1,6 @@
 // runs on the physical windows host next to the dcs gameservers, the
-// only place that can reach a dcs server's control port, which only
-// accepts connections from 127.0.0.1 on its own machine
-// see docs/Why.md#why-does-the-mission-agent-have-no-accounts
+// only place that can reach a dcs server's control port (127.0.0.1-only)
+// see docs/Deployment-Topology.md
 
 // express and the upload/proxy/archive libraries this agent needs
 const express = require("express");
@@ -465,9 +464,8 @@ const webguiProxyMiddleware = createProxyMiddleware({
 app.use("/webgui/:instanceName", checkToken, requireInstanceDir, webguiProxyMiddleware);
 
 // section: dcs install webgui bundle
-// lets the auth-gate pull the real webgui spa straight out of a dcs
-// world server install already on this host, instead of an admin
-// copying it into webgui-static/ by hand
+
+// lets admins pull the webgui straight out of a dcs install on this host
 // see docs/Why.md#why-isnt-the-dcs-install-path-confined-to-a-fixed-root
 
 app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) => {
@@ -493,9 +491,9 @@ app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) 
 }));
 
 // section: self-update, stage and commit
-// relayed through the auth-gate (see src/updateCheck.js) since this
-// host has no internet access of its own by design
-// see docs/Why.md#why-does-the-agent-use-a-current-junction
+
+// relayed through the auth-gate since this host has no internet access
+// see docs/Why.md#why-does-the-auth-gate-relay-the-agents-update
 
 // overrides the root for local dev/tests, where process.execPath
 // points at node itself, not a packaged agent.exe next to a real

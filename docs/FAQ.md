@@ -1,7 +1,9 @@
 # FAQ
 
 Each entry answers a design question, not a symptom. For a symptom,
-see [Troubleshooting](Troubleshooting.md) instead.
+see [Troubleshooting](Troubleshooting.md) instead. This is a short,
+curated list; for the full engineering decision log behind the code,
+see [Why](Why.md).
 
 ## Why does this project exist at all?
 

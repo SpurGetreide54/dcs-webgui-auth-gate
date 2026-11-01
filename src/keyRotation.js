@@ -1,7 +1,6 @@
-// the self-update signing-key rotation trust root: a primary and a
-// secondary ed25519 key, revocable without a new app release, checked
-// hourly against a dedicated github release tag, see
-// docs/Why.md#why-is-key-staterotation-a-separate-signed-record
+// the self-update signing-key rotation trust root: primary + secondary
+// ed25519 keys, revocable without a new release, checked hourly
+// see docs/Why.md#why-is-key-staterotation-a-separate-signed-record
 
 // node's crypto module, and the db and github-repo constant modules
 const crypto = require("node:crypto");
@@ -47,9 +46,8 @@ async function fetchJson(url) {
 }
 
 // fetch the key-state release's own asset: every rotation record ever
-// issued, oldest first, or null if no rotation has ever been
-// published, the normal state for most deployments, see
-// docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
+// issued, oldest first, or null if none published yet
+// see docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
 async function fetchKeyStateHistory() {
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/tags/${KEY_STATE_TAG}`;
   const res = await fetch(url, { headers: { "User-Agent": "dcs-webgui-auth-gate-key-state-check" } });

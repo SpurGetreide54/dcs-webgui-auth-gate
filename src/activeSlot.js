@@ -3,9 +3,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 // a plain flat file, not a db row, see db.js's update_state comment
-// the path must be overridden in production via active_slot_path (or
-// auth_gate_state_dir) in .env, see
-// docs/Why.md#why-is-the-active-slot-pointer-a-flat-file
+// overridden in production via ACTIVE_SLOT_PATH or AUTH_GATE_STATE_DIR in .env
+// see docs/Why.md#why-is-the-active-slot-pointer-a-flat-file
 const { ACTIVE_SLOT_PATH } = require("./stateDir");
 
 // read which slot ("a" or "b") is currently live, defaulting to "a"

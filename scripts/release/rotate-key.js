@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// drives the fully-automatable halves of signing-key rotation: a
-// routine secondary rotation (primary vouches, no user step needed),
-// and the drafting/finalizing halves of a primary rotation (secondary
-// must vouch, via the separate user-run-only
-// sign-key-state-with-secondary.js), see
-// docs/Why.md#why-is-tooling-split-into-automatable-and-user-run-only-halves
+// drives signing-key rotation's automatable halves: a routine
+// secondary rotation, and drafting/finalizing a primary rotation
+// see docs/Why.md#why-is-tooling-split-into-automatable-and-user-run-only-halves
 //
 // Usage:
 //   node scripts/release/rotate-key.js secondary
@@ -20,10 +17,8 @@ const RELEASE_DIR = path.join(__dirname, "..", "..", "local-only", "release");
 const DRAFT_PATH = path.join(RELEASE_DIR, "key_state.draft.json");
 const FINAL_PATH = path.join(RELEASE_DIR, "key_state.json");
 
-// the durable append-only log every rotation gets added to, kept next
-// to the key material itself since local-only/release/ gets swept
-// into local-only/release-archive/ before every routine version
-// release, see docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
+// the durable append-only log every rotation gets added to
+// see docs/Why.md#why-does-key-rotation-historyjson-live-outside-local-onlyrelease
 const HISTORY_PATH = path.join(KEYS_DIR, "key-rotation-history.json");
 
 // the private key file for a slot, optionally a ".next" draft copy
@@ -132,10 +127,8 @@ function rotatePrimaryDraft() {
   console.log("  node scripts/release/rotate-key.js primary-finalize --vouch-signature <that signature>");
 }
 
-// rotating primary, finishing half: takes the signature the user
-// signed with secondary and pasted back, verifies it against the
-// secondary public key this machine already trusts, and only then
-// publishes the updated history and promotes *.next.pem into place
+// rotating primary, finishing half: verifies the user's pasted-back
+// secondary signature, then publishes history and promotes *.next.pem
 function rotatePrimaryFinalize(vouchSignature) {
   if (!vouchSignature) throw new Error("--vouch-signature is required.");
   const draft = JSON.parse(fs.readFileSync(DRAFT_PATH, "utf8"));

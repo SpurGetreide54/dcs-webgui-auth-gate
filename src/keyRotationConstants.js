@@ -1,6 +1,5 @@
-// ed25519 public keys seeding the primary/secondary key-rotation
-// trust root, side-effect free so db.js can seed key_state from it
-// without a require cycle, same reasoning as updateConstants.js
+// ed25519 public keys seeding the key-rotation trust root, side-effect
+// free so db.js can seed key_state without a require cycle
 // see docs/Why.md#why-do-key-rotation-constants-live-in-their-own-file
 
 // public half of the primary key, the private half never leaves

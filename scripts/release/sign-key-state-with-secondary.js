@@ -1,14 +1,12 @@
 #!/usr/bin/env node
-// USER-RUN-ONLY. Never run this from an AI coding session, and never
-// paste the secondary private key into one -- that is the entire
-// point of this script existing separately from rotate-key.js, see
-// docs/Why.md#why-is-tooling-split-into-automatable-and-user-run-only-halves
-// and vs-workspace/AGENTS.md's SSH-handoff rule for the same reasoning
-// applied to a different kind of key.
+// user-run-only, never from an ai coding session: the secondary
+// private key never leaving this script is the whole point of it
+// see docs/Why.md#why-is-tooling-split-into-automatable-and-user-run-only-halves
 //
-// Reads a pending primary-rotation draft, signs it with the secondary
-// key, and prints only the resulting signature -- never the key
-// itself, never the draft contents. Paste that signature into:
+// reads a pending primary-rotation draft, signs it with the secondary
+// key, and prints only the resulting signature, never the key or draft
+// itself; paste it into:
+//
 //   node scripts/release/rotate-key.js primary-finalize --vouch-signature <signature>
 //
 // Usage:

@@ -60,9 +60,8 @@ function canUploadMissions(adminId, serverId) {
   return Boolean(access && access.can_upload_missions);
 }
 
-// true if this admin holds the named permission on this server
-// "any-mission" is also a sentinel, true if any one of the four
-// mission permissions is set, not a real column
+// true if this admin holds the named permission; "any-mission" is a
+// sentinel for "any of the four mission permissions", not a real column
 // see docs/Why.md#why-does-any-mission-exist-alongside-view
 function hasPermission(adminId, serverId, permission) {
   const access = getAccess(adminId, serverId);
