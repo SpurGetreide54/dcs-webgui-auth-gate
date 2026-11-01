@@ -2,11 +2,14 @@
 // redirect after writing and the following get still shows the result
 // see docs/Why.md#why-is-the-flash-cookie-a-plain-unsigned-cookie
 const FLASH_COOKIE = "dcs_flash";
+// default true, disable only for local http dev, mirrors the same
+// flag in server.js's own setSessionCookie
+const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
 
 // store a flash payload as a cookie, cleared automatically after 10s
 function setFlash(res, data) {
   // write the payload as json, http only so client js can't read it
-  res.cookie(FLASH_COOKIE, JSON.stringify(data), { httpOnly: true, maxAge: 10000, sameSite: "lax" });
+  res.cookie(FLASH_COOKIE, JSON.stringify(data), { httpOnly: true, secure: COOKIE_SECURE, maxAge: 10000, sameSite: "lax" });
 }
 
 // read and clear this request's flash payload, or {} if there was none

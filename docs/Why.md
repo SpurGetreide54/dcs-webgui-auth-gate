@@ -18,7 +18,11 @@ only ever displayed as text, it becomes a real `<a href>`, and the
 cookie's own origin isn't guaranteed to be the same browser's own
 tampering (a sibling subdomain could set it too). `readFlash()` in
 `src/flash.js` only lets it through when it starts with `http://` or
-`https://`, closing that gap without needing to sign the cookie.
+`https://`, closing that gap without needing to sign the cookie.<br>
+`setFlash` also sets `secure: COOKIE_SECURE`, matching
+`setSessionCookie`'s own flag, since the cookie can carry that same
+live invite URL: a plain-http request in the 10 second window it
+lives for would otherwise send a bearer credential in cleartext.
 
 ## Why is the active slot pointer a flat file?
 
