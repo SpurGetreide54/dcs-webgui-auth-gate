@@ -286,6 +286,10 @@ fi
 cp -r "$ROOT_DIR/node_modules" "$INSTALL_DIR/releases/a/node_modules"
 chown -R "$SERVICE_ACCOUNT:$SERVICE_ACCOUNT" "$INSTALL_DIR/releases"
 
+# a custom state dir (--state-dir) may not exist yet, unlike
+# $INSTALL_DIR itself, which is already created above
+mkdir -p "$AUTH_GATE_STATE_DIR"
+
 # a fresh active-slot always starts at "a", an existing one is left
 # alone, see docs/Why.md#why-does-installsh-leave-an-existing-active-slot-file-alone
 if [ ! -f "$ACTIVE_SLOT_PATH" ]; then
