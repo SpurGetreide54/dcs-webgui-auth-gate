@@ -386,6 +386,7 @@ const SLUG_RE = /^[a-z0-9-]+$/;
 // kept in sync with agent.js's own copy of this pattern
 const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
 const DEFAULT_INSTANCE_NAME = "DCS.dcs_serverrelease";
+const INSTANCE_NAME_HELP = "DCS instance name must be letters, numbers, underscores, dots, and hyphens only (not dots alone).";
 
 const serversRouter = express.Router();
 serversRouter.use(auth.requireAccountManager);
@@ -410,7 +411,7 @@ serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
     return res.redirect("/admin/servers");
   }
   if (!INSTANCE_NAME_RE.test(instance_name)) {
-    flash.setFlash(res, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." });
+    flash.setFlash(res, { error: INSTANCE_NAME_HELP });
     return res.redirect("/admin/servers");
   }
   const installPath = dcs_install_path && dcs_install_path.trim() ? dcs_install_path.trim() : null;
@@ -435,7 +436,7 @@ serversRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) =
     return res.redirect("/admin/servers");
   }
   if (!INSTANCE_NAME_RE.test(instance_name)) {
-    flash.setFlash(res, { error: "DCS instance name must be letters, numbers, underscores, and hyphens only." });
+    flash.setFlash(res, { error: INSTANCE_NAME_HELP });
     return res.redirect("/admin/servers");
   }
   const installPath = dcs_install_path && dcs_install_path.trim() ? dcs_install_path.trim() : null;
