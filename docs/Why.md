@@ -729,18 +729,59 @@ in `src/updateCheck.js` re-stringifies the same keys (everything except
 reordering the fields would make a genuinely valid manifest fail
 verification.
 
-## Why does the service unit redirect stdout/stderr to the app log?
+## Why does the service unit redirect stdout/stderr to their own file, not the app log?
 
 A true native crash (a segfault, a V8 fatal error) never reaches
 `uncaughtException`, since no JS runs at all to catch it; the OS-level
 `StandardOutput=append:`/`StandardError=append:` redirect is the only
-thing that can still capture it.<br>It's pointed at the same
-`auth-gate.log` file `AUTH_GATE_LOG_PATH` already writes structured
-lines to, mirroring the Windows side's already-working
+thing that can still capture it.
+
+It used to point at the same `auth-gate.log` file `AUTH_GATE_LOG_PATH`
+already writes structured lines to, mirroring the Windows side's
 `AGENT_LOG_FILE`/NSSM `AppStdout`/`AppStderr` pairing, so one crash
-dump can land mid-file without a viewer change: `appLog.js`'s
+dump could land mid-file without a viewer change (`appLog.js`'s
 `readRecentEntries` already renders a line that fails to parse as
-JSON as a raw row instead of breaking the page.
+JSON as a raw row instead of breaking the page). That turned out to
+cause two confirmed problems, both reproduced directly rather than
+just reasoned about:
+
+1. **Every ordinary log line was written twice.** `appLog.js`'s
+   `installConsoleCapture()` calls both the original `console.*`
+   method (real stdout/stderr, captured by the OS redirect into
+   `auth-gate.log`) and its own `appendLine()` (a second, direct
+   `fs.appendFileSync` into the same file). One `console.log()` call
+   produced two lines — the plain message and the structured JSON —
+   doubling every row `/admin/logs` showed.
+2. **Rotation leaked disk, invisibly.** `appendLine()` rotates by
+   `fs.renameSync`-ing the live file to `.1`. systemd opens its
+   `StandardOutput`/`StandardError` fd once, at service start, and
+   keeps it open for the service's whole lifetime — a rename doesn't
+   follow that fd. After one rotation, systemd's fd keeps writing into
+   the now-`.1` file; after a second, that file is itself renamed away
+   again, and systemd's fd is left attached to a fully unlinked inode —
+   invisible to `ls -l` on the directory, discoverable only via `ls -l
+   /proc/<pid>/fd`, growing without bound for as long as the service
+   runs.
+
+The Windows mission agent doesn't share this: `agent.js`'s own
+`installConsoleCapture()` only ever calls the *original* console
+method with the JSON-formatted line — there's no second, independent
+file write or rotation logic anywhere in `agent.js`. NSSM's
+`AppStdout`/`AppStderr` is the only writer and `AppRotateOnline=1` the
+only rotator, and NSSM reopens its own handle on rotation, so there's
+no second writer and no stale-fd race to begin with.
+
+The fix gives the OS-level redirect its own dedicated
+`auth-gate-native-crash.log`, decoupled from the self-rotated
+structured log (`scripts/linux/install.sh`'s `NATIVE_CRASH_LOG_PATH`).
+A genuine crash is still captured — that redirect's only job — and
+`/admin/logs` no longer doubles every line. The cost: a crash dump no
+longer lands inline in the same timeline `/admin/logs` shows, so an
+admin checks the dedicated file separately over SSH. That file sees
+nothing under normal operation (only a real segfault/V8 fatal writes
+to it, which kills the process and triggers `Restart=always`), so its
+own unbounded growth is no longer an invisible leak, just an ordinary,
+visible, by-name file that only ever grows on a rare real crash.
 
 ## Why is the rollback a separate systemd unit?
 
