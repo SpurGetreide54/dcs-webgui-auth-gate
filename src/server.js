@@ -813,20 +813,30 @@ function loadMissionAccess(req) {
   };
 }
 
-// ask the agent for one instance's mission list
+// ask the agent for one instance's mission list, rejecting any reply
+// the view can't safely render instead of letting it throw later
 async function fetchMissionsList(instanceName) {
   const url = new URL(`/missions/${encodeURIComponent(instanceName)}`, MISSION_AGENT_URL);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
   if (!res.ok) throw new Error(`agent returned ${res.status}`);
-  return (await res.json()).missions;
+  const { missions } = await res.json();
+  if (!Array.isArray(missions) || missions.some((m) => typeof m?.modifiedAt !== "string")) {
+    throw new Error("agent returned a malformed missions list");
+  }
+  return missions;
 }
 
-// ask the agent for one instance's trashed-mission list
+// ask the agent for one instance's trashed-mission list, same shape
+// check as fetchMissionsList above
 async function fetchTrashList(instanceName) {
   const url = new URL(`/missions/${encodeURIComponent(instanceName)}/trash`, MISSION_AGENT_URL);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
   if (!res.ok) throw new Error(`agent returned ${res.status}`);
-  return (await res.json()).trash;
+  const { trash } = await res.json();
+  if (!Array.isArray(trash) || trash.some((t) => typeof t?.trashedAt !== "string")) {
+    throw new Error("agent returned a malformed trash list");
+  }
+  return trash;
 }
 
 // render the missions page, loading the list only if this admin can view it
@@ -855,9 +865,9 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
     .send(views.missionsPage({ admin: req.admin, server: req.dcsServer, access, missions, trash, error: pageError, notice }));
 }
 
-app.get("/s/:slug/missions", requireServerAccess({ permission: "any-mission" }), (req, res) => {
-  renderMissionsPage(req, res, flash.readFlash(req, res));
-});
+app.get("/s/:slug/missions", requireServerAccess({ permission: "any-mission" }), asyncHandler(async (req, res) => {
+  await renderMissionsPage(req, res, flash.readFlash(req, res));
+}));
 
 // redirects after every outcome so reloading the result page never
 // resubmits the same file, unlike download/trash below (download

@@ -76,6 +76,10 @@ const AGENT_TOKEN = "test-agent-token";
 let dummyAgentLogText = "";
 let dummyAgentLogsShouldFail = false;
 
+// overrides dummyAgent's get /missions/:instance body, set per test;
+// null means the default { missions: [] } below
+let dummyAgentMissionsOverride = null;
+
 // stands in for the real github api updateCheck.js's checkForUpdate()
 // reaches, set per test via dummyGithubRespond
 let dummyGithub, dummyGithubBase;
@@ -99,9 +103,18 @@ test.before(async () => {
         return res.end(dummyAgentLogText);
       }
       res.writeHead(200, { "Content-Type": "application/json" });
+      // a trash list get needs its own { trash: [...] } shape, distinct
+      // from the plain list's { missions: [...] }, matching src/agent.js
+      if (req.method === "GET" && req.url.startsWith("/missions/") && req.url.endsWith("/trash")) {
+        return res.end(JSON.stringify({ trash: [] }));
+      }
       // a list get needs a real { missions: [...] } shape, not the
-      // generic { ok: true } every other stubbed endpoint returns
-      res.end(req.method === "GET" && req.url.startsWith("/missions/") ? JSON.stringify({ missions: [] }) : JSON.stringify({ ok: true }));
+      // generic { ok: true } every other stubbed endpoint returns,
+      // overridable per test to exercise a malformed reply
+      if (req.method === "GET" && req.url.startsWith("/missions/")) {
+        return res.end(JSON.stringify(dummyAgentMissionsOverride || { missions: [] }));
+      }
+      res.end(JSON.stringify({ ok: true }));
     });
   });
   dummyAgentPort = dummyAgent.address().port;
@@ -344,6 +357,25 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(missionsPageRes.status, 200, "view access must be enough to reach the missions page");
     const missionsPageHtml = await missionsPageRes.text();
     assert.doesNotMatch(missionsPageHtml, /Upload mission/, "no upload rights means no upload form is shown");
+
+    // a malformed agent reply (a real array, just missing modifiedAt on
+    // an entry) must render a clean error page, not crash the process
+    // see docs/Why.md#why-does-every-async-handler-need-asynchandler
+    dummyAgentMissionsOverride = { missions: [{ name: "x", size: 1 }] };
+    try {
+      const malformedRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: serverAdminCookie } });
+      assert.equal(malformedRes.status, 200, "a malformed agent reply must not 500 or crash the process");
+      const malformedHtml = await malformedRes.text();
+      assert.match(malformedHtml, /Could not reach the mission agent/, "a malformed reply must show the usual agent-error message");
+      assert.doesNotMatch(malformedHtml, /class="mission-date"/, "no mission row must be rendered from a malformed reply");
+    } finally {
+      dummyAgentMissionsOverride = null;
+    }
+
+    // confirms the process itself survived the malformed reply above,
+    // not just that this one request got an error response
+    const stillAliveAfterMalformedRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
+    assert.equal(stillAliveAfterMalformedRes.status, 200, "the server must still answer after a malformed mission agent reply");
 
     const forbiddenMissionUpload = await fetch(`${base}/s/training/missions/upload`, {
       method: "POST",
