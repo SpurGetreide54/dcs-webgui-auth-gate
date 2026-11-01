@@ -860,3 +860,67 @@ directory, not copied from the working tree's own install.<br>That
 keeps devDependencies (`esbuild`, `postject`) out of every shipped
 archive, and makes the lockfile the single source of truth for what's
 actually in it.
+
+## Why is key-state/rotation a separate signed record?
+
+`signed_updates.json` already has its own trust root (the one
+`PUBLIC_KEY_PEM` in `src/updateCheck.js`), checked on every routine
+release.<br>Folding key rotation into that same file would force its
+signature to become conditional — dual-signed only in months a
+rotation happens to land — and would recouple release cadence to
+rotation cadence for no reason. A separate record, on its own fixed
+`key-state` tag, overwritten in place, lets a leaked key get revoked
+the moment it's noticed, with no new app version and no change to how
+`signed_updates.json` itself is built or signed.
+
+## Why was a third hardcoded key, guarding a compromised GitHub account, dropped?
+
+Neither the primary nor the secondary private key ever touches
+GitHub — both live in `local-only/keys/` or the maintainer's own
+password manager.<br>`verifyKeyState()`'s own signature checks already
+mean an attacker who only has GitHub account or token access can, at
+most, delete or replace the `key-state` release's asset with
+something that fails verification (denial of service), never get a
+forged rotation accepted. A third key would guard against a threat
+that doesn't exist here.
+
+## Why is tooling split into automatable and user-run-only halves?
+
+The secondary private key is the only thing that makes rotating
+primary a real two-key decision rather than theater.<br>As long as it
+is read only by a script the user runs themselves, in their own
+terminal, it never has to pass through an AI coding session, no
+matter where the rest of the tooling lives. That's why
+`sign-key-state-with-secondary.js` is a separate, minimal script that
+reads the key and prints only the resulting signature — never the key
+itself, never a finished, publishable file — leaving the actual
+publish step to `rotate-key.js primary-finalize`, which only ever
+touches that pasted-back signature.
+
+## Why do key rotation constants live in their own file?
+
+`db.js` seeds `key_state`'s initial row from the two hardcoded public
+keys, and needs them at module load time, before anything else is
+set up.<br>Putting them in `src/keyRotation.js` instead would force
+`db.js` to require a module that itself requires `db.js`, the same
+circular-dependency shape `updateConstants.js` already exists to
+avoid for the version-check side.
+
+## Why is next_target_rotation_at jittered?
+
+A fixed 30-day clock would make the exact day of the next rotation
+predictable from the previous one's own timestamp.<br>Jittering it a
+few days either way, computed fresh each time a rotation is applied,
+only helps against an attacker trying to time an attack around that
+moment — it does nothing to shrink how long an already-stolen key
+stays usable before someone notices and rotates it by hand.
+
+## Why is there no admin UI surface for key rotation?
+
+This is not a deployer or site-admin concern at all — every
+deployment trusts the same two keys this project's own maintainer
+controls, the same person who already runs `rotate-key.js` by
+hand.<br>No individual deployment ever rotates its own keys, so
+there is nothing for an admin UI to expose. Checking `key_state`
+directly in the database, the same way `update_state` is checked, is
+enough for the one person who ever needs to.
