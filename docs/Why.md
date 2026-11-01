@@ -958,6 +958,29 @@ keeps devDependencies (`esbuild`, `postject`) out of every shipped
 archive, and makes the lockfile the single source of truth for what's
 actually in it.
 
+## Why doesn't applyUpdate() run npm install in the new slot?
+
+It used to, right after staging. Removed after reproducing on the
+real production VM: that service account is created with `useradd
+--no-create-home`, so `HOME` resolves to `/nonexistent`.<br>The moment
+npm needed to touch its cache for anything beyond a no-op, it died
+with `EACCES: permission denied, mkdir '/nonexistent'`, aborting the
+whole update before the active-slot pointer ever flipped.
+
+The staged slot's `node_modules` is already complete and correct: it
+comes straight from the same archive `npm ci --omit=dev` built
+against its own pinned lockfile, see "Why is node_modules rebuilt
+fresh instead of copied?" above.<br>There's nothing left for a second
+`npm install` to do, confirmed on the real VM too: run against that
+already-correct `node_modules`, the same command reports "up to date"
+and exits clean without ever touching the cache.
+
+The one native dependency, `better-sqlite3`, uses N-API
+(`NAPI_VERSION=10` in its own `binding.gyp`) and ships a prebuilt
+binary per platform, both specifically so it never needs rebuilding
+for a different Node version. Whatever the original motivation was,
+an ABI mismatch was never actually a risk for this dependency.
+
 ## Why is key-state/rotation a separate signed record?
 
 `signed_updates.json` already has its own trust root (`key_state`'s
