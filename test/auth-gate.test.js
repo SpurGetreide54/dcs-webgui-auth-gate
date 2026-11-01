@@ -163,6 +163,18 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
   ).run("community1", "Example Server - Community 1", "community1");
 
   try {
+    // a repeated form field parses to an array under extended:false,
+    // which must hit the normal "required" error, not a 500 crash
+    const repeatedSetupFieldRes = await fetch(`${base}/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=siteadmin&password=a&password=b",
+      redirect: "manual",
+    });
+    assert.equal(repeatedSetupFieldRes.status, 302, "a repeated field must redirect with the normal error, not 500");
+    const repeatedSetupFollow = await fetch(`${base}/setup`, { headers: { Cookie: extractCookie(repeatedSetupFieldRes) } });
+    assert.match(await repeatedSetupFollow.text(), /Username required, password must be at least 12 characters/);
+
     // /setup creates the first admin with full access
     const setupRes = await fetch(`${base}/setup`, {
       method: "POST",
@@ -177,6 +189,18 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // /setup is a one-time door, must 404 now that an admin exists
     const setupAgainRes = await fetch(`${base}/setup`);
     assert.equal(setupAgainRes.status, 404, "/setup must 404 once an admin account exists");
+
+    // a repeated form field parses to an array under extended:false,
+    // which must hit the normal "required" error, not a 500 crash
+    const repeatedLoginFieldRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=a&username=b&password=x",
+      redirect: "manual",
+    });
+    assert.equal(repeatedLoginFieldRes.status, 302, "a repeated field must redirect with the normal error, not 500");
+    const repeatedLoginFollow = await fetch(`${base}/login`, { headers: { Cookie: extractCookie(repeatedLoginFieldRes) } });
+    assert.match(await repeatedLoginFollow.text(), /Username and password required/);
 
     // dashboard shows the site admin's (full) access
     const dashRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });

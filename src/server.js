@@ -79,6 +79,14 @@ function setSessionCookie(res, token) {
   });
 }
 
+// true only if every named body field is a plain string, not an
+// array or missing -- a repeated form field key parses to an array
+// under express.urlencoded, which would otherwise reach
+// .toLowerCase()/.length/hashPassword downstream and throw
+function allStrings(body, names) {
+  return names.every((name) => typeof body[name] === "string");
+}
+
 // section: /setup, only reachable while no admin accounts exist yet
 
 app.get("/setup", (req, res) => {
@@ -89,7 +97,7 @@ app.get("/setup", (req, res) => {
 app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
   if (adminCount() > 0) return res.status(404).send("Not found.");
   const { username, password } = req.body;
-  if (!username || !password || password.length < 12) {
+  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < 12) {
     flash.setFlash(res, { error: "Username required, password must be at least 12 characters." });
     return res.redirect("/setup");
   }
@@ -116,7 +124,7 @@ app.get("/login", (req, res) => {
 
 app.post("/login", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
-  if (!username || !password) {
+  if (!allStrings(req.body || {}, ["username", "password"]) || !username || !password) {
     flash.setFlash(res, { error: "Username and password required." });
     return res.redirect("/login");
   }
@@ -163,7 +171,7 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
   if (!invite) return res.status(404).send(views.inviteExpiredPage());
 
   const { username, password, confirm_password } = req.body;
-  if (!username || !password || !confirm_password) {
+  if (!allStrings(req.body, ["username", "password", "confirm_password"]) || !username || !password || !confirm_password) {
     flash.setFlash(res, { error: "All fields are required." });
     return res.redirect(`/invite/${req.params.token}`);
   }
@@ -241,7 +249,7 @@ accountsRouter.get("/", (req, res) => {
 // see docs/Why.md#why-does-changing-your-password-sign-out-every-other-session
 accountsRouter.post("/change-password", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
-  if (!current_password || !new_password || !confirm_password) {
+  if (!allStrings(req.body, ["current_password", "new_password", "confirm_password"]) || !current_password || !new_password || !confirm_password) {
     flash.setFlash(res, { error: "All password fields are required." });
     return res.redirect("/admin/accounts");
   }
@@ -322,7 +330,7 @@ accountsRouter.post("/invites/:id/revoke", auth.requireAccountManager, (req, res
 
 accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const { username, password, can_manage_accounts } = req.body;
-  if (!username || !password || password.length < 12) {
+  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < 12) {
     flash.setFlash(res, { error: "Username required, password must be at least 12 characters." });
     return res.redirect("/admin/accounts");
   }
