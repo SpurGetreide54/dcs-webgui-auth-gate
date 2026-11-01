@@ -312,6 +312,26 @@ test(
   }
 );
 
+test(
+  "applyUpdate refuses a downgrade on its own, even if it's called without checkForUpdate ever offering it",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: "0.0.1",
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "a".repeat(64) }],
+    });
+    serveManifest(manifest);
+
+    // called directly, never through checkForUpdate, proving the guard
+    // is applyUpdate()'s own, matching the message rules out a false
+    // pass from the fake download url instead actually being reached
+    await assert.rejects(() => updateCheck.applyUpdate(), /not newer/);
+  }
+);
+
 test("checkForUpdate rejects and still records the attempt when the check fails", async () => {
   // no real key needed, a throwaway key the hardcoded public key will
   // never accept, so this runs unconditionally unlike the two tests above

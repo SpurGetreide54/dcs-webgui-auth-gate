@@ -248,6 +248,12 @@ async function applyUpdate() {
   console.debug(`Update: starting applyUpdate()...`);
   const manifest = await fetchVerifiedManifest();
   console.debug(`Update: verified manifest for version ${manifest.version}.`);
+  // refuses a downgrade the same way checkForUpdate does, the only
+  // check that actually gates an install, regardless of which path
+  // triggered it, see docs/Why.md#why-does-checkforupdate-reject-a-lower-or-equal-version
+  if (!isVersionGreater(manifest.version, getCurrentVersion())) {
+    throw new Error(`Offered version ${manifest.version} is not newer than the current ${getCurrentVersion()}, refusing to install.`);
+  }
   const scratchDir = await fsp.mkdtemp(path.join(os.tmpdir(), "dcs-auth-gate-update-"));
   try {
     const authGateDownload = findDownload(manifest, "auth-gate");
