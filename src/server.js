@@ -1046,6 +1046,12 @@ function loadWebguiIndexTemplate(root) {
 let webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 
 app.get("/s/:slug/", requireServerAccess(), (req, res) => {
+  // a bare /s/<slug> still matches this route, but the browser's
+  // address bar needs the trailing slash too or its own relative
+  // asset urls resolve wrong, see docs/Why.md#why-does-s-slug-redirect-to-add-its-own-trailing-slash
+  if (!req.path.endsWith("/")) {
+    return res.redirect(302, `${req.path}/${req.url.slice(req.path.length)}`);
+  }
   if (!webguiIndexTemplate) {
     return res.status(503).send("The DCS webgui bundle is not installed on this server yet.");
   }

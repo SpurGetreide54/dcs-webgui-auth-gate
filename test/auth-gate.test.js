@@ -443,6 +443,18 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(forbiddenRestore.status, 403, "download rights alone must not allow restoring from trash");
 
+    // a bare /s/<slug> (no trailing slash) must redirect, not serve
+    // the index at the wrong base, see docs/Why.md#why-does-s-slug-redirect-to-add-its-own-trailing-slash
+    const noSlashRes = await fetch(`${base}/s/training`, { headers: { Cookie: siteAdminCookie }, redirect: "manual" });
+    assert.equal(noSlashRes.status, 302);
+    assert.equal(noSlashRes.headers.get("location"), "/s/training/");
+
+    const noSlashWithQueryRes = await fetch(`${base}/s/training?x=1`, { headers: { Cookie: siteAdminCookie }, redirect: "manual" });
+    assert.equal(noSlashWithQueryRes.headers.get("location"), "/s/training/?x=1", "the query string must survive the redirect");
+
+    const followedRes = await fetch(`${base}/s/training`, { headers: { Cookie: siteAdminCookie } });
+    assert.match(await followedRes.text(), /<div id="app">/, "following the redirect must still land on a working page");
+
     // the real webgui's own static bundle is served under /s/<slug>/
     const webguiRes = await fetch(`${base}/s/training/`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(webguiRes.status, 200);
