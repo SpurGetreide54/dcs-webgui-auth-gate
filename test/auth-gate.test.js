@@ -647,7 +647,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
       body: `slug=community3&name=X&instance_name=${encodeURIComponent("../escape")}`,
     });
-    assert.match(await badInstanceRes.text(), /DCS instance name must be letters, numbers, underscores, and hyphens only/);
+    assert.match(await badInstanceRes.text(), /DCS instance name must be letters, numbers, underscores, dots, and hyphens only/);
 
     // edit the server
     const editServerRes = await fetch(`${base}/admin/servers/${newServerRow.id}`, {
