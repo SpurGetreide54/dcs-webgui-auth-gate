@@ -873,6 +873,22 @@ rotation cadence for no reason. A separate record, on its own fixed
 the moment it's noticed, with no new app version and no change to how
 `signed_updates.json` itself is built or signed.
 
+## Why does key_state seed rotated_at with a fixed date instead of install time?
+
+`verifyKeyState()`'s replay guard rejects any rotation record whose
+`rotated_at` isn't strictly newer than what's already trusted, which
+is what stops an attacker replaying an old, previously-valid
+record.<br>Seeding `primary_rotated_at`/`secondary_rotated_at` with
+the install's own first-run time meant a real rotation published
+before a given install's first run was rejected by that install
+forever, keeping it on a key that may have already been revoked. The
+seed is instead `INITIAL_KEY_ROTATED_AT` in
+`src/keyRotationConstants.js`, fixed at the date the two keys
+themselves were created and the same on every install, so it is older
+than any real rotation will ever be. No guarded migration was needed
+for this fix: `key_state` had not yet shipped in a released version
+when the bug was found.
+
 ## Why was a third hardcoded key, guarding a compromised GitHub account, dropped?
 
 Neither the primary nor the secondary private key ever touches
