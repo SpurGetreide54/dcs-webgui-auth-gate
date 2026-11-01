@@ -869,9 +869,33 @@ rotation into that same file would force its
 signature to become conditional — dual-signed only in months a
 rotation happens to land — and would recouple release cadence to
 rotation cadence for no reason. A separate record, on its own fixed
-`key-state` tag, overwritten in place, lets a leaked key get revoked
-the moment it's noticed, with no new app version and no change to how
+`key-state` tag, lets a leaked key get revoked the moment it's
+noticed, with no new app version and no change to how
 `signed_updates.json` itself is built or signed.
+
+## Why is key_state.json an append-only history instead of a single record?
+
+A rotation record's vouch signature is checked against whatever the
+*surviving* slot's key the verifying install currently has, not
+whatever the record's own author had.<br>When `key_state.json` held
+only the newest record, overwritten in place, an install that missed
+two rotations between hourly checks (secondary rotated, vouched by the
+old primary; then primary rotated, vouched by the *new* secondary)
+only ever saw the second record. Its own stored secondary was still
+the old one, so that vouch could never verify, and the install
+rejected that record and every later one forever. That is the exact
+failure key rotation exists to avoid, happening to key rotation itself.
+
+`key_state.json` is now a JSON array of every rotation record ever
+issued, oldest first, never pruned (ed25519 records are tiny; even
+decades of rotations stay negligible). `checkKeyState()` replays the
+whole array in order on every check, re-reading trusted state between
+records, so a record vouched by a key the same batch just rotated in
+verifies correctly. However far behind an install falls, it just has
+more records to replay; it can never get permanently stuck. Fixed
+before the feature's first real use: no `key_state.json` had ever been
+published, so there was no live consumer of the old single-record
+format to migrate.
 
 ## Why does verifyManifest read key_state instead of a hardcoded constant?
 
