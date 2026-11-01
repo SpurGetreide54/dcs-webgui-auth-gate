@@ -343,9 +343,12 @@ validly-signed manifest could still be offered as GitHub's "latest"
 (a compromised GitHub account replacing the release asset, or a stale
 cache), and this app would install it as a downgrade, rolling every
 site back to a build with a known bug.<br>`isVersionGreater` parses
-each version's `X.Y.Z` numeric triple (ignoring any `-alpha`-style
-suffix, no `semver` dependency needed) and only treats a strictly
-greater manifest version as an update.<br>`checkForUpdate`'s own check
+each version's `X.Y.Z` numeric triple and, on a tied triple, a
+hand-written SemVer prerelease comparison (no `semver` dependency
+needed) so a pre-release install can still take the final release of
+the same triple -- `1.5.0-alpha` to `1.5.0-beta` to plain `1.5.0` --
+and only treats a strictly greater manifest version as an
+update.<br>`checkForUpdate`'s own check
 only guards what gets cached into `update_state` for display;
 `applyUpdate()` re-runs the identical check itself, right after
 fetching its own verified manifest, so the guard holds no matter how

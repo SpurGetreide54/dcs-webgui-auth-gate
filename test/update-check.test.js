@@ -313,6 +313,18 @@ test(
   }
 );
 
+test("isVersionGreater treats a same-triple prerelease promotion as an update (1.5.0-alpha -> 1.5.0-beta)", () => {
+  assert.equal(updateCheck.isVersionGreater("1.5.0-beta", "1.5.0-alpha"), true);
+});
+
+test("isVersionGreater treats the final release as newer than any prerelease of the same triple (1.5.0-beta -> 1.5.0)", () => {
+  assert.equal(updateCheck.isVersionGreater("1.5.0", "1.5.0-beta"), true);
+});
+
+test("isVersionGreater rejects a lower prerelease of the same triple (1.5.0-beta -> 1.5.0-alpha is not an update)", () => {
+  assert.equal(updateCheck.isVersionGreater("1.5.0-alpha", "1.5.0-beta"), false);
+});
+
 test(
   "applyUpdate refuses a downgrade on its own, even if it's called without checkForUpdate ever offering it",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
