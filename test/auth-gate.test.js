@@ -260,6 +260,21 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       assert.equal(grantRes.status, 200);
     }
 
+    // an unknown or missing server_id must 404, not crash on the db's
+    // own foreign-key/not-null constraint, and nothing gets written
+    for (const badServerId of [999999, undefined]) {
+      const permCountBefore = db.prepare("SELECT COUNT(*) AS n FROM admin_server_access WHERE admin_id = ?").get(serverAdminRow.id).n;
+      const body = badServerId === undefined ? { permission: "upload", granted: true } : { server_id: badServerId, permission: "upload", granted: true };
+      const badServerRes = await fetch(`${base}/admin/accounts/${serverAdminRow.id}/permissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: siteAdminCookie },
+        body: JSON.stringify(body),
+      });
+      assert.equal(badServerRes.status, 404);
+      const permCountAfter = db.prepare("SELECT COUNT(*) AS n FROM admin_server_access WHERE admin_id = ?").get(serverAdminRow.id).n;
+      assert.equal(permCountAfter, permCountBefore, "an unknown/missing server_id must never write a permission row");
+    }
+
     // the accounts page must render popup state matching what was
     // granted, regression check for getAccessibleServers()'s server_id gotcha
     const accountsHtmlAfterCreate = await (
@@ -895,6 +910,19 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(grantInviteViewRes.status, 200);
     const inviteGrant = invitesDb.getInviteAccess(inviteRow.id).find((g) => g.server_id === trainingServerId);
     assert.ok(inviteGrant && inviteGrant.can_view_missions, "the invite-permissions endpoint must persist the grant");
+
+    // same unknown/missing server_id guard, for the invite-permissions endpoint
+    for (const badServerId of [999999, undefined]) {
+      const accessCountBefore = invitesDb.getInviteAccess(inviteRow.id).length;
+      const body = badServerId === undefined ? { permission: "upload", granted: true } : { server_id: badServerId, permission: "upload", granted: true };
+      const badInviteServerRes = await fetch(`${base}/admin/accounts/invites/${inviteRow.id}/permissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: siteAdminCookie },
+        body: JSON.stringify(body),
+      });
+      assert.equal(badInviteServerRes.status, 404);
+      assert.equal(invitesDb.getInviteAccess(inviteRow.id).length, accessCountBefore, "an unknown/missing server_id must never write an invite permission row");
+    }
 
     // revoke deletes it outright
     const revokeInviteRes = await fetch(`${base}/admin/accounts/invites/${inviteRow.id}/revoke`, {

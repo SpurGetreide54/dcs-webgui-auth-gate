@@ -287,6 +287,7 @@ accountsRouter.post("/:id/permissions", auth.requireAccountManager, express.json
   const granted = Boolean(req.body?.granted);
   if (!TOGGLEABLE_PERMISSIONS.has(permission)) return res.status(400).json({ error: "Unknown permission." });
   if (!db.prepare("SELECT 1 FROM admins WHERE id = ?").get(targetId)) return res.status(404).json({ error: "No such account." });
+  if (!serversDb.getServerById(serverId)) return res.status(404).json({ error: "No such server." });
   serversDb.setPermission(targetId, serverId, permission, granted);
   res.json({ ok: true });
 });
@@ -299,6 +300,7 @@ accountsRouter.post("/invites/:id/permissions", auth.requireAccountManager, expr
   const granted = Boolean(req.body?.granted);
   if (!TOGGLEABLE_PERMISSIONS.has(permission)) return res.status(400).json({ error: "Unknown permission." });
   if (!invitesDb.getValidInviteById(inviteId)) return res.status(404).json({ error: "That invite has expired or no longer exists." });
+  if (!serversDb.getServerById(serverId)) return res.status(404).json({ error: "No such server." });
   invitesDb.setInvitePermission(inviteId, serverId, permission, granted);
   res.json({ ok: true });
 });
