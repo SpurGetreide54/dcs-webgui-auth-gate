@@ -7,6 +7,10 @@ const Database = require("better-sqlite3");
 // sqlite_path (or auth_gate_state_dir) in .env
 const { SQLITE_PATH } = require("./stateDir");
 
+// the key-rotation trust root's two initial public keys, for seeding
+// key_state below
+const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM } = require("./keyRotationConstants");
+
 // a fresh clone has no local-only/ on disk at all, make sure it exists
 fs.mkdirSync(path.dirname(SQLITE_PATH), { recursive: true });
 
@@ -119,12 +123,32 @@ db.exec(`
     -- env vars read once at process startup, never rechecked until restart
     deprecated_env_vars_detected TEXT NOT NULL DEFAULT ''
   );
+
+  -- single row, same id = 1 convention, the self-update signing-key
+  -- rotation trust root: two slots, checked hourly against a
+  -- dedicated github release tag, independent of signed_updates.json
+  -- see docs/Why.md#why-is-key-staterotation-a-separate-signed-record
+  CREATE TABLE IF NOT EXISTS key_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_checked_at TEXT,
+    primary_public_key_pem TEXT NOT NULL,
+    primary_rotated_at TEXT NOT NULL,
+    primary_next_target_rotation_at TEXT,
+    secondary_public_key_pem TEXT NOT NULL,
+    secondary_rotated_at TEXT NOT NULL,
+    secondary_next_target_rotation_at TEXT
+  );
 `);
 
 // seed the single update_state row, once, on the very first run
 db.prepare("INSERT OR IGNORE INTO update_state (id) VALUES (1)").run();
 // seed the single diagnostics_state row, same reasoning
 db.prepare("INSERT OR IGNORE INTO diagnostics_state (id) VALUES (1)").run();
+// seed the single key_state row with the two hardcoded initial keys
+db.prepare(
+  `INSERT OR IGNORE INTO key_state (id, primary_public_key_pem, primary_rotated_at, secondary_public_key_pem, secondary_rotated_at)
+   VALUES (1, ?, ?, ?, ?)`
+).run(PRIMARY_PUBLIC_KEY_PEM, new Date().toISOString(), SECONDARY_PUBLIC_KEY_PEM, new Date().toISOString());
 
 // guarded migration from the old upstream_url/mission_folder_key
 // columns, see docs/FAQ.md#why-does-this-project-exist-at-all for why
