@@ -30,7 +30,12 @@ function readFlash(req, res) {
   // cookie might carry
   const flash = {};
   for (const key of ["error", "notice", "inviteUrl"]) {
-    if (typeof parsed[key] === "string") flash[key] = parsed[key];
+    if (typeof parsed[key] !== "string") continue;
+    // inviteUrl becomes a real <a href>, unlike error/notice which are
+    // only ever displayed as text, so only an actual http(s) url is
+    // let through, see docs/Why.md#why-is-the-flash-cookie-a-plain-unsigned-cookie
+    if (key === "inviteUrl" && !/^https?:\/\//.test(parsed[key])) continue;
+    flash[key] = parsed[key];
   }
   return flash;
 }

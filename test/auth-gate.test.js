@@ -183,6 +183,21 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const stillAliveRes = await fetch(`${base}/`, { headers: { Cookie: siteAdminCookie } });
     assert.equal(stillAliveRes.status, 200, "the server must still answer after every malformed flash cookie");
 
+    // a dcs_flash inviteUrl with a non-http(s) scheme must never become
+    // a rendered link, this cookie isn't signed and a sibling subdomain
+    // could plant it, see docs/Why.md#why-is-the-flash-cookie-a-plain-unsigned-cookie
+    const scriptSchemeRes = await fetch(`${base}/admin/accounts`, {
+      headers: { Cookie: `${siteAdminCookie}; dcs_flash=${encodeURIComponent(JSON.stringify({ inviteUrl: "javascript:alert(1)" }))}` },
+    });
+    assert.equal(scriptSchemeRes.status, 200);
+    assert.doesNotMatch(await scriptSchemeRes.text(), /javascript:/, "a javascript: inviteUrl must never be rendered as a link");
+
+    // a same-shaped but legitimate-looking http(s) inviteUrl must still render
+    const httpSchemeRes = await fetch(`${base}/admin/accounts`, {
+      headers: { Cookie: `${siteAdminCookie}; dcs_flash=${encodeURIComponent(JSON.stringify({ inviteUrl: "http://evil.test/x" }))}` },
+    });
+    assert.match(await httpSchemeRes.text(), /http:\/\/evil\.test\/x/, "an http(s) inviteUrl must still render, the fix is a scheme check, not a block on this string");
+
     // create a second admin with no permissions yet, no account mgmt
     const trainingServerId = db.prepare("SELECT id FROM servers WHERE slug = ?").get("training").id;
     const createRes = await fetch(`${base}/admin/accounts`, {
