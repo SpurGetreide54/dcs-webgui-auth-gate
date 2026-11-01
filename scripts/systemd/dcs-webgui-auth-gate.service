@@ -16,6 +16,11 @@ User=dcs-webgui-auth-gate
 Group=dcs-webgui-auth-gate
 WorkingDirectory=/var/www/dcs-webgui-auth-gate
 EnvironmentFile=/var/www/dcs-webgui-auth-gate/.env
+# every file this service creates itself (sqlite + -wal/-shm,
+# auth-gate.log, webgui-sync's scratch/backup dirs) is private to
+# this account from creation, see
+# docs/Why.md#why-is-env-chmodded-600-on-every-write-instead-of-once-at-the-end
+UMask=0077
 ExecStart=/usr/bin/node launcher.js
 Restart=always
 RestartSec=5

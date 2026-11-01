@@ -180,6 +180,10 @@ set_env_value() {
   key=$2
   value=$3
   touch "$env_file"
+  # closes the window on first creation; systemd reads this file as
+  # root via EnvironmentFile=, so a root-only mode still works, see
+  # docs/Why.md#why-is-env-chmodded-600-on-every-write-instead-of-once-at-the-end
+  chmod 600 "$env_file"
   # value goes through the environment, not -v, so a literal
   # backslash in it survives: awk's -v assignment runs escape
   # processing on its argument, ENVIRON does not
@@ -189,6 +193,10 @@ set_env_value() {
     { print }
     END { if (!found) print k"="v }
   ' "$env_file" > "$env_file.tmp"
+  # the tmp file's own mode is what survives the mv below (a rename
+  # on the same filesystem), not the old file's mode, so it needs its
+  # own chmod rather than one chmod at the very end
+  chmod 600 "$env_file.tmp"
   mv "$env_file.tmp" "$env_file"
 }
 

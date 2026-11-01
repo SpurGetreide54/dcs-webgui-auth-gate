@@ -983,6 +983,24 @@ the already-installed `dcs-webgui-auth-gate.service`'s own
 source of truth checked before `.env`'s own location can even be
 known.
 
+## Why is .env chmodded 600 on every write, instead of once at the end?
+
+`set_env_value` writes through a `touch`, an awk redirect into a
+`.tmp` file, and a `mv`.<br>`mv` on the same filesystem is a rename,
+so the file that survives it carries whichever mode the `.tmp` file
+had, not whatever mode the old `.env` had — a single `chmod` at the
+very end of `install.sh` would still leave every intermediate write
+briefly world-readable under the default `0644` umask.<br>Chmodding
+right after `touch` (first creation) and right before every `mv`
+(every later call) closes that window on both paths.<br>`UMask=0077`
+in the service unit covers the other half: every file the running
+service creates itself (the sqlite db plus its `-wal`/`-shm` files,
+`auth-gate.log`, the webgui-sync scratch and backup dirs) is private
+from creation, not just `.env`.<br>The rollback unit, which appends
+to the native-crash log, needs neither: it runs as root with no
+`User=`/`UMask=` of its own, and root bypasses file-mode checks
+entirely on Linux, so tightening that file's mode can't block it.
+
 ## Why does assertNoBrokenTableForms exist?
 
 A `<form>` can't legally wrap a `<tr>`/`<td>`.<br>Browsers silently
