@@ -275,16 +275,23 @@ if ! getent passwd "$SERVICE_ACCOUNT" >/dev/null 2>&1; then
 fi
 
 # section: a/b layout, mirrors docs/A-B-Self-Update.md's prerequisites
-echo "==> Seeding releases/a from $ROOT_DIR"
-mkdir -p "$INSTALL_DIR/releases/a" "$INSTALL_DIR/releases/b"
-rsync -a --exclude releases --exclude local-only --exclude webgui-static --exclude node_modules \
-  "$ROOT_DIR/" "$INSTALL_DIR/releases/a/"
-if [ ! -d "$ROOT_DIR/node_modules" ]; then
-  echo "==> $ROOT_DIR/node_modules not found. A release download already includes it; a git checkout needs npm install first." >&2
-  exit 1
+# only on a true first install: once active-slot exists, the
+# self-update system is the sole owner of releases/*'s contents, see
+# docs/Why.md#why-does-installsh-leave-an-existing-active-slot-file-alone
+if [ ! -f "$ACTIVE_SLOT_PATH" ]; then
+  echo "==> Seeding releases/a from $ROOT_DIR"
+  mkdir -p "$INSTALL_DIR/releases/a" "$INSTALL_DIR/releases/b"
+  rsync -a --exclude releases --exclude local-only --exclude webgui-static --exclude node_modules \
+    "$ROOT_DIR/" "$INSTALL_DIR/releases/a/"
+  if [ ! -d "$ROOT_DIR/node_modules" ]; then
+    echo "==> $ROOT_DIR/node_modules not found. A release download already includes it; a git checkout needs npm install first." >&2
+    exit 1
+  fi
+  cp -r "$ROOT_DIR/node_modules" "$INSTALL_DIR/releases/a/node_modules"
+  chown -R "$SERVICE_ACCOUNT:$SERVICE_ACCOUNT" "$INSTALL_DIR/releases"
+else
+  echo "==> releases/ already deployed, leaving it to the self-update system"
 fi
-cp -r "$ROOT_DIR/node_modules" "$INSTALL_DIR/releases/a/node_modules"
-chown -R "$SERVICE_ACCOUNT:$SERVICE_ACCOUNT" "$INSTALL_DIR/releases"
 
 # a custom state dir (--state-dir) may not exist yet, unlike
 # $INSTALL_DIR itself, which is already created above
