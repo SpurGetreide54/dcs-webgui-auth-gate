@@ -31,6 +31,17 @@ admins on the internet
    physical host  (DCS gameservers + mission-agent)
 ```
 
+## Why no HOST/BIND_ADDRESS setting?
+
+`app.listen(PORT)` binds every interface, with no bind-address
+control.<br>On a single-NIC-per-VM deployment — the only one this
+project is built and tested against, and the only shape described
+above — there is nothing to bind to differently from `0.0.0.0`: the
+VM has exactly one address into its network either way.<br>The real
+boundary is the firewall: only the reverse proxy's address may reach
+this port.<br>A `HOST`/`BIND_ADDRESS` env var would be dead weight
+here, and on any similarly-shaped deployment.
+
 ## Two genuinely separate physical machines
 
 Nothing in the code assumes the auth-gate and the DCS host share one
