@@ -19,6 +19,7 @@ const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
 const updateCheck = require("./updateCheck");
 const diagnostics = require("./diagnostics");
+const keyRotation = require("./keyRotation");
 const settings = require("./settings");
 const appLog = require("./appLog");
 const flash = require("./flash");
@@ -1179,6 +1180,7 @@ function start() {
   const controlProxyServer = serverProxy.startControlProxy();
   updateCheck.startHourlyCheck();
   diagnostics.startDiagnosticsCheck();
+  keyRotation.startKeyStateCheck();
   // explicit db.close() on shutdown
   // see docs/Why.md#why-does-shutdown-call-db-close-explicitly
   for (const signal of ["SIGTERM", "SIGINT"]) {
