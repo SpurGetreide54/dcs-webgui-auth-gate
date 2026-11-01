@@ -15,8 +15,8 @@ const { CHECK_INTERVAL_MS } = require("./updateCheck");
 // of the real github api, same env var updateCheck.js reads
 const GITHUB_API_BASE = process.env.GITHUB_API_BASE_OVERRIDE || "https://api.github.com";
 
-// fixed release tag the rotation record is published under, never a
-// version tag, overwritten in place on every rotation
+// fixed release tag the rotation history is published under, never a
+// version tag, its one asset reuploaded in place on every rotation
 const KEY_STATE_TAG = "key-state";
 
 // how far out the next target rotation lands, jittered so the exact
@@ -37,7 +37,7 @@ function setKeyStateLastCheckedAt(lastCheckedAt) {
   db.prepare("UPDATE key_state SET last_checked_at = ? WHERE id = 1").run(lastCheckedAt);
 }
 
-// section: fetching the rotation record
+// section: fetching the rotation history
 
 // fetch a url and parse its response as json
 async function fetchJson(url) {
@@ -46,9 +46,11 @@ async function fetchJson(url) {
   return res.json();
 }
 
-// fetch the key-state release's own asset, null if no rotation has
-// ever been published, the normal state for most deployments
-async function fetchKeyStateRecord() {
+// fetch the key-state release's own asset: every rotation record ever
+// issued, oldest first, or null if no rotation has ever been
+// published, the normal state for most deployments, see
+// docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
+async function fetchKeyStateHistory() {
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/tags/${KEY_STATE_TAG}`;
   const res = await fetch(url, { headers: { "User-Agent": "dcs-webgui-auth-gate-key-state-check" } });
   // branch: no rotation has ever been published under this tag
@@ -134,13 +136,22 @@ function applyKeyStateRecord(record) {
 async function checkKeyState() {
   const now = new Date().toISOString();
   try {
-    const record = await fetchKeyStateRecord();
-    // branch: a rotation record was published, check it before trusting it
-    if (record) {
-      if (verifyKeyState(record, getKeyState())) {
-        applyKeyStateRecord(record);
-      } else {
-        console.warn(`Key-state record for slot "${record.rotated_slot}" failed verification, ignoring.`);
+    const history = await fetchKeyStateHistory();
+    // branch: at least one rotation has ever been published, replay
+    // it in order so a record vouched by a key the same batch just
+    // rotated in verifies against the now-current state, not a stale one
+    if (history) {
+      for (const record of history) {
+        const currentState = getKeyState();
+        const currentRotatedAt = currentState[`${record.rotated_slot}_rotated_at`];
+        // skip: already applied or older than what's trusted, not a
+        // verification failure, so it's never logged as one
+        if (new Date(record.rotated_at).getTime() <= new Date(currentRotatedAt).getTime()) continue;
+        if (verifyKeyState(record, currentState)) {
+          applyKeyStateRecord(record);
+        } else {
+          console.warn(`Key-state record for slot "${record.rotated_slot}" dated ${record.rotated_at} failed verification, ignoring.`);
+        }
       }
     }
     setKeyStateLastCheckedAt(now);

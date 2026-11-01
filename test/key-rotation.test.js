@@ -69,12 +69,12 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-function serveKeyStateRecord(record) {
+function serveKeyStateHistory(records) {
   dummyGithubRespond = (req, res) => {
     if (req.url.includes(`/releases/tags/${keyRotation.KEY_STATE_TAG}`)) {
       sendJson(res, 200, { assets: [{ name: "key_state.json", browser_download_url: `${dummyGithubBase}/key_state.json` }] });
     } else {
-      sendJson(res, 200, record);
+      sendJson(res, 200, records);
     }
   };
 }
@@ -248,7 +248,7 @@ test("checkKeyState applies a verified secondary rotation and sets a jittered ne
     newSecondaryPriv,
     primaryPriv
   );
-  serveKeyStateRecord(record);
+  serveKeyStateHistory([record]);
 
   await keyRotation.checkKeyState();
   const after = keyRotation.getKeyState();
@@ -269,12 +269,41 @@ test("checkKeyState ignores (does not apply) a record that fails verification, b
     newSecondaryPriv,
     impostorPriv // not the trusted primary
   );
-  serveKeyStateRecord(record);
+  serveKeyStateHistory([record]);
 
   await keyRotation.checkKeyState();
   const after = keyRotation.getKeyState();
   assert.ok(after.last_checked_at);
   assert.equal(after.secondary_public_key_pem, before.secondary_public_key_pem, "an unverified record must never be applied");
+});
+
+test("checkKeyState catches up through two missed rotations replayed in one history", async () => {
+  // same throwaway-primary workaround as the single-rotation test above
+  const { publicKey: oldPrimaryPub, privateKey: oldPrimaryPriv } = freshKeypair();
+  db.prepare("UPDATE key_state SET primary_public_key_pem = ? WHERE id = 1").run(pem(oldPrimaryPub));
+
+  const { publicKey: newSecondaryPub, privateKey: newSecondaryPriv } = freshKeypair();
+  const { publicKey: newPrimaryPub, privateKey: newPrimaryPriv } = freshKeypair();
+
+  // first missed rotation: secondary rotates, vouched by the old primary
+  const secondaryRecord = signRecord(
+    { rotated_slot: "secondary", new_public_key_pem: pem(newSecondaryPub), rotated_at: new Date(Date.now() + 3000).toISOString() },
+    newSecondaryPriv,
+    oldPrimaryPriv
+  );
+  // second missed rotation: primary rotates, vouched by the NEW secondary,
+  // only valid once secondaryRecord above has already been applied
+  const primaryRecord = signRecord(
+    { rotated_slot: "primary", new_public_key_pem: pem(newPrimaryPub), rotated_at: new Date(Date.now() + 4000).toISOString() },
+    newPrimaryPriv,
+    newSecondaryPriv
+  );
+  serveKeyStateHistory([secondaryRecord, primaryRecord]);
+
+  await keyRotation.checkKeyState();
+  const after = keyRotation.getKeyState();
+  assert.equal(after.secondary_public_key_pem, pem(newSecondaryPub), "the missed secondary rotation must still apply");
+  assert.equal(after.primary_public_key_pem, pem(newPrimaryPub), "the primary rotation, vouched by a key only this same check just rotated in, must still apply");
 });
 
 test("checkKeyState still records the attempt when the fetch itself fails", async () => {
@@ -297,14 +326,17 @@ test(
     const releaseDir = path.join(__dirname, "..", "local-only", "release");
     const secondaryPath = path.join(keysDir, "key-rotation-secondary.pem");
     const secondaryPubPath = path.join(keysDir, "key-rotation-secondary.pub.pem");
+    const historyPath = path.join(keysDir, "key-rotation-history.json");
     const backupSecondary = fs.existsSync(secondaryPath) ? fs.readFileSync(secondaryPath) : null;
     const backupSecondaryPub = fs.existsSync(secondaryPubPath) ? fs.readFileSync(secondaryPubPath) : null;
+    const backupHistory = fs.existsSync(historyPath) ? fs.readFileSync(historyPath) : null;
     try {
       execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "release", "rotate-key.js"), "secondary"], {
         cwd: path.join(__dirname, ".."),
         stdio: "pipe",
       });
-      const record = JSON.parse(fs.readFileSync(path.join(releaseDir, "key_state.json"), "utf8"));
+      const history = JSON.parse(fs.readFileSync(path.join(releaseDir, "key_state.json"), "utf8"));
+      const record = history.at(-1);
       const { PRIMARY_PUBLIC_KEY_PEM } = require("../src/keyRotationConstants");
       // a fully independent currentState, not the shared db row other
       // tests in this file mutate, including with future-dated
@@ -319,6 +351,45 @@ test(
       // restore whatever secondary key material existed before this test ran
       if (backupSecondary) fs.writeFileSync(secondaryPath, backupSecondary);
       if (backupSecondaryPub) fs.writeFileSync(secondaryPubPath, backupSecondaryPub);
+      if (backupHistory) fs.writeFileSync(historyPath, backupHistory);
+      else fs.rmSync(historyPath, { force: true });
+      fs.rmSync(path.join(releaseDir, "key_state.json"), { force: true });
+    }
+  }
+);
+
+test(
+  "rotate-key.js accumulates two real rotations into one published history, not an overwrite",
+  {
+    skip: !fs.existsSync(path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem"))
+      ? "local-only/keys/key-rotation-primary.pem not present on this machine"
+      : false,
+  },
+  () => {
+    const { execFileSync } = require("node:child_process");
+    const keysDir = path.join(__dirname, "..", "local-only", "keys");
+    const releaseDir = path.join(__dirname, "..", "local-only", "release");
+    const secondaryPath = path.join(keysDir, "key-rotation-secondary.pem");
+    const secondaryPubPath = path.join(keysDir, "key-rotation-secondary.pub.pem");
+    const historyPath = path.join(keysDir, "key-rotation-history.json");
+    const backupSecondary = fs.existsSync(secondaryPath) ? fs.readFileSync(secondaryPath) : null;
+    const backupSecondaryPub = fs.existsSync(secondaryPubPath) ? fs.readFileSync(secondaryPubPath) : null;
+    const backupHistory = fs.existsSync(historyPath) ? fs.readFileSync(historyPath) : null;
+    try {
+      const run = () =>
+        execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "release", "rotate-key.js"), "secondary"], {
+          cwd: path.join(__dirname, ".."),
+          stdio: "pipe",
+        });
+      run();
+      run();
+      const history = JSON.parse(fs.readFileSync(path.join(releaseDir, "key_state.json"), "utf8"));
+      assert.equal(history.length, (backupHistory ? JSON.parse(backupHistory).length : 0) + 2, "both rotations must be present, not just the latest");
+    } finally {
+      if (backupSecondary) fs.writeFileSync(secondaryPath, backupSecondary);
+      if (backupSecondaryPub) fs.writeFileSync(secondaryPubPath, backupSecondaryPub);
+      if (backupHistory) fs.writeFileSync(historyPath, backupHistory);
+      else fs.rmSync(historyPath, { force: true });
       fs.rmSync(path.join(releaseDir, "key_state.json"), { force: true });
     }
   }

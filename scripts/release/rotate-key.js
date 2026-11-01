@@ -20,6 +20,12 @@ const RELEASE_DIR = path.join(__dirname, "..", "..", "local-only", "release");
 const DRAFT_PATH = path.join(RELEASE_DIR, "key_state.draft.json");
 const FINAL_PATH = path.join(RELEASE_DIR, "key_state.json");
 
+// the durable append-only log every rotation gets added to, kept next
+// to the key material itself since local-only/release/ gets swept
+// into local-only/release-archive/ before every routine version
+// release, see docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
+const HISTORY_PATH = path.join(KEYS_DIR, "key-rotation-history.json");
+
 // the private key file for a slot, optionally a ".next" draft copy
 function keyPath(slot, suffix = "") {
   return path.join(KEYS_DIR, `key-rotation-${slot}${suffix}.pem`);
@@ -33,6 +39,21 @@ function pubKeyPath(slot, suffix = "") {
 // fixed key order matters here, same message shape src/keyRotation.js verifies
 function keyStateMessage({ rotated_slot, new_public_key_pem, rotated_at }) {
   return Buffer.from(JSON.stringify({ rotated_slot, new_public_key_pem, rotated_at }));
+}
+
+// every rotation record ever appended, oldest first, empty if this is
+// the first rotation this machine has ever done
+function loadHistory() {
+  return fs.existsSync(HISTORY_PATH) ? JSON.parse(fs.readFileSync(HISTORY_PATH, "utf8")) : [];
+}
+
+// adds one record to the durable log and returns the full history,
+// the array rotate-key.js then publishes in full each time
+function appendToHistory(record) {
+  const history = loadHistory();
+  history.push(record);
+  fs.writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2));
+  return history;
 }
 
 // moves an existing file aside with a timestamp suffix instead of
@@ -49,7 +70,8 @@ function backupIfExists(filePath) {
 function printPublishReminder() {
   console.log("");
   console.log(`Next: create or update the GitHub Release tagged "key-state" (never a version tag),`);
-  console.log(`and upload ${FINAL_PATH} as its sole asset, overwriting any existing one in place.`);
+  console.log(`and upload ${FINAL_PATH} as its sole asset, overwriting any existing one in place --`);
+  console.log(`it now holds the full rotation history, not just this one record.`);
 }
 
 // rotating secondary: primary (already on this machine) vouches,
@@ -74,8 +96,9 @@ function rotateSecondary() {
   fs.writeFileSync(keyPath("secondary"), privateKey.export({ type: "pkcs8", format: "pem" }));
   fs.writeFileSync(pubKeyPath("secondary"), newPublicKeyPem);
 
+  const history = appendToHistory(record);
   fs.mkdirSync(RELEASE_DIR, { recursive: true });
-  fs.writeFileSync(FINAL_PATH, JSON.stringify(record, null, 2));
+  fs.writeFileSync(FINAL_PATH, JSON.stringify(history, null, 2));
   console.log(`Wrote ${FINAL_PATH}`);
   printPublishReminder();
 }
@@ -112,7 +135,7 @@ function rotatePrimaryDraft() {
 // rotating primary, finishing half: takes the signature the user
 // signed with secondary and pasted back, verifies it against the
 // secondary public key this machine already trusts, and only then
-// publishes the final record and promotes *.next.pem into place
+// publishes the updated history and promotes *.next.pem into place
 function rotatePrimaryFinalize(vouchSignature) {
   if (!vouchSignature) throw new Error("--vouch-signature is required.");
   const draft = JSON.parse(fs.readFileSync(DRAFT_PATH, "utf8"));
@@ -126,8 +149,9 @@ function rotatePrimaryFinalize(vouchSignature) {
   if (!vouchOk) throw new Error("That signature does not verify against this machine's own trusted secondary public key. Nothing was published.");
 
   const record = { ...draft, signatures: [...draft.signatures, vouchSignature] };
+  const history = appendToHistory(record);
   fs.mkdirSync(RELEASE_DIR, { recursive: true });
-  fs.writeFileSync(FINAL_PATH, JSON.stringify(record, null, 2));
+  fs.writeFileSync(FINAL_PATH, JSON.stringify(history, null, 2));
 
   backupIfExists(keyPath("primary"));
   backupIfExists(pubKeyPath("primary"));
