@@ -308,10 +308,14 @@ cache), and this app would install it as a downgrade, rolling every
 site back to a build with a known bug.<br>`isVersionGreater` parses
 each version's `X.Y.Z` numeric triple (ignoring any `-alpha`-style
 suffix, no `semver` dependency needed) and only treats a strictly
-greater manifest version as an update.<br>No deliberate-rollback path
-exists through this channel: the automatic, local,
-crash-triggered rollback unit already covers a bad release's real
-failure mode without touching GitHub at all.
+greater manifest version as an update.<br>`checkForUpdate`'s own check
+only guards what gets cached into `update_state` for display;
+`applyUpdate()` re-runs the identical check itself, right after
+fetching its own verified manifest, so the guard holds no matter how
+an install gets triggered, not only through a prior `checkForUpdate`
+call.<br>No deliberate-rollback path exists through this channel: the
+automatic, local, crash-triggered rollback unit already covers a bad
+release's real failure mode without touching GitHub at all.
 
 ## Why is the agent relay timeout only 60 seconds?
 
