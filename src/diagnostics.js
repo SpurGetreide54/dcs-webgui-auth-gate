@@ -59,7 +59,7 @@ async function checkMissionAgent() {
 // section: self-update rollback, scanned from the shared app log
 
 // records a newly-seen rollback, leaves an already-recorded one (and
-// any seen/dismissed flags an admin already set on it) untouched
+// any seen/dismissed flags already set on it) untouched
 function checkRollback() {
   const matches = appLog
     .readRecentEntries(ROLLBACK_LOG_SCAN_LINES)
@@ -84,10 +84,14 @@ function dismissRollback() {
   updateDiagnosticsState({ rollback_dismissed_at: new Date().toISOString() });
 }
 
-// called by updateCheck.js right after a successful flip: a fresh
-// update with no new rollback is itself the "resolved" signal
+// called by updateCheck.js right after a successful flip: marks the
+// current rollback resolved the same way an admin dismiss would,
+// instead of erasing it, so the unchanged log line already sitting
+// in auth-gate.log doesn't get re-detected as brand new on restart
 function clearRollback() {
-  updateDiagnosticsState({ rollback_detected_at: null, rollback_seen_at: null, rollback_dismissed_at: null });
+  const state = getDiagnosticsState();
+  if (!state.rollback_detected_at) return;
+  updateDiagnosticsState({ rollback_dismissed_at: new Date().toISOString() });
 }
 
 // section: webgui-static/ emptiness

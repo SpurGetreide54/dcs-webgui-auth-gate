@@ -184,7 +184,7 @@ for (const table of ["admin_server_access", "invite_server_access"]) {
 
 // guarded migration adding update_triggered_at, the cooldown guard's
 // own timestamp column
-// see docs/Why.md#why-does-update-state-track-when-an-update-was-triggered
+// see docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
 {
   const columns = db.prepare("PRAGMA table_info(update_state)").all().map((c) => c.name);
   if (!columns.includes("update_triggered_at")) {

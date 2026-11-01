@@ -155,9 +155,37 @@ test("dismissRollback and clearRollback", () => {
 
   diagnostics.clearRollback();
   const state = diagnostics.getDiagnosticsState();
-  assert.equal(state.rollback_detected_at, null);
-  assert.equal(state.rollback_seen_at, null);
-  assert.equal(state.rollback_dismissed_at, null);
+  assert.ok(state.rollback_detected_at, "clearRollback marks it resolved, it doesn't erase the record");
+  assert.ok(state.rollback_dismissed_at);
+});
+
+test("clearRollback survives a rescan of the same unchanged log, but a genuinely new rollback still surfaces", () => {
+  fs.rmSync(authGateLogPath, { force: true });
+  writeRollbackLine("2026-11-01T18:00:00.000Z");
+  diagnostics.checkRollback();
+  diagnostics.clearRollback();
+
+  // same log, no new line: a restart's rescan must not resurrect it
+  diagnostics.checkRollback();
+  let issues = diagnostics.getActiveIssues({
+    updateState: { last_checked_at: new Date().toISOString() },
+    updateCheckIntervalMs: 60 * 60 * 1000,
+    staleMultiplier: 3,
+  });
+  assert.ok(!issues.map((i) => i.key).includes("rollback"), "a cleared rollback must stay resolved across a rescan");
+
+  // a later, genuinely new rollback must still be detected
+  writeRollbackLine("2026-11-01T20:00:00.000Z");
+  diagnostics.checkRollback();
+  issues = diagnostics.getActiveIssues({
+    updateState: { last_checked_at: new Date().toISOString() },
+    updateCheckIntervalMs: 60 * 60 * 1000,
+    staleMultiplier: 3,
+  });
+  assert.ok(issues.map((i) => i.key).includes("rollback"), "a new rollback after a resolved one must still surface");
+
+  // leave state clean for the tests that follow
+  diagnostics.dismissRollback();
 });
 
 test("isUpdateCheckStale", () => {
