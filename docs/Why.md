@@ -583,6 +583,26 @@ rather than replacing it.<br>Trusting the full chain would let a
 client spoof `req.ip` with their own header and dodge the login rate
 limiter, so only the one real hop (nginx itself) is trusted.
 
+## Why is there a separate per-IP login throttle?
+
+The existing per-username bucket (`ip:username`) lets one IP spray
+unlimited usernames, five wrong passwords each, with no ceiling on
+total attempts or on the bcrypt-cost-12 compute each one
+costs.<br>`RATE_LIMIT_IP_MAX_ATTEMPTS` (20, four times the
+per-username ceiling) adds a second bucket keyed on IP alone, under
+its own `"login-ip"` purpose, checked alongside the per-username one
+in `/login` — either ceiling being hit blocks the attempt. 4x gives
+enough headroom for a few real usernames behind one shared NAT
+address to each mistype a password a couple of times without
+tripping it.<br>Unlike the per-username bucket, this one is never
+cleared on a successful login: one correct login out of a spray
+shouldn't reset the count, since the bucket exists specifically to
+bound a spray across many usernames, not to track one legitimate
+user's own mistakes.<br>This is defense-in-depth on top of the real
+network boundary, not a substitute for it — see
+`docs/Deployment-Topology.md`'s own note on `trust proxy` and
+`X-Forwarded-For`.
+
 ## Why do static assets get a 1-day cache lifetime?
 
 Without it, every page load or reload sends a fresh conditional

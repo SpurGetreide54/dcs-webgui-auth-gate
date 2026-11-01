@@ -748,6 +748,22 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     }
     assert.match(await lastAttempt.text(), /Too many attempts/, "6th attempt within the window should be rate-limited");
 
+    // per-IP login throttle: 21 different usernames, one failed
+    // attempt each, none anywhere near the per-username ceiling of
+    // 5, must still trip the per-IP ceiling of 20 (the 21st request
+    // is the first one to see a count of 20 already recorded),
+    // isolated via a fresh X-Forwarded-For
+    const ipSprayHeaders = { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.1.1.9" };
+    let lastSprayAttempt;
+    for (let i = 0; i < 21; i++) {
+      lastSprayAttempt = await postAndFollowFlash(`${base}/login`, {
+        method: "POST",
+        headers: ipSprayHeaders,
+        body: `username=spray-probe-${i}&password=wrong-password`,
+      });
+    }
+    assert.match(await lastSprayAttempt.text(), /Too many attempts/, "21st attempt from the same IP, across 21 distinct usernames, should trip the per-IP throttle");
+
     // change-password rate limiting, under its own bucket, same scope
     // as the login rate-limit test above (clear-on-success isn't tested either)
     let lastChangePasswordAttempt;

@@ -128,13 +128,14 @@ app.post("/login", express.urlencoded({ extended: false }), asyncHandler(async (
     flash.setFlash(res, { error: "Username and password required." });
     return res.redirect("/login");
   }
-  if (auth.isRateLimited(req, username)) {
+  if (auth.isRateLimited(req, username) || auth.isIpRateLimited(req)) {
     flash.setFlash(res, { error: "Too many attempts. Try again later." });
     return res.redirect("/login");
   }
   auth.pruneOldLoginAttempts();
   auth.pruneExpiredSessions();
   auth.recordLoginAttempt(req, username);
+  auth.recordIpLoginAttempt(req);
 
   const admin = db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
   // always run one real bcrypt compare, known username or not

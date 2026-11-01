@@ -42,6 +42,20 @@ boundary is the firewall: only the reverse proxy's address may reach
 this port.<br>A `HOST`/`BIND_ADDRESS` env var would be dead weight
 here, and on any similarly-shaped deployment.
 
+## trust proxy and X-Forwarded-For
+
+The auth-gate sets `trust proxy` to `1`: it fully trusts whatever is
+one hop upstream of the TCP connection to set `X-Forwarded-For`, and
+uses that value as `req.ip` for the login throttle.<br>This is only
+safe because the reverse proxy is that one hop — if the auth-gate's
+port were ever reachable directly, a client could set its own
+`X-Forwarded-For` and land in a fresh rate-limit bucket on every
+attempt.<br>The app port must never be reachable except through the
+reverse-proxy VM. The in-app per-IP login throttle
+(see `docs/Why.md#why-is-there-a-separate-per-ip-login-throttle`) is
+defense-in-depth on top of that network boundary, not a substitute
+for it.
+
 ## Two genuinely separate physical machines
 
 Nothing in the code assumes the auth-gate and the DCS host share one

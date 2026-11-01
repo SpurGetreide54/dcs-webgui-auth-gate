@@ -12,6 +12,11 @@ const COOKIE_REFRESH_THRESHOLD_SECONDS = 60 * 60;
 const SESSION_COOKIE = "dcs_session";
 const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
+// 4x the per-username ceiling: enough headroom for several usernames
+// behind one shared NAT address, while still bounding total
+// bcrypt-cost-12 compute a single source can spend spraying logins
+// see docs/Why.md#why-is-there-a-separate-per-ip-login-throttle
+const RATE_LIMIT_IP_MAX_ATTEMPTS = 20;
 // the one place this rule is defined; server.js and views.js both read it
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -70,6 +75,32 @@ function isRateLimited(req, username, purpose = "login") {
 // record one login attempt against this ip and username pair
 function recordLoginAttempt(req, username, purpose = "login") {
   db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(rateLimitKey(req, username, purpose));
+}
+
+// build the rate-limit bucket key for one ip alone, no username --
+// bounds a spray across many usernames, see
+// docs/Why.md#why-is-there-a-separate-per-ip-login-throttle
+function ipRateLimitKey(req) {
+  return `login-ip:${req.ip}`;
+}
+
+// true once this ip alone has hit too many attempts recently,
+// across any number of usernames
+function isIpRateLimited(req) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM login_attempts
+       WHERE key = ? AND attempted_at > datetime('now', '-' || ? || ' seconds')`
+    )
+    .get(ipRateLimitKey(req), RATE_LIMIT_WINDOW_SECONDS);
+  return row.n >= RATE_LIMIT_IP_MAX_ATTEMPTS;
+}
+
+// record one login attempt against this ip alone; never cleared on a
+// success, unlike the per-username bucket, since this bucket exists
+// specifically to bound a spray across many usernames
+function recordIpLoginAttempt(req) {
+  db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(ipRateLimitKey(req));
 }
 
 // delete attempts outside the window, called opportunistically on login
@@ -185,6 +216,8 @@ module.exports = {
   hashToken,
   isRateLimited,
   recordLoginAttempt,
+  isIpRateLimited,
+  recordIpLoginAttempt,
   pruneOldLoginAttempts,
   clearLoginAttempts,
   pruneExpiredSessions,
