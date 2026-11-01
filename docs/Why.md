@@ -641,7 +641,9 @@ caught error, taking the whole process down on the very next bug, not
 just the one that happened to be found and fixed first.<br>Confirmed
 present-day, not just a future risk: before this fix, `GET
 /missions/:instanceName`'s `Promise.all`/`fs.stat` call, `POST
-/missions/:instanceName/trash`'s `fs.mkdir`, and several other routes
+/missions/:instanceName/trash`'s `fs.mkdir`, `src/server.js`'s own
+`GET /s/:slug/missions` (a malformed mission-agent reply crashed the
+whole process, not just that one request), and several other routes
 in both `src/server.js` and `src/agent.js` ran with no `try`/`catch`
 at all.<br>`(req, res, next) => fn(req, res, next).catch(next)` is
 hand-rolled rather than a dependency (`express-async-handler` or
