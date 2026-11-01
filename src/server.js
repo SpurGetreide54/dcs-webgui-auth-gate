@@ -627,10 +627,16 @@ updateRouter.post("/check", asyncHandler(async (req, res) => {
 
 updateRouter.post("/", (req, res) => {
   // guards against a double-click firing a second applyUpdate() while
-  // one is already in flight, see docs/Why.md#why-does-update-state-track-when-an-update-was-triggered
+  // one is already in flight, see docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
   const cooldownUntil = updateCheck.getUpdateCooldownUntil();
   if (cooldownUntil) {
     flash.setFlash(res, { error: `An update was just started, try again after ${cooldownUntil.toISOString().slice(11, 19)} UTC.` });
+    return res.redirect("/admin/update");
+  }
+  // catches a second click past the 60s cooldown above if the first
+  // run is genuinely still going, the cooldown alone isn't enough
+  if (updateCheck.isUpdateInFlight()) {
+    flash.setFlash(res, { error: "An update is already running, try again once it finishes." });
     return res.redirect("/admin/update");
   }
   updateCheck.recordUpdateTriggered();

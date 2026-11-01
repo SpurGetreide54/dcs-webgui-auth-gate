@@ -332,6 +332,29 @@ test(
   }
 );
 
+test(
+  "applyUpdate sets isUpdateInFlight synchronously and clears it once it fails",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    // same version as current, fails the downgrade check right after
+    // the flag is set, with no download mocking needed
+    const manifest = signManifest(privateKey, {
+      version: updateCheck.getCurrentVersion(),
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "a".repeat(64) }],
+    });
+    serveManifest(manifest);
+
+    assert.equal(updateCheck.isUpdateInFlight(), false);
+    const promise = updateCheck.applyUpdate();
+    assert.equal(updateCheck.isUpdateInFlight(), true, "must be set synchronously, before the first await");
+    await assert.rejects(() => promise, /not newer/);
+    assert.equal(updateCheck.isUpdateInFlight(), false, "must be cleared once applyUpdate has failed");
+  }
+);
+
 test("checkForUpdate rejects and still records the attempt when the check fails", async () => {
   // no real key needed, a throwaway key the hardcoded public key will
   // never accept, so this runs unconditionally unlike the two tests above

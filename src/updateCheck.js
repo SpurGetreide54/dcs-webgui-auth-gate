@@ -146,7 +146,7 @@ async function checkForUpdate() {
 
 // section: the cooldown guard against two overlapping applyUpdate() runs
 
-// see docs/Why.md#why-does-update-state-track-when-an-update-was-triggered
+// see docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
 const UPDATE_COOLDOWN_MS = 60 * 1000;
 
 // record that an update was just triggered, starting the cooldown
@@ -160,6 +160,15 @@ function getUpdateCooldownUntil() {
   if (!update_triggered_at) return null;
   const until = new Date(update_triggered_at).getTime() + UPDATE_COOLDOWN_MS;
   return until > Date.now() ? new Date(until) : null;
+}
+
+// true only while this process's own applyUpdate() is still running,
+// catches a second click past the 60s db cooldown if the first run
+// is genuinely still in flight, see docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
+let updateInFlight = false;
+
+function isUpdateInFlight() {
+  return updateInFlight;
 }
 
 // start the hourly background poll, swallowing (not throwing) its errors
@@ -245,58 +254,65 @@ async function relayAgentUpdate(archivePath, sha256) {
 // commit the agent's build, flip the pointer, then exit for the
 // supervisor to restart into the new slot
 async function applyUpdate() {
-  console.debug(`Update: starting applyUpdate()...`);
-  const manifest = await fetchVerifiedManifest();
-  console.debug(`Update: verified manifest for version ${manifest.version}.`);
-  // refuses a downgrade the same way checkForUpdate does, the only
-  // check that actually gates an install, regardless of which path
-  // triggered it, see docs/Why.md#why-does-checkforupdate-reject-a-lower-or-equal-version
-  if (!isVersionGreater(manifest.version, getCurrentVersion())) {
-    throw new Error(`Offered version ${manifest.version} is not newer than the current ${getCurrentVersion()}, refusing to install.`);
-  }
-  const scratchDir = await fsp.mkdtemp(path.join(os.tmpdir(), "dcs-auth-gate-update-"));
+  // cleared in the finally below; on success process.exit() kills the
+  // process first, so clearing it there never actually matters
+  updateInFlight = true;
   try {
-    const authGateDownload = findDownload(manifest, "auth-gate");
-    const authGateArchive = path.join(scratchDir, "auth-gate.tar.gz");
-    await downloadAndVerify(authGateDownload.url, authGateDownload.sha256, authGateArchive);
-    console.debug("Update: downloaded and verified the auth-gate archive.");
+    console.debug(`Update: starting applyUpdate()...`);
+    const manifest = await fetchVerifiedManifest();
+    console.debug(`Update: verified manifest for version ${manifest.version}.`);
+    // refuses a downgrade the same way checkForUpdate does, the only
+    // check that actually gates an install, regardless of which path
+    // triggered it, see docs/Why.md#why-does-checkforupdate-reject-a-lower-or-equal-version
+    if (!isVersionGreater(manifest.version, getCurrentVersion())) {
+      throw new Error(`Offered version ${manifest.version} is not newer than the current ${getCurrentVersion()}, refusing to install.`);
+    }
+    const scratchDir = await fsp.mkdtemp(path.join(os.tmpdir(), "dcs-auth-gate-update-"));
+    try {
+      const authGateDownload = findDownload(manifest, "auth-gate");
+      const authGateArchive = path.join(scratchDir, "auth-gate.tar.gz");
+      await downloadAndVerify(authGateDownload.url, authGateDownload.sha256, authGateArchive);
+      console.debug("Update: downloaded and verified the auth-gate archive.");
 
-    const idleSlot = activeSlot.otherSlot(activeSlot.readActiveSlot());
-    // __dirname is releases/<active-slot>/src, three levels up is the
-    // shared top-level app root
-    const appRoot = path.join(__dirname, "..", "..", "..");
-    const slotDir = path.join(appRoot, "releases", idleSlot);
-    await stageAuthGateSlot(authGateArchive, slotDir);
-    console.debug(`Update: staged into slot ${idleSlot}, running npm install...`);
-    await runNpmInstall(slotDir);
-    console.debug("Update: npm install finished.");
+      const idleSlot = activeSlot.otherSlot(activeSlot.readActiveSlot());
+      // __dirname is releases/<active-slot>/src, three levels up is the
+      // shared top-level app root
+      const appRoot = path.join(__dirname, "..", "..", "..");
+      const slotDir = path.join(appRoot, "releases", idleSlot);
+      await stageAuthGateSlot(authGateArchive, slotDir);
+      console.debug(`Update: staged into slot ${idleSlot}, running npm install...`);
+      await runNpmInstall(slotDir);
+      console.debug("Update: npm install finished.");
 
-    const agentDownload = findDownload(manifest, "agent");
-    const agentExe = path.join(scratchDir, "agent.exe");
-    await downloadAndVerify(agentDownload.url, agentDownload.sha256, agentExe);
-    console.debug("Update: downloaded and verified the agent build.");
-    await relayAgentUpdate(agentExe, agentDownload.sha256);
+      const agentDownload = findDownload(manifest, "agent");
+      const agentExe = path.join(scratchDir, "agent.exe");
+      await downloadAndVerify(agentDownload.url, agentDownload.sha256, agentExe);
+      console.debug("Update: downloaded and verified the agent build.");
+      await relayAgentUpdate(agentExe, agentDownload.sha256);
 
-    activeSlot.writeActiveSlot(idleSlot);
-    setUpdateState({
-      lastCheckedAt: new Date().toISOString(),
-      availableVersion: null,
-      changelogUrl: null,
-      needsServiceUpdate: Boolean(manifest.needs_service_update),
-    });
-    // a fresh update with no new rollback is itself the "resolved"
-    // signal, required here (not at module load) to avoid a circular
-    // require with diagnostics.js, see docs/Why.md#why-does-diagnostics-mirror-updatecheckjss-own-shape
-    require("./diagnostics").clearRollback();
-    console.log(`Update: flipped active slot to ${idleSlot}. Exiting for the supervisor to restart into it.`);
+      activeSlot.writeActiveSlot(idleSlot);
+      setUpdateState({
+        lastCheckedAt: new Date().toISOString(),
+        availableVersion: null,
+        changelogUrl: null,
+        needsServiceUpdate: Boolean(manifest.needs_service_update),
+      });
+      // a fresh update with no new rollback is itself the "resolved"
+      // signal, required here (not at module load) to avoid a circular
+      // require with diagnostics.js, see docs/Why.md#why-does-diagnostics-mirror-updatecheckjss-own-shape
+      require("./diagnostics").clearRollback();
+      console.log(`Update: flipped active slot to ${idleSlot}. Exiting for the supervisor to restart into it.`);
+    } finally {
+      await fsp.rm(scratchDir, { recursive: true, force: true });
+    }
+
+    // a clean exit(0), not exit(1)
+    // see docs/Why.md#why-does-applyupdate-exit0-instead-of-exit1
+    process.exitCode = 0;
+    process.exit(0);
   } finally {
-    await fsp.rm(scratchDir, { recursive: true, force: true });
+    updateInFlight = false;
   }
-
-  // a clean exit(0), not exit(1)
-  // see docs/Why.md#why-does-applyupdate-exit0-instead-of-exit1
-  process.exitCode = 0;
-  process.exit(0);
 }
 
 // expose every function another module needs, plus the two constants
@@ -313,4 +329,5 @@ module.exports = {
   getUpdateState,
   recordUpdateTriggered,
   getUpdateCooldownUntil,
+  isUpdateInFlight,
 };

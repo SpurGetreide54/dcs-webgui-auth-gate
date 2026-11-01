@@ -1042,6 +1042,28 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       db.prepare("UPDATE update_state SET update_triggered_at = NULL WHERE id = 1").run();
     }
 
+    // the in-process flag catches a second click even past the 60s db
+    // cooldown, if applyUpdate() is genuinely still running, see
+    // docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
+    const realIsUpdateInFlight = updateCheck.isUpdateInFlight;
+    const realApplyUpdateForInFlight = updateCheck.applyUpdate;
+    updateCheck.isUpdateInFlight = () => true;
+    let inFlightApplyUpdateCalls = 0;
+    updateCheck.applyUpdate = async () => {
+      inFlightApplyUpdateCalls++;
+    };
+    try {
+      // back-dated past the cooldown, isolating this from it entirely
+      db.prepare("UPDATE update_state SET update_triggered_at = ? WHERE id = 1").run(new Date(Date.now() - 61_000).toISOString());
+      const blockedByInFlight = await postAndFollowFlash(`${base}/admin/update`, { method: "POST", headers: { Cookie: siteAdminCookie } });
+      assert.match(await blockedByInFlight.text(), /already running/, "a still-running update must be refused even past the 60s db cooldown");
+      assert.equal(inFlightApplyUpdateCalls, 0, "a refused trigger must not call applyUpdate() again");
+    } finally {
+      updateCheck.isUpdateInFlight = realIsUpdateInFlight;
+      updateCheck.applyUpdate = realApplyUpdateForInFlight;
+      db.prepare("UPDATE update_state SET update_triggered_at = NULL WHERE id = 1").run();
+    }
+
     // settings: site-wide "always show update nav" toggle
     const forbiddenSettingsPage = await fetch(`${base}/admin/settings`, { headers: { Cookie: serverAdminCookie } });
     assert.equal(forbiddenSettingsPage.status, 403, "a non-site-admin must not reach the settings page");
