@@ -19,6 +19,7 @@ const archiver = require("archiver");
 // see docs/Why.md#why-does-agentjs-duplicate-applogjss-log-format
 function installConsoleCapture() {
   const original = { log: console.log, warn: console.warn, error: console.error, debug: console.debug };
+  // write one captured console call as an ndjson line
   function emit(write, level, args) {
     const msg = args.map((a) => (typeof a === "string" ? a : util.inspect(a))).join(" ");
     write(JSON.stringify({ t: new Date().toISOString(), level, msg }));

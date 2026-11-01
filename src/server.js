@@ -1067,6 +1067,7 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
     var TOKEN = ${JSON.stringify(token)};
     var CONTROL_PORT = ${JSON.stringify(String(serverProxy.CONTROL_PORT))};
     var BASE_PATH = ${JSON.stringify(`/s/${req.params.slug}/`)};
+    // redirect a webgui call bound for the control port to the proxy, tagging it with the auth token
     function rewriteIfBackendCall(url) {
       var target;
       try {
@@ -1119,6 +1120,7 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
       document.head.appendChild(style);
     }
 
+    // insert the back-to-dashboard link next to the navbar brand
     function placeButton(brandEl) {
       var navbarEl = brandEl.closest(".navbar") || brandEl.parentElement;
       var btn = document.createElement("a");
@@ -1136,6 +1138,7 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
         "transition:opacity .15s ease-in-out,color .15s ease-in-out,border-color .15s ease-in-out;";
       navbarEl.appendChild(btn);
 
+      // keep the back button pinned beside the brand as the navbar resizes
       function reposition() {
         var navRect = navbarEl.getBoundingClientRect();
         var brandRect = brandEl.getBoundingClientRect();

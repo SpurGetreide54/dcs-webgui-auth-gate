@@ -226,11 +226,13 @@ function permPopupMarkup(servers) {
     });
   }
 
+  // render one permission-grid cell
   function cellHtml(serverId, perm, granted) {
     return '<td class="perm-cell ' + (granted ? "granted" : "denied") + '" data-server-id="' + serverId + '" data-permission="' + perm + '">' +
       (granted ? "\\u2713" : "\\u2715") + "</td>";
   }
 
+  // rebuild the whole popup table for one account or invite row
   function render(kind, id, rows) {
     var head = "<tr><th>Server</th>";
     CATEGORIES.forEach(function (c, i) {
@@ -257,12 +259,14 @@ function permPopupMarkup(servers) {
     });
   }
 
+  // update one cell's granted/denied visual state in place
   function setCell(cell, granted) {
     cell.classList.toggle("granted", granted);
     cell.classList.toggle("denied", !granted);
     cell.textContent = granted ? "\\u2713" : "\\u2715";
   }
 
+  // flip one cell, post the change, revert it if the request fails
   function toggle(kind, id, cell) {
     var serverId = Number(cell.getAttribute("data-server-id"));
     var permission = cell.getAttribute("data-permission");
@@ -285,6 +289,7 @@ function permPopupMarkup(servers) {
     });
   }
 
+  // hide the popup
   function hide() { popup.hidden = true; }
 
   Array.prototype.forEach.call(document.querySelectorAll(".perm-btn"), function (btn) {
