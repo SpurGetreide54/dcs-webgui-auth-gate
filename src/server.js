@@ -486,24 +486,38 @@ async function buildWebguiPortProposal() {
 }
 
 serversRouter.get("/webgui-ports", asyncHandler(async (req, res) => {
+  const { error } = flash.readFlash(req, res);
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
     return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
   }
   try {
     const { proposals } = await buildWebguiPortProposal();
-    res.send(views.webguiPortsPage({ admin: req.admin, proposals }));
+    res.send(views.webguiPortsPage({ admin: req.admin, proposals, error }));
   } catch (err) {
     res.status(502).send(loadServersPageData(req, { error: `Could not reach the mission agent: ${err.message}` }));
   }
 }));
 
-serversRouter.post("/webgui-ports/confirm", asyncHandler(async (req, res) => {
+serversRouter.post("/webgui-ports/confirm", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
   }
   try {
     const { proposals } = await buildWebguiPortProposal();
+
+    // a single hidden-field pair comes back as a bare string, not a
+    // one-element array, under extended:false's querystring parser
+    const reviewedNames = [].concat(req.body.instance_name || []);
+    const reviewedPorts = [].concat(req.body.port || []).map(Number);
+    const matches =
+      reviewedNames.length === proposals.length &&
+      reviewedNames.every((name, i) => name === proposals[i].server.instance_name && reviewedPorts[i] === proposals[i].proposedPort);
+    if (!matches) {
+      flash.setFlash(res, { error: "The proposal changed since you reviewed it. Review it again." });
+      return res.redirect("/admin/servers/webgui-ports");
+    }
+
     for (const { server, proposedPort } of proposals) {
       const url = new URL(`/webgui/${encodeURIComponent(server.instance_name)}/ensure-port`, MISSION_AGENT_URL);
       const agentRes = await fetch(url, {

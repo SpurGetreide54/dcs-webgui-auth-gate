@@ -529,22 +529,32 @@ ${forms}
 }
 
 // confirm-before-write page for assigning missing webgui control ports
-function webguiPortsPage({ admin, proposals }) {
+function webguiPortsPage({ admin, proposals, error }) {
   const rows = proposals
     .map((p) => `<tr><td>${escapeHtml(p.server.name)}</td><td>${escapeHtml(p.server.instance_name)}</td><td>${p.proposedPort}</td></tr>`)
     .join("");
 
-  const body =
-    proposals.length === 0
-      ? `<p>Every configured server already has a webgui control port. Nothing to do.</p>`
-      : `<p>These servers have no <code>webgui_port</code> in their <code>Config\\autoexec.cfg</code> yet. Confirming will create or append that line on the physical host via the mission-agent — existing config content is preserved either way.</p>
+  // one hidden instance_name/port pair per reviewed row, so confirm
+  // can refuse instead of silently recomputing a changed proposal
+  // see docs/Why.md#why-does-webgui-ports-confirm-use-hidden-fields-instead-of-a-signed-token
+  const hiddenFields = proposals
+    .map((p) => `<input type="hidden" name="instance_name" value="${escapeHtml(p.server.instance_name)}"><input type="hidden" name="port" value="${p.proposedPort}">`)
+    .join("");
+
+  const body = `${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+${
+  proposals.length === 0
+    ? `<p>Every configured server already has a webgui control port. Nothing to do.</p>`
+    : `<p>These servers have no <code>webgui_port</code> in their <code>Config\\autoexec.cfg</code> yet. Confirming will create or append that line on the physical host via the mission-agent — existing config content is preserved either way.</p>
 <table>
   <thead><tr><th>Server</th><th>Instance</th><th>Proposed port</th></tr></thead>
   <tbody>${rows}</tbody>
 </table>
 <form method="post" action="/admin/servers/webgui-ports/confirm">
+  ${hiddenFields}
   <button type="submit">Confirm and assign these ports</button>
-</form>`;
+</form>`
+}`;
 
   return layout(`Webgui ports — DCS Control Panel`, body, { admin, active: "servers", pageTitle: "Assign webgui control ports" });
 }

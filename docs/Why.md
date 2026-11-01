@@ -593,6 +593,18 @@ resolve against that missing segment, landing on `/s/js/app.js`, which
 which also carries the query string) and redirects 302, not 301, so a
 later slug rename is never cached by the browser.
 
+## Why does webgui-ports confirm use hidden fields instead of a signed token?
+
+Only site admins reach `/admin/servers/webgui-ports`, so there's no
+adversary who'd benefit from tampering with their own hidden
+fields.<br>The guard this closes is a race with reality changing
+between review and click — a server added, or an instance's
+`autoexec.cfg` edited, in between — not distrust of the reviewer, so
+a plain hidden `instance_name`/`port` pair per reviewed row, compared
+server-by-server against a freshly recomputed proposal on confirm, is
+enough.<br>The comparison is order-based, safe because
+`serversDb.getAllServers()` orders by `id`, a stable order.
+
 ## Why is webgui-static/ synced explicitly rather than automatically?
 
 This is an explicit admin action, the same shape as the webgui-ports

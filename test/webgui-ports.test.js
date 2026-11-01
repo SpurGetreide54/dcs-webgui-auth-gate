@@ -124,10 +124,12 @@ test("webgui-ports: proposes non-colliding ports for missing instances, writes n
     assert.doesNotMatch(checkHtml, /Server A/, "already-configured servers must not appear in the proposal list");
     assert.equal(ensureCalls.length, 0, "reviewing the proposal must not write anything");
 
-    // confirm: writes exactly b and c, with the proposed ports
+    // confirm: writes exactly b and c, with the proposed ports, using
+    // the same hidden instance_name/port pairs the review page itself renders
     const confirmRes = await fetch(`${base}/admin/servers/webgui-ports/confirm`, {
       method: "POST",
-      headers: { Cookie: siteAdminCookie },
+      headers: { Cookie: siteAdminCookie, "Content-Type": "application/x-www-form-urlencoded" },
+      body: "instance_name=B_missing&port=8088&instance_name=C_missing&port=8089",
     });
     assert.equal(confirmRes.status, 200);
     assert.equal(ensureCalls.length, 2);
@@ -143,6 +145,54 @@ test("webgui-ports: proposes non-colliding ports for missing instances, writes n
     const recheckRes = await fetch(`${base}/admin/servers/webgui-ports`, { headers: { Cookie: siteAdminCookie } });
     const recheckHtml = await recheckRes.text();
     assert.match(recheckHtml, /Every configured server already has/);
+  } finally {
+    server.close();
+  }
+});
+
+test("webgui-ports: confirm refuses stale reviewed pairs when the proposal changed since review", async () => {
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  // carry forward what the earlier test already provisioned for
+  // A_has_port/B_missing/C_missing, so only D_missing/E_missing are new
+  instancePorts = new Map([...instancePorts, ["D_missing", null]]);
+  ensureCalls = [];
+
+  try {
+    const loginRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=siteadmin&password=correct-horse-battery-staple",
+      redirect: "manual",
+    });
+    const cookie = extractCookie(loginRes);
+
+    db.prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)").run("d", "Server D", "D_missing");
+
+    // review page: proposes a port for D_missing
+    const checkRes = await fetch(`${base}/admin/servers/webgui-ports`, { headers: { Cookie: cookie } });
+    const checkHtml = await checkRes.text();
+    assert.match(checkHtml, /Server D/);
+
+    // a new server appears between review and confirm, changing the real proposal
+    db.prepare("INSERT INTO servers (slug, name, instance_name) VALUES (?, ?, ?)").run("e", "Server E", "E_missing");
+    instancePorts.set("E_missing", null);
+
+    // confirm, posted with the stale single-row proposal from before E_missing existed
+    const confirmRes = await fetch(`${base}/admin/servers/webgui-ports/confirm`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
+      body: "instance_name=D_missing&port=8088",
+      redirect: "manual",
+    });
+    assert.equal(confirmRes.status, 302);
+    assert.equal(confirmRes.headers.get("location"), "/admin/servers/webgui-ports");
+    assert.equal(ensureCalls.length, 0, "a stale proposal must not trigger any ensure-port call");
+
+    const flashCookie = extractCookie(confirmRes);
+    const reviewAfterRes = await fetch(`${base}/admin/servers/webgui-ports`, { headers: { Cookie: `${cookie}; ${flashCookie}` } });
+    assert.match(await reviewAfterRes.text(), /The proposal changed since you reviewed it/);
   } finally {
     server.close();
   }
