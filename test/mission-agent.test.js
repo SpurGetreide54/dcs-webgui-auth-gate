@@ -696,6 +696,56 @@ test("trash moves multiple selected missions aside in one request", async () => 
   assert.equal(fs.existsSync(path.join(missionsDir, "keep.miz")), true, "a mission not selected for delete must be left alone");
 });
 
+test("trash dedupes a repeated name in one request instead of failing on the second rename", async () => {
+  const instance = "Example_TrashDuplicateName";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "dupe.miz"), "dupe bytes");
+
+  const res = await fetch(`${base}/missions/${instance}/trash`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ missions: ["dupe.miz", "dupe.miz"] }),
+  });
+  assert.equal(res.status, 200);
+  const trashDir = path.join(missionsDir, ".trash");
+  const trashed = fs.readdirSync(trashDir).filter((name) => name.startsWith("dupe.miz"));
+  assert.equal(trashed.length, 1, "a name repeated in one request must be trashed once, not attempted twice");
+});
+
+test("trash bumps the millisecond suffix on a same-millisecond collision instead of overwriting the earlier entry", async () => {
+  const instance = "Example_TrashCollision";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  const trashDir = path.join(missionsDir, ".trash");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.mkdirSync(trashDir, { recursive: true });
+
+  // simulate an already-trashed entry landing on "now", the same
+  // millisecond the real trash call below will also compute
+  const now = Date.now();
+  fs.writeFileSync(path.join(trashDir, `collide.miz.${now}`), "first trashed bytes");
+
+  fs.writeFileSync(path.join(missionsDir, "collide.miz"), "second trashed bytes");
+  const originalNow = Date.now;
+  Date.now = () => now;
+  try {
+    const res = await fetch(`${base}/missions/${instance}/trash`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ missions: ["collide.miz"] }),
+    });
+    assert.equal(res.status, 200);
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const trashed = fs.readdirSync(trashDir).filter((name) => name.startsWith("collide.miz"));
+  assert.equal(trashed.length, 2, "both trash entries must survive, under distinct names");
+  const contents = trashed.map((name) => fs.readFileSync(path.join(trashDir, name), "utf8"));
+  assert.ok(contents.includes("first trashed bytes"), "the earlier trash entry must not be overwritten");
+  assert.ok(contents.includes("second trashed bytes"));
+});
+
 test("trash rejects an unknown mission name", async () => {
   const res = await fetch(`${base}/missions/${INSTANCE}/trash`, {
     method: "POST",

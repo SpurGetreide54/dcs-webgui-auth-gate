@@ -309,7 +309,8 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
 }));
 
 app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
-  const names = Array.isArray(req.body?.missions) ? req.body.missions : [];
+  // a repeated name is a no-op, not a second, failing rename
+  const names = [...new Set(Array.isArray(req.body?.missions) ? req.body.missions : [])];
   if (names.length === 0) return res.status(400).send("No missions named.");
 
   const targetDir = missionsDir(req.instanceDir);
@@ -326,7 +327,15 @@ app.post("/missions/:instanceName/trash", checkToken, requireInstanceDir, expres
   await fs.mkdir(trashDir, { recursive: true });
   try {
     for (const { safeName, finalPath } of resolvedPaths) {
-      await fs.rename(finalPath, path.join(trashDir, `${safeName}.${Date.now()}`));
+      // bump the millisecond suffix on a same-millisecond collision,
+      // rather than let fs.rename silently replace the earlier entry
+      let ts = Date.now();
+      let target = path.join(trashDir, `${safeName}.${ts}`);
+      while (await isExistingFile(target)) {
+        ts++;
+        target = path.join(trashDir, `${safeName}.${ts}`);
+      }
+      await fs.rename(finalPath, target);
     }
   } catch (err) {
     return res.status(500).send(`Could not move to trash: ${err.message}`);
