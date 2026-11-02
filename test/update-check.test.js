@@ -44,6 +44,7 @@ let dummyGithubRespond; // set per test to control what the dummy "GitHub API" r
 let dummyAgent, dummyAgentBase;
 let dummyAgentRespond; // set per test to control what the dummy mission agent returns
 let sqlitePath;
+let activeSlotPath;
 
 const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem");
 const MISSION_AGENT_TEST_TOKEN = "update-check-relay-test-token";
@@ -61,6 +62,11 @@ test.before(async () => {
   sqlitePath = tempSqlitePath("update-check");
   process.env.SQLITE_PATH = sqlitePath;
 
+  // a dedicated temp path, not the repo's own default active-slot
+  // file, which other test files would otherwise contend over
+  activeSlotPath = path.join(os.tmpdir(), `update-check-active-slot-${crypto.randomBytes(6).toString("hex")}`);
+  process.env.ACTIVE_SLOT_PATH = activeSlotPath;
+
   updateCheck = require("../src/updateCheck");
 });
 
@@ -69,6 +75,7 @@ test.after(async () => {
   await new Promise((resolve) => dummyAgent.close(resolve));
   require("../src/db").close();
   cleanupSqlite(sqlitePath);
+  fs.rmSync(activeSlotPath, { force: true });
 });
 
 test("getCurrentVersion reads package.json's own version", () => {
@@ -392,6 +399,20 @@ test("isVersionGreater treats the final release as newer than any prerelease of 
 
 test("isVersionGreater rejects a lower prerelease of the same triple (1.5.0-beta -> 1.5.0-alpha is not an update)", () => {
   assert.equal(updateCheck.isVersionGreater("1.5.0-alpha", "1.5.0-beta"), false);
+});
+
+test("applyUpdate fails fast when the active-slot file isn't writable, before touching the network at all", async () => {
+  fs.writeFileSync(activeSlotPath, "a", "utf8");
+  fs.chmodSync(activeSlotPath, 0o444);
+  // never configured to serve anything this test run -- a network
+  // call here, instead of the fast local permission check, would
+  // surface as this rejecting for the wrong reason
+  dummyGithubRespond = (req, res) => res.writeHead(500).end("must not be reached");
+  try {
+    await assert.rejects(() => updateCheck.applyUpdate(), /active-slot/);
+  } finally {
+    fs.chmodSync(activeSlotPath, 0o644);
+  }
 });
 
 test(

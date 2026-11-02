@@ -311,6 +311,25 @@ async function relayAgentUpdate(archivePath, manifest) {
 
 // section: the whole update, start to finish
 
+// fail fast, before touching the agent or downloading anything, if
+// the active-slot file (or its directory, on a very first update)
+// isn't writable -- a late failure here would leave the gate and
+// the agent on different versions
+function assertActiveSlotWritable() {
+  try {
+    fs.accessSync(activeSlot.ACTIVE_SLOT_PATH, fs.constants.W_OK);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw new Error(`Cannot write the active-slot file: ${err.message}`);
+    // no slot file yet (very first update); its directory must be
+    // writable instead, since writeActiveSlot will create the file
+    try {
+      fs.accessSync(path.dirname(activeSlot.ACTIVE_SLOT_PATH), fs.constants.W_OK);
+    } catch (dirErr) {
+      throw new Error(`Cannot create the active-slot file: ${dirErr.message}`);
+    }
+  }
+}
+
 // re-verify, download both artifacts, stage the auth-gate, relay and
 // commit the agent's build, flip the pointer, then exit for the
 // supervisor to restart into the new slot
@@ -320,6 +339,7 @@ async function applyUpdate() {
   updateInFlight = true;
   try {
     console.debug(`Update: starting applyUpdate()...`);
+    assertActiveSlotWritable();
     const manifest = await fetchVerifiedManifest();
     console.debug(`Update: verified manifest for version ${manifest.version}.`);
     // refuses a downgrade the same way checkForUpdate does, the only
