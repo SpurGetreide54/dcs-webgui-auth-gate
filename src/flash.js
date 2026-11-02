@@ -5,11 +5,28 @@ const FLASH_COOKIE = "dcs_flash";
 // default true, disable only for local http dev, mirrors the same
 // flag in server.js's own setSessionCookie
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
+// keeps the encoded cookie well under the browser's ~4KB cap even
+// with multibyte text, see docs/Why.md#why-does-the-flash-cookie-cap-error-and-notice-length
+const MAX_FLASH_MESSAGE_LENGTH = 500;
+
+// cuts a string to the cap, logging the full text first when it's
+// actually cut so the admin can still see it on the logs page
+function truncateFlashMessage(text) {
+  if (text.length <= MAX_FLASH_MESSAGE_LENGTH) return text;
+  console.error(`Flash message truncated for the cookie, full text: ${text}`);
+  return `${text.slice(0, MAX_FLASH_MESSAGE_LENGTH)}...`;
+}
 
 // store a flash payload as a cookie, cleared automatically after 10s
 function setFlash(res, data) {
+  // cap error/notice so a long one can never make the cookie too big
+  // for the browser to keep, which would silently drop it
+  const bounded = { ...data };
+  for (const key of ["error", "notice"]) {
+    if (typeof bounded[key] === "string") bounded[key] = truncateFlashMessage(bounded[key]);
+  }
   // write the payload as json, http only so client js can't read it
-  res.cookie(FLASH_COOKIE, JSON.stringify(data), { httpOnly: true, secure: COOKIE_SECURE, maxAge: 10000, sameSite: "lax" });
+  res.cookie(FLASH_COOKIE, JSON.stringify(bounded), { httpOnly: true, secure: COOKIE_SECURE, maxAge: 10000, sameSite: "lax" });
 }
 
 // read and clear this request's flash payload, or {} if there was none

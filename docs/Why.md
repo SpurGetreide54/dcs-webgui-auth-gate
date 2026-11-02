@@ -24,6 +24,22 @@ tampering (a sibling subdomain could set it too). `readFlash()` in
 live invite URL: a plain-http request in the 10 second window it
 lives for would otherwise send a bearer credential in cleartext.
 
+## Why does the flash cookie cap error and notice length?
+
+Browsers drop a cookie outright once it's over about 4KB, with no
+error and no signal to the app that it happened, so an unbounded
+`error`/`notice` string (an agent's full response body, a raw
+`err.message`) could silently erase the whole flash payload instead
+of just being long.<br>`setFlash` truncates both fields to 500
+characters plus an ellipsis, comfortably under that limit even with
+multibyte text, and logs the full original to `console.error` first
+so it still reaches the `/admin/logs` page. 500 was checked against
+the longest legitimate message in the app, the server-created notice
+in `src/server.js`, which stays well under the cap for any real
+server/instance name.<br>`inviteUrl` is left uncapped: it's a fixed-shape
+URL the app builds itself, never free text from an error, so it has
+no unbounded-length path to guard against.
+
 ## Why is the active slot pointer a flat file?
 
 `launcher.js` reads it to decide which slot to launch, and
