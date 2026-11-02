@@ -1122,19 +1122,27 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
     }
     var nativeFetch = window.fetch;
     window.fetch = function (input, init) {
+      // a URL object has no .url string property, only .href
+      if (input instanceof URL) input = String(input);
       var url = typeof input === "string" ? input : input.url;
       if (isControlPortDiscoveryCall(url)) {
         var body = JSON.stringify({ address: "127.0.0.1", webPort: Number(CONTROL_PORT), webKey: "DigitalCombatSimulator.com" });
         return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }));
       }
       var rewritten = rewriteIfBackendCall(url);
-      if (rewritten) {
+      if (!rewritten) return nativeFetch.call(this, input, init);
+      if (typeof input === "string") {
         init = Object.assign({}, init);
         init.headers = new Headers(init.headers || {});
         init.headers.set("X-Auth-Gate-Token", TOKEN);
         return nativeFetch.call(this, rewritten, init);
       }
-      return nativeFetch.call(this, input, init);
+      // a Request carries its own method/headers/body; rebuild it at
+      // the rewritten url so none of that is lost, see
+      // docs/Why.md#why-does-the-fetch-shim-rebuild-a-request-instead-of-just-reading-its-url
+      var rebuilt = new Request(rewritten, input);
+      rebuilt.headers.set("X-Auth-Gate-Token", TOKEN);
+      return nativeFetch.call(this, rebuilt);
     };
   })();
 

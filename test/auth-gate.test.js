@@ -516,7 +516,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     function runBootstrapFetch(requestUrl, { hostname, pathname }) {
       const calls = [];
-      const context = { location: { hostname, protocol: "https:", href: `https://${hostname}${pathname}` }, URL, Headers };
+      const context = { location: { hostname, protocol: "https:", href: `https://${hostname}${pathname}` }, URL, Headers, Request };
       context.window = {
         fetch: async (url) => {
           calls.push(url);
@@ -560,6 +560,26 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     // must pass through untouched, not get sent at the control-port proxy
     const ownAsset = runBootstrapFetch(`${pathname}js/app.js`, { hostname, pathname });
     assert.equal(ownAsset, `${pathname}js/app.js`, "a request for the app's own served files must not be rewritten");
+
+    // a Request input must be rebuilt at the rewritten url, carrying
+    // its own method/headers/body along, not dropped to a bare GET
+    const requestInput = new Request("http://127.0.0.1:8088/encryptedRequest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "request-body",
+    });
+    const rebuilt = runBootstrapFetch(requestInput, { hostname, pathname });
+    assert.ok(rebuilt instanceof Request, "a Request input must stay a Request, not be unwrapped to a string");
+    assert.equal(rebuilt.url, `https://${hostname}:${serverProxy.CONTROL_PORT}/encryptedRequest`);
+    assert.equal(rebuilt.method, "POST");
+    assert.equal(rebuilt.headers.get("content-type"), "application/json");
+    assert.equal(await rebuilt.text(), "request-body");
+
+    // a URL input has no .url property, only .href -- today's bug
+    // skips the rewrite entirely and leaves the original URL object alone
+    const urlInput = new URL("http://127.0.0.1:8088/encryptedRequest");
+    const rewrittenFromUrlObject = runBootstrapFetch(urlInput, { hostname, pathname });
+    assert.equal(rewrittenFromUrlObject, `https://${hostname}:${serverProxy.CONTROL_PORT}/encryptedRequest`);
 
     // the same bootstrap also injects a back-to-control-panel button,
     // actually run against a stub dom exposing one, not just checked

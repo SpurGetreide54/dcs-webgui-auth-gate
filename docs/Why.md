@@ -798,6 +798,20 @@ DCS install, never a per-server secret.<br>Mirroring that same
 shortcut here, for the reverse-proxied case, is exactly as legitimate
 as the app's own file://+localhost path already is.
 
+## Why does the fetch shim rebuild a Request instead of just reading its url?
+
+A plain string is the common, confirmed-real case (`fetch(url, options)` is
+the only shape the actual synced DCS webgui bundle ever calls), so that
+path's existing two-argument `nativeFetch.call(this, rewritten, init)`
+shape is left untouched on purpose.<br>A `Request` object carries its own
+method, headers and body; reading only its `.url` and discarding the rest
+would silently turn a POST into a GET with no body.<br>`new Request(rewritten,
+input)` rebuilds one at the rewritten url while copying everything else
+from the original by standard Fetch-spec structural property access -- this
+is defensive hardening for a call shape the current bundle doesn't use,
+not a fix for an observed bug, since `webgui-sync` can point this app at a
+different DCS install (and so a different bundle) at any time.
+
 ## Why is the back button anchored to the navbar brand?
 
 The real DCS webgui has no link back to the auth-gate dashboard, so
