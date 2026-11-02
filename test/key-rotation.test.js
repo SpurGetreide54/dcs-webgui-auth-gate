@@ -390,7 +390,7 @@ test("a primary rotation drafted by rotate-key.js, vouched by sign-key-state-wit
 });
 
 test("rotate-key.js primary-draft creates the keys directory on demand (a fresh clone has no local-only/keys yet) and refuses to overwrite a pending draft", () => {
-  // nested, and never created by this test -- stands in for a fresh
+  // nested, and never created by this test, standing in for a fresh
   // clone that has no local-only/keys directory at all yet
   const keysParent = fs.mkdtempSync(path.join(os.tmpdir(), "key-rotation-test-keys-"));
   const keysDir = path.join(keysParent, "nested");
