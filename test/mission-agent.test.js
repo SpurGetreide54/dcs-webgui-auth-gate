@@ -123,6 +123,31 @@ test("a colliding upload is saved as name(1).miz, never overwriting the existing
   assert.equal(body2.safeName, "dupe(2).miz");
 });
 
+test("two uploads of the same filename racing each other both land, under distinct names, neither overwriting the other", async () => {
+  const instance = "Example_UploadRace";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+
+  const formOne = new FormData();
+  formOne.append("instance_name", instance);
+  formOne.append("mission", new Blob([Buffer.from("racer one")]), "race.miz");
+  const formTwo = new FormData();
+  formTwo.append("instance_name", instance);
+  formTwo.append("mission", new Blob([Buffer.from("racer two")]), "race.miz");
+
+  const [resOne, resTwo] = await Promise.all([
+    fetch(`${base}/upload`, { method: "POST", headers: authHeaders(), body: formOne }),
+    fetch(`${base}/upload`, { method: "POST", headers: authHeaders(), body: formTwo }),
+  ]);
+  const [bodyOne, bodyTwo] = await Promise.all([resOne.json(), resTwo.json()]);
+  assert.equal(resOne.status, 200);
+  assert.equal(resTwo.status, 200);
+  assert.notEqual(bodyOne.safeName, bodyTwo.safeName, "two racing uploads of the same filename must not claim the same name");
+
+  const namesOnDisk = fs.readdirSync(missionsDir).sort();
+  assert.deepEqual(namesOnDisk, [bodyOne.safeName, bodyTwo.safeName].sort(), "both uploads must have landed, neither overwritten by the other");
+});
+
 test("rejects an instance_name with path-traversal characters", async () => {
   const res = await fetch(`${base}/upload`, {
     method: "POST",

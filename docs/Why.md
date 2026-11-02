@@ -482,6 +482,23 @@ its trash-not-unlink guarantee.<br>Auto-renaming the *new* upload to
 existing mission on disk never touched — avoids that bypass without
 needing a new permission or a confirm-overwrite round trip.
 
+## Why does the upload claim its final name with fs.link instead of checking then renaming?
+
+Checking whether `<name>(n).miz` already exists and then renaming the
+tmp file into it leaves an async window between the check and the
+rename; two uploads of the same filename landing in that window both
+pick the same free name, and the second `rename` silently replaces
+the first.<br>`fs.link(tmpPath, finalPath)` claims the name
+atomically: a second upload's `link` call to that same path fails
+with `EEXIST` instead of succeeding, so it retries the next `(n)`
+suffix instead of overwriting anything.<br>`fs.link` only works
+within one filesystem, which this app accepts rather than adding a
+fallback path for: the agent's mission folder lives under a DCS
+install's own `Saved Games` tree, on the same local Windows volume as
+the OS itself, practically always NTFS for any deployment this
+project targets. FAT and network-share installs aren't a supported
+configuration.
+
 ## Why does the agent check typeof before every path operation?
 
 `path.basename`, `path.join`, and friends throw `ERR_INVALID_ARG_TYPE`

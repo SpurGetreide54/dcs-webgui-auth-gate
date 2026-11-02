@@ -199,17 +199,24 @@ async function isExistingFile(filePath) {
   }
 }
 
-// find the first unused "<name>(n).ext" for a colliding upload, so a
-// same-name upload never overwrites an existing mission, see
-// docs/Why.md#why-does-a-colliding-upload-auto-rename-instead-of-overwriting
-async function uniqueMissionName(targetDir, safeName) {
+// claims the first unused "<name>(n).ext" for a colliding upload by
+// hard-linking the tmp file into place, so two uploads racing for the
+// same name can never overwrite each other, see docs/Why.md#why-does-the-upload-claim-its-final-name-with-fslink-instead-of-checking-then-renaming
+async function claimMissionName(targetDir, tmpPath, safeName) {
   const ext = path.extname(safeName);
   const base = safeName.slice(0, -ext.length);
   let candidate = safeName;
-  for (let n = 1; await isExistingFile(path.join(targetDir, candidate)); n++) {
-    candidate = `${base}(${n})${ext}`;
+  for (let n = 1; ; n++) {
+    const finalPath = path.join(targetDir, candidate);
+    try {
+      await fs.link(tmpPath, finalPath);
+      return { safeName: candidate, finalPath };
+    } catch (err) {
+      // branch: someone else just claimed this exact name, try the next one
+      if (err.code !== "EEXIST") throw err;
+      candidate = `${base}(${n})${ext}`;
+    }
   }
-  return candidate;
 }
 
 // an RFC 6266 Content-Disposition value: a quoted ascii fallback for
@@ -244,22 +251,22 @@ app.post("/upload", checkToken, upload.single("mission"), asyncHandler(async (re
   if (!resolved) return res.status(400).send("Invalid filename.");
 
   await fs.mkdir(targetDir, { recursive: true });
-  // a same-name collision is saved alongside the existing mission
-  // under a (1), (2), ... suffix, never overwriting it
-  const uniqueName = await uniqueMissionName(targetDir, resolved.safeName);
-  const finalPath = path.join(targetDir, uniqueName);
 
-  const tmpPath = `${finalPath}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  const tmpPath = path.join(targetDir, `.${crypto.randomBytes(6).toString("hex")}.tmp`);
+  let claimed;
   try {
     await fs.writeFile(tmpPath, req.file.buffer);
-    // atomic write, dcs never sees a partial file
-    await fs.rename(tmpPath, finalPath);
+    // a same-name collision is saved alongside the existing mission
+    // under a (1), (2), ... suffix, never overwriting it, even against
+    // a second upload racing for the same name
+    claimed = await claimMissionName(targetDir, tmpPath, resolved.safeName);
   } catch (err) {
     await fs.rm(tmpPath, { force: true });
     return res.status(500).send(`Write failed: ${err.message}`);
   }
+  await fs.rm(tmpPath, { force: true });
 
-  res.json({ ok: true, path: finalPath, safeName: uniqueName });
+  res.json({ ok: true, path: claimed.finalPath, safeName: claimed.safeName });
 }));
 
 app.get("/missions/:instanceName", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {
