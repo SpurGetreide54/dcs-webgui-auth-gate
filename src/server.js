@@ -96,8 +96,13 @@ app.get("/setup", (req, res) => {
 app.post("/setup", express.urlencoded({ extended: false }), (req, res) => {
   if (adminCount() > 0) return res.status(404).send("Not found.");
   const { username, password } = req.body;
-  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < auth.MIN_PASSWORD_LENGTH) {
-    flash.setFlash(res, { error: `Username required, password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
+  if (!allStrings(req.body, ["username", "password"]) || !username) {
+    flash.setFlash(res, { error: "Username is required." });
+    return res.redirect("/setup");
+  }
+  const passwordError = auth.validateNewPassword(password);
+  if (passwordError) {
+    flash.setFlash(res, { error: passwordError });
     return res.redirect("/setup");
   }
   const info = db
@@ -265,8 +270,9 @@ accountsRouter.post("/change-password", express.urlencoded({ extended: false }),
     return res.redirect("/admin/accounts");
   }
   auth.clearLoginAttempts(req, req.admin.username, "change-password");
-  if (new_password.length < auth.MIN_PASSWORD_LENGTH) {
-    flash.setFlash(res, { error: `New password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
+  const passwordError = auth.validateNewPassword(new_password);
+  if (passwordError) {
+    flash.setFlash(res, { error: passwordError });
     return res.redirect("/admin/accounts");
   }
   if (new_password !== confirm_password) {
@@ -340,8 +346,13 @@ accountsRouter.post("/invites/:id/revoke", auth.requireAccountManager, (req, res
 
 accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const { username, password, can_manage_accounts } = req.body;
-  if (!allStrings(req.body, ["username", "password"]) || !username || !password || password.length < auth.MIN_PASSWORD_LENGTH) {
-    flash.setFlash(res, { error: `Username required, password must be at least ${auth.MIN_PASSWORD_LENGTH} characters.` });
+  if (!allStrings(req.body, ["username", "password"]) || !username) {
+    flash.setFlash(res, { error: "Username is required." });
+    return res.redirect("/admin/accounts");
+  }
+  const passwordError = auth.validateNewPassword(password);
+  if (passwordError) {
+    flash.setFlash(res, { error: passwordError });
     return res.redirect("/admin/accounts");
   }
   try {

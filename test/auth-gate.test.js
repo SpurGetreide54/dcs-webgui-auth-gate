@@ -188,7 +188,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.equal(repeatedSetupFieldRes.status, 302, "a repeated field must redirect with the normal error, not 500");
     const repeatedSetupFollow = await fetch(`${base}/setup`, { headers: { Cookie: extractCookie(repeatedSetupFieldRes) } });
-    assert.match(await repeatedSetupFollow.text(), /Username required, password must be at least 12 characters/);
+    assert.match(await repeatedSetupFollow.text(), /Username is required/);
 
     // /setup creates the first admin with full access
     const setupRes = await fetch(`${base}/setup`, {
