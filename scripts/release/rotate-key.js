@@ -123,6 +123,9 @@ function rotatePrimaryDraft() {
   const selfSignature = crypto.sign(null, message, privateKey).toString("hex");
   record.signatures = [selfSignature];
 
+  // create the keys directory on first-ever rotation, same as a
+  // fresh clone with no local-only/keys yet
+  fs.mkdirSync(KEYS_DIR, { recursive: true });
   fs.writeFileSync(keyPath("primary", ".next"), privateKey.export({ type: "pkcs8", format: "pem" }));
   fs.writeFileSync(pubKeyPath("primary", ".next"), newPublicKeyPem);
   fs.mkdirSync(RELEASE_DIR, { recursive: true });

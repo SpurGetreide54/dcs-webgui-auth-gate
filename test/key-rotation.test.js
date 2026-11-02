@@ -389,22 +389,19 @@ test("a primary rotation drafted by rotate-key.js, vouched by sign-key-state-wit
   }
 });
 
-test("rotate-key.js primary-draft refuses to overwrite a pending draft, instead of silently replacing it", () => {
-  const { execFileSync } = require("node:child_process");
-  const keysDir = path.join(__dirname, "..", "local-only", "keys");
-  const releaseDir = path.join(__dirname, "..", "local-only", "release");
-  const rotateScript = path.join(__dirname, "..", "scripts", "release", "rotate-key.js");
-  const draftPath = path.join(releaseDir, "key_state.draft.json");
-  const primaryNextPath = path.join(keysDir, "key-rotation-primary.next.pem");
-  const primaryNextPubPath = path.join(keysDir, "key-rotation-primary.next.pub.pem");
-  const run = () => execFileSync(process.execPath, [rotateScript, "primary-draft"], { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+test("rotate-key.js primary-draft creates the keys directory on demand (a fresh clone has no local-only/keys yet) and refuses to overwrite a pending draft", () => {
+  // nested, and never created by this test -- stands in for a fresh
+  // clone that has no local-only/keys directory at all yet
+  const keysParent = fs.mkdtempSync(path.join(os.tmpdir(), "key-rotation-test-keys-"));
+  const keysDir = path.join(keysParent, "nested");
+  const releaseDir = fs.mkdtempSync(path.join(os.tmpdir(), "key-rotation-test-release-"));
+  const run = () => runRotateKey(["primary-draft"], keysDir, releaseDir);
   try {
     run();
     assert.throws(run, /already pending/);
   } finally {
-    fs.rmSync(draftPath, { force: true });
-    fs.rmSync(primaryNextPath, { force: true });
-    fs.rmSync(primaryNextPubPath, { force: true });
+    fs.rmSync(keysParent, { recursive: true, force: true });
+    fs.rmSync(releaseDir, { recursive: true, force: true });
   }
 });
 
