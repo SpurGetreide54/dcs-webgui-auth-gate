@@ -561,6 +561,19 @@ comment on the real line.<br>Taking the last match when several exist
 mirrors how Lua itself would evaluate repeated assignments in the
 same file.
 
+## Why doesn't the webgui proxy fall back to a default port?
+
+It used to, to 8088 when an instance's `autoexec.cfg` had no
+`webgui_port` line.<br>Two unconfigured instances, or one unconfigured
+instance sharing a host with another instance that happens to use
+8088, would collide: an admin scoped to the unconfigured instance's
+token still got proxied straight into the other instance's control
+port, breaking the scoping `src/serverProxy.js` otherwise
+guarantees.<br>Confirmed no real deployment relies on the
+fallback -- every instance gets an explicit port via
+`/admin/servers/webgui-ports` -- so `requireWebguiPort` now 502s
+instead of guessing.
+
 ## Why does the agent use a "current" junction instead of NSSM's own config?
 
 `"current"` is a directory junction NSSM's `ExecStart` always targets

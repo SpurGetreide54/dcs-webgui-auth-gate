@@ -323,21 +323,28 @@ test("ensure-port rejects an out-of-range port", async () => {
 
 // section: webgui relay
 
-test("relay falls back to the DCS default port (8088) when nothing's configured", async () => {
+test("relay 502s an instance with no webgui_port set, instead of falling back to a port that may belong to another instance", async () => {
+  let otherInstanceReceivedAConnection = false;
   const dummyDcs = await new Promise((resolve) => {
     const s = require("node:http").createServer((req, res) => {
+      otherInstanceReceivedAConnection = true;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ path: req.url }));
     });
     s.listen(8088, "127.0.0.1", () => resolve(s));
   });
   try {
-    const instance = "Example_NoPortSet";
-    fs.mkdirSync(instanceDir(instance), { recursive: true });
-    const res = await fetch(`${base}/webgui/${instance}/some/path`, { headers: authHeaders() });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.path, "/some/path");
+    const otherInstance = "Example_SharesPort8088";
+    fs.mkdirSync(path.join(instanceDir(otherInstance), "Config"), { recursive: true });
+    fs.writeFileSync(path.join(instanceDir(otherInstance), "Config", "autoexec.cfg"), "webgui_port = 8088\n");
+
+    const unsetInstance = "Example_NoPortSet";
+    fs.mkdirSync(instanceDir(unsetInstance), { recursive: true });
+
+    const res = await fetch(`${base}/webgui/${unsetInstance}/some/path`, { headers: authHeaders() });
+    assert.equal(res.status, 502);
+    assert.match(await res.text(), /No webgui_port set/);
+    assert.equal(otherInstanceReceivedAConnection, false, "the unconfigured instance's request must never reach the other instance's port");
   } finally {
     dummyDcs.close();
   }

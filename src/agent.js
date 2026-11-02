@@ -35,7 +35,6 @@ installConsoleCapture();
 const PORT = Number(process.env.AGENT_PORT || 4000);
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
 const SAVED_GAMES_ROOT = process.env.DCS_SAVED_GAMES_ROOT;
-const DEFAULT_WEBGUI_PORT = 8088;
 
 // process.execPath, through the "current" junction, resolves to
 // whichever slot is actually running, install.ps1 pins this to
@@ -478,12 +477,23 @@ app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, ex
   res.json({ ok: true, webguiPort: port, created: true });
 }));
 
-// the actual control-port proxy, routed per instance from above
+// express middleware: 502s an instance with no webgui_port set,
+// instead of falling back to a port that may belong to another
+// instance, see docs/Why.md#why-doesnt-the-webgui-proxy-fall-back-to-a-default-port
+async function requireWebguiPort(req, res, next) {
+  const { webguiPort } = await readWebguiPort(req.instanceDir);
+  if (webguiPort === null) {
+    return res.status(502).send("No webgui_port set for this instance. Assign one from /admin/servers/webgui-ports.");
+  }
+  req.webguiPort = webguiPort;
+  next();
+}
+
+// the actual control-port proxy, routed per instance from above --
+// requireWebguiPort already guarantees req.webguiPort is set, so this
+// never re-reads autoexec.cfg itself
 const webguiProxyMiddleware = createProxyMiddleware({
-  router: async (req) => {
-    const { webguiPort } = await readWebguiPort(req.instanceDir);
-    return `http://127.0.0.1:${webguiPort ?? DEFAULT_WEBGUI_PORT}`;
-  },
+  router: (req) => `http://127.0.0.1:${req.webguiPort}`,
   pathRewrite: (reqPath, req) => {
     const prefix = `/webgui/${req.params.instanceName}`;
     const rest = reqPath.startsWith(prefix) ? reqPath.slice(prefix.length) : reqPath;
@@ -505,7 +515,7 @@ const webguiProxyMiddleware = createProxyMiddleware({
   },
 });
 
-app.use("/webgui/:instanceName", checkToken, requireInstanceDir, webguiProxyMiddleware);
+app.use("/webgui/:instanceName", checkToken, requireInstanceDir, asyncHandler(requireWebguiPort), webguiProxyMiddleware);
 
 // section: dcs install webgui bundle
 
