@@ -88,7 +88,7 @@ function rotateSecondary() {
 
   backupIfExists(keyPath("secondary"));
   backupIfExists(pubKeyPath("secondary"));
-  fs.writeFileSync(keyPath("secondary"), privateKey.export({ type: "pkcs8", format: "pem" }));
+  fs.writeFileSync(keyPath("secondary"), privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
   fs.writeFileSync(pubKeyPath("secondary"), newPublicKeyPem);
 
   const history = appendToHistory(record);
@@ -126,7 +126,7 @@ function rotatePrimaryDraft() {
   // create the keys directory on first-ever rotation, same as a
   // fresh clone with no local-only/keys yet
   fs.mkdirSync(KEYS_DIR, { recursive: true });
-  fs.writeFileSync(keyPath("primary", ".next"), privateKey.export({ type: "pkcs8", format: "pem" }));
+  fs.writeFileSync(keyPath("primary", ".next"), privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
   fs.writeFileSync(pubKeyPath("primary", ".next"), newPublicKeyPem);
   fs.mkdirSync(RELEASE_DIR, { recursive: true });
   fs.writeFileSync(DRAFT_PATH, JSON.stringify(record, null, 2));

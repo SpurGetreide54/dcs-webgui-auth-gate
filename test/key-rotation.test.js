@@ -416,3 +416,14 @@ test("rotate-key.js accumulates two rotations into one published history, not an
     removeTempKeysDir(scratch);
   }
 });
+
+test("rotate-key.js writes new private key files with mode 0600, not world/group-readable", { skip: os.platform() === "win32" ? "chmod's mode argument is a no-op on win32" : false }, () => {
+  const scratch = makeTempKeysDir();
+  try {
+    runRotateKey(["secondary"], scratch.keysDir, scratch.releaseDir);
+    const mode = fs.statSync(path.join(scratch.keysDir, "key-rotation-secondary.pem")).mode & 0o777;
+    assert.equal(mode, 0o600);
+  } finally {
+    removeTempKeysDir(scratch);
+  }
+});
