@@ -38,13 +38,44 @@ function cleanupSqlite(sqlitePath) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
 }
 
+// seeds a throwaway primary+secondary keypair into a fresh scratch
+// dir, standing in for local-only/keys so rotate-key.js tests never
+// touch real key material or race each other over it
+function makeTempKeysDir() {
+  const keysDir = fs.mkdtempSync(path.join(os.tmpdir(), "key-rotation-test-keys-"));
+  const releaseDir = fs.mkdtempSync(path.join(os.tmpdir(), "key-rotation-test-release-"));
+  const primary = freshKeypair();
+  const secondary = freshKeypair();
+  fs.writeFileSync(path.join(keysDir, "key-rotation-primary.pem"), pem(primary.privateKey, true));
+  fs.writeFileSync(path.join(keysDir, "key-rotation-primary.pub.pem"), pem(primary.publicKey, false));
+  fs.writeFileSync(path.join(keysDir, "key-rotation-secondary.pem"), pem(secondary.privateKey, true));
+  fs.writeFileSync(path.join(keysDir, "key-rotation-secondary.pub.pem"), pem(secondary.publicKey, false));
+  return { keysDir, releaseDir, primary, secondary };
+}
+
+function removeTempKeysDir({ keysDir, releaseDir }) {
+  fs.rmSync(keysDir, { recursive: true, force: true });
+  fs.rmSync(releaseDir, { recursive: true, force: true });
+}
+
+// runs rotate-key.js against a scratch keys/release dir pair instead
+// of the real local-only/keys
+function runRotateKey(args, keysDir, releaseDir) {
+  const { execFileSync } = require("node:child_process");
+  const rotateScript = path.join(__dirname, "..", "scripts", "release", "rotate-key.js");
+  return execFileSync(process.execPath, [rotateScript, ...args], {
+    cwd: path.join(__dirname, ".."),
+    stdio: "pipe",
+    env: { ...process.env, ROTATE_KEY_KEYS_DIR: keysDir, ROTATE_KEY_RELEASE_DIR: releaseDir },
+  })
+    .toString()
+    .trim();
+}
+
 let keyRotation, db;
 let dummyGithub, dummyGithubBase;
 let dummyGithubRespond;
 let sqlitePath;
-
-const REAL_PRIMARY_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pub.pem");
-const REAL_SECONDARY_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "key-rotation-secondary.pub.pem");
 
 test.before(async () => {
   dummyGithub = await startDummyHttpServer((req, res) => dummyGithubRespond(req, res));
@@ -313,105 +344,50 @@ test("checkKeyState still records the attempt when the fetch itself fails", asyn
   assert.ok(after.last_checked_at);
 });
 
-test(
-  "rotate-key.js produces a record the real verifyKeyState() accepts, end to end (secondary rotation)",
-  {
-    skip: !fs.existsSync(path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem"))
-      ? "local-only/keys/key-rotation-primary.pem not present on this machine"
-      : false,
-  },
-  () => {
-    const { execFileSync } = require("node:child_process");
-    const keysDir = path.join(__dirname, "..", "local-only", "keys");
-    const releaseDir = path.join(__dirname, "..", "local-only", "release");
-    const secondaryPath = path.join(keysDir, "key-rotation-secondary.pem");
-    const secondaryPubPath = path.join(keysDir, "key-rotation-secondary.pub.pem");
-    const historyPath = path.join(keysDir, "key-rotation-history.json");
-    const backupSecondary = fs.existsSync(secondaryPath) ? fs.readFileSync(secondaryPath) : null;
-    const backupSecondaryPub = fs.existsSync(secondaryPubPath) ? fs.readFileSync(secondaryPubPath) : null;
-    const backupHistory = fs.existsSync(historyPath) ? fs.readFileSync(historyPath) : null;
-    try {
-      execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "release", "rotate-key.js"), "secondary"], {
-        cwd: path.join(__dirname, ".."),
-        stdio: "pipe",
-      });
-      const history = JSON.parse(fs.readFileSync(path.join(releaseDir, "key_state.json"), "utf8"));
-      const record = history.at(-1);
-      const { PRIMARY_PUBLIC_KEY_PEM } = require("../src/keyRotationConstants");
-      // a fully independent currentState, not the shared db row other
-      // tests in this file mutate, including with future-dated
-      // rotated_at values that could otherwise outrun this record's own
-      const currentState = { primary_public_key_pem: PRIMARY_PUBLIC_KEY_PEM, secondary_rotated_at: "2020-01-01T00:00:00.000Z" };
-      assert.equal(
-        keyRotation.verifyKeyState(record, currentState),
-        true,
-        "a record produced by rotate-key.js secondary must verify against the real hardcoded primary key"
-      );
-    } finally {
-      // restore whatever secondary key material existed before this test ran
-      if (backupSecondary) fs.writeFileSync(secondaryPath, backupSecondary);
-      if (backupSecondaryPub) fs.writeFileSync(secondaryPubPath, backupSecondaryPub);
-      if (backupHistory) fs.writeFileSync(historyPath, backupHistory);
-      else fs.rmSync(historyPath, { force: true });
-      fs.rmSync(path.join(releaseDir, "key_state.json"), { force: true });
-    }
+test("rotate-key.js produces a record the real verifyKeyState() accepts, end to end (secondary rotation)", () => {
+  const scratch = makeTempKeysDir();
+  try {
+    runRotateKey(["secondary"], scratch.keysDir, scratch.releaseDir);
+    const history = JSON.parse(fs.readFileSync(path.join(scratch.releaseDir, "key_state.json"), "utf8"));
+    const record = history.at(-1);
+    // a fully independent currentState, not the shared db row other
+    // tests in this file mutate, including with future-dated
+    // rotated_at values that could otherwise outrun this record's own
+    const currentState = { primary_public_key_pem: pem(scratch.primary.publicKey, false), secondary_rotated_at: "2020-01-01T00:00:00.000Z" };
+    assert.equal(keyRotation.verifyKeyState(record, currentState), true, "a record produced by rotate-key.js secondary must verify against the scratch dir's own primary key");
+  } finally {
+    removeTempKeysDir(scratch);
   }
-);
+});
 
-test(
-  "a primary rotation drafted by rotate-key.js, vouched by sign-key-state-with-secondary.js, finalized by rotate-key.js, verifies with the real verifyKeyState() -- all three keyStateMessage call sites agreeing byte for byte",
-  {
-    skip: !fs.existsSync(path.join(__dirname, "..", "local-only", "keys", "key-rotation-secondary.pem"))
-      ? "local-only/keys/key-rotation-secondary.pem not present on this machine"
-      : false,
-  },
-  () => {
-    const { execFileSync } = require("node:child_process");
-    const keysDir = path.join(__dirname, "..", "local-only", "keys");
-    const releaseDir = path.join(__dirname, "..", "local-only", "release");
-    const rotateScript = path.join(__dirname, "..", "scripts", "release", "rotate-key.js");
-    const signScript = path.join(__dirname, "..", "scripts", "release", "sign-key-state-with-secondary.js");
-    const draftPath = path.join(releaseDir, "key_state.draft.json");
-    const primaryPath = path.join(keysDir, "key-rotation-primary.pem");
-    const primaryPubPath = path.join(keysDir, "key-rotation-primary.pub.pem");
-    const primaryNextPath = path.join(keysDir, "key-rotation-primary.next.pem");
-    const primaryNextPubPath = path.join(keysDir, "key-rotation-primary.next.pub.pem");
-    const secondaryPubPath = path.join(keysDir, "key-rotation-secondary.pub.pem");
-    const historyPath = path.join(keysDir, "key-rotation-history.json");
-    const finalPath = path.join(releaseDir, "key_state.json");
-    const backupPrimary = fs.existsSync(primaryPath) ? fs.readFileSync(primaryPath) : null;
-    const backupPrimaryPub = fs.existsSync(primaryPubPath) ? fs.readFileSync(primaryPubPath) : null;
-    const backupHistory = fs.existsSync(historyPath) ? fs.readFileSync(historyPath) : null;
-    try {
-      execFileSync(process.execPath, [rotateScript, "primary-draft"], { cwd: path.join(__dirname, ".."), stdio: "pipe" });
-      const vouchSignature = execFileSync(process.execPath, [signScript, "--draft", draftPath, "--secondary-key", path.join(keysDir, "key-rotation-secondary.pem")], {
-        cwd: path.join(__dirname, ".."),
-        stdio: "pipe",
-      })
-        .toString()
-        .trim();
-      execFileSync(process.execPath, [rotateScript, "primary-finalize", "--vouch-signature", vouchSignature], { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+test("a primary rotation drafted by rotate-key.js, vouched by sign-key-state-with-secondary.js, finalized by rotate-key.js, verifies with the real verifyKeyState() -- all three keyStateMessage call sites agreeing byte for byte", () => {
+  const { execFileSync } = require("node:child_process");
+  const scratch = makeTempKeysDir();
+  const signScript = path.join(__dirname, "..", "scripts", "release", "sign-key-state-with-secondary.js");
+  const draftPath = path.join(scratch.releaseDir, "key_state.draft.json");
+  const finalPath = path.join(scratch.releaseDir, "key_state.json");
+  try {
+    runRotateKey(["primary-draft"], scratch.keysDir, scratch.releaseDir);
+    const vouchSignature = execFileSync(process.execPath, [signScript, "--draft", draftPath, "--secondary-key", path.join(scratch.keysDir, "key-rotation-secondary.pem")], {
+      cwd: path.join(__dirname, ".."),
+      stdio: "pipe",
+    })
+      .toString()
+      .trim();
+    runRotateKey(["primary-finalize", "--vouch-signature", vouchSignature], scratch.keysDir, scratch.releaseDir);
 
-      const history = JSON.parse(fs.readFileSync(finalPath, "utf8"));
-      const record = history.at(-1);
-      const currentState = { secondary_public_key_pem: fs.readFileSync(secondaryPubPath, "utf8"), primary_rotated_at: "2020-01-01T00:00:00.000Z" };
-      assert.equal(
-        keyRotation.verifyKeyState(record, currentState),
-        true,
-        "a primary rotation drafted, vouched, and finalized by the real scripts must verify against the real verifyKeyState()"
-      );
-    } finally {
-      if (backupPrimary) fs.writeFileSync(primaryPath, backupPrimary);
-      if (backupPrimaryPub) fs.writeFileSync(primaryPubPath, backupPrimaryPub);
-      if (backupHistory) fs.writeFileSync(historyPath, backupHistory);
-      else fs.rmSync(historyPath, { force: true });
-      fs.rmSync(primaryNextPath, { force: true });
-      fs.rmSync(primaryNextPubPath, { force: true });
-      fs.rmSync(draftPath, { force: true });
-      fs.rmSync(finalPath, { force: true });
-    }
+    const history = JSON.parse(fs.readFileSync(finalPath, "utf8"));
+    const record = history.at(-1);
+    const currentState = { secondary_public_key_pem: pem(scratch.secondary.publicKey, false), primary_rotated_at: "2020-01-01T00:00:00.000Z" };
+    assert.equal(
+      keyRotation.verifyKeyState(record, currentState),
+      true,
+      "a primary rotation drafted, vouched, and finalized by the real scripts must verify against the real verifyKeyState()"
+    );
+  } finally {
+    removeTempKeysDir(scratch);
   }
-);
+});
 
 test("rotate-key.js primary-draft refuses to overwrite a pending draft, instead of silently replacing it", () => {
   const { execFileSync } = require("node:child_process");
@@ -432,39 +408,14 @@ test("rotate-key.js primary-draft refuses to overwrite a pending draft, instead 
   }
 });
 
-test(
-  "rotate-key.js accumulates two real rotations into one published history, not an overwrite",
-  {
-    skip: !fs.existsSync(path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem"))
-      ? "local-only/keys/key-rotation-primary.pem not present on this machine"
-      : false,
-  },
-  () => {
-    const { execFileSync } = require("node:child_process");
-    const keysDir = path.join(__dirname, "..", "local-only", "keys");
-    const releaseDir = path.join(__dirname, "..", "local-only", "release");
-    const secondaryPath = path.join(keysDir, "key-rotation-secondary.pem");
-    const secondaryPubPath = path.join(keysDir, "key-rotation-secondary.pub.pem");
-    const historyPath = path.join(keysDir, "key-rotation-history.json");
-    const backupSecondary = fs.existsSync(secondaryPath) ? fs.readFileSync(secondaryPath) : null;
-    const backupSecondaryPub = fs.existsSync(secondaryPubPath) ? fs.readFileSync(secondaryPubPath) : null;
-    const backupHistory = fs.existsSync(historyPath) ? fs.readFileSync(historyPath) : null;
-    try {
-      const run = () =>
-        execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "release", "rotate-key.js"), "secondary"], {
-          cwd: path.join(__dirname, ".."),
-          stdio: "pipe",
-        });
-      run();
-      run();
-      const history = JSON.parse(fs.readFileSync(path.join(releaseDir, "key_state.json"), "utf8"));
-      assert.equal(history.length, (backupHistory ? JSON.parse(backupHistory).length : 0) + 2, "both rotations must be present, not just the latest");
-    } finally {
-      if (backupSecondary) fs.writeFileSync(secondaryPath, backupSecondary);
-      if (backupSecondaryPub) fs.writeFileSync(secondaryPubPath, backupSecondaryPub);
-      if (backupHistory) fs.writeFileSync(historyPath, backupHistory);
-      else fs.rmSync(historyPath, { force: true });
-      fs.rmSync(path.join(releaseDir, "key_state.json"), { force: true });
-    }
+test("rotate-key.js accumulates two rotations into one published history, not an overwrite", () => {
+  const scratch = makeTempKeysDir();
+  try {
+    runRotateKey(["secondary"], scratch.keysDir, scratch.releaseDir);
+    runRotateKey(["secondary"], scratch.keysDir, scratch.releaseDir);
+    const history = JSON.parse(fs.readFileSync(path.join(scratch.releaseDir, "key_state.json"), "utf8"));
+    assert.equal(history.length, 2, "both rotations must be present, not just the latest");
+  } finally {
+    removeTempKeysDir(scratch);
   }
-);
+});

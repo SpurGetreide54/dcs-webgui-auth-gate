@@ -13,8 +13,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { keyStateMessage } = require("../../src/keyRotationConstants");
 
-const KEYS_DIR = path.join(__dirname, "..", "..", "local-only", "keys");
-const RELEASE_DIR = path.join(__dirname, "..", "..", "local-only", "release");
+// override lets tests point this script at a throwaway temp
+// directory instead of the real local-only/keys
+const KEYS_DIR = process.env.ROTATE_KEY_KEYS_DIR || path.join(__dirname, "..", "..", "local-only", "keys");
+// same override pattern, for the release output directory
+const RELEASE_DIR = process.env.ROTATE_KEY_RELEASE_DIR || path.join(__dirname, "..", "..", "local-only", "release");
 const DRAFT_PATH = path.join(RELEASE_DIR, "key_state.draft.json");
 const FINAL_PATH = path.join(RELEASE_DIR, "key_state.json");
 
