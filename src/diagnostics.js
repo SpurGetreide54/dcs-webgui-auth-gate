@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const db = require("./db");
 const appLog = require("./appLog");
 const stateDir = require("./stateDir");
+const agentClient = require("./agentClient");
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 // how many missed hourly update checks in a row count as "keeps
@@ -13,8 +14,6 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_STALE_MULTIPLIER = 3;
 const PING_TIMEOUT_MS = 5 * 1000;
 const ROLLBACK_LOG_SCAN_LINES = 1000;
-const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
-const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 
 // the rollback unit's own exact log line, see
 // scripts/systemd/dcs-webgui-auth-gate-rollback.service
@@ -40,13 +39,12 @@ function updateDiagnosticsState(fields) {
 
 // one of "ok" | "not_configured" | "unreachable" | "unauthorized" | "unexpected_response"
 async function checkMissionAgent() {
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return "not_configured";
+  if (!agentClient.isConfigured()) return "not_configured";
   let res;
   try {
-    res = await fetch(new URL("/ping", MISSION_AGENT_URL), {
-      headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` },
-      signal: AbortSignal.timeout(PING_TIMEOUT_MS),
-    });
+    // shorter than agentClient's own default: a stale ping should
+    // surface on the diagnostics page quickly, not hang near a minute
+    res = await agentClient.agentFetch("/ping", { timeoutMs: PING_TIMEOUT_MS });
   } catch {
     // connection refused, timeout, dns failure: all the same to an admin
     return "unreachable";

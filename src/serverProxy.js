@@ -4,10 +4,9 @@ const { createProxyMiddleware } = require("http-proxy-middleware");
 const controlTokens = require("./controlTokens");
 const serversDb = require("./servers");
 const auth = require("./auth");
+const agentClient = require("./agentClient");
 
 const CONTROL_PORT = Number(process.env.WEBGUI_CONTROL_PORT || 8088);
-const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
-const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 
 // build the control-port proxy app, routing each request to the right
 // dcs server by control token, never by anything the client supplies
@@ -54,14 +53,14 @@ function buildControlProxyApp() {
     if (!server) return res.status(404).send("Unknown server.");
 
     // refuse to proxy anywhere if the agent isn't configured at all
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    if (!agentClient.isConfigured()) {
       return res.status(500).send("Mission agent is not configured.");
     }
 
     // the dcs host's control port only accepts 127.0.0.1 on its own
     // machine, so the agent running there does the last hop, this
     // just relays to it, scoped to this token's own server
-    req.dcsAgentUrl = MISSION_AGENT_URL;
+    req.dcsAgentUrl = agentClient.getUrl();
     req.dcsAgentPathPrefix = `/webgui/${encodeURIComponent(server.instance_name)}`;
     next();
   });
@@ -75,7 +74,7 @@ function buildControlProxyApp() {
       proxyReq(proxyReq) {
         // server to server only, scrub every browser-identifying header
         // before this hop so nothing admin-specific reaches the agent
-        proxyReq.setHeader("Authorization", `Bearer ${MISSION_AGENT_TOKEN}`);
+        proxyReq.setHeader("Authorization", `Bearer ${agentClient.getToken()}`);
         proxyReq.removeHeader("x-auth-gate-token");
         proxyReq.removeHeader("cookie");
         proxyReq.removeHeader("origin");

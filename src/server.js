@@ -17,6 +17,7 @@ const invitesDb = require("./invites");
 const views = require("./views");
 const controlTokens = require("./controlTokens");
 const serverProxy = require("./serverProxy");
+const agentClient = require("./agentClient");
 const updateCheck = require("./updateCheck");
 const diagnostics = require("./diagnostics");
 const keyRotation = require("./keyRotation");
@@ -37,8 +38,6 @@ if (stateDir.deprecatedVarsSet.length > 0) {
 }
 
 const PORT = Number(process.env.PORT || 3000);
-const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
-const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
 // default true, disable only for local http dev
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
@@ -478,8 +477,7 @@ serversRouter.post("/:id/delete", (req, res) => {
 
 // ask the agent what webgui_port (if any) an instance already has
 async function agentStatus(instanceName) {
-  const url = new URL(`/webgui/${encodeURIComponent(instanceName)}/status`, MISSION_AGENT_URL);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  const res = await agentClient.agentFetch(`/webgui/${encodeURIComponent(instanceName)}/status`);
   if (!res.ok) throw new Error(`agent returned ${res.status} for ${instanceName}`);
   return res.json();
 }
@@ -506,7 +504,7 @@ async function buildWebguiPortProposal() {
 
 serversRouter.get("/webgui-ports", asyncHandler(async (req, res) => {
   const { error } = flash.readFlash(req, res);
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+  if (!agentClient.isConfigured()) {
     return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
   }
   try {
@@ -518,7 +516,7 @@ serversRouter.get("/webgui-ports", asyncHandler(async (req, res) => {
 }));
 
 serversRouter.post("/webgui-ports/confirm", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+  if (!agentClient.isConfigured()) {
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
   }
@@ -538,10 +536,9 @@ serversRouter.post("/webgui-ports/confirm", express.urlencoded({ extended: false
     }
 
     for (const { server, proposedPort } of proposals) {
-      const url = new URL(`/webgui/${encodeURIComponent(server.instance_name)}/ensure-port`, MISSION_AGENT_URL);
-      const agentRes = await fetch(url, {
+      const agentRes = await agentClient.agentFetch(`/webgui/${encodeURIComponent(server.instance_name)}/ensure-port`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ port: proposedPort }),
       });
       if (!agentRes.ok) throw new Error(`agent returned ${agentRes.status} for ${server.instance_name}`);
@@ -565,9 +562,8 @@ serversRouter.post("/webgui-ports/confirm", express.urlencoded({ extended: false
 
 // ask the agent for a tarball of one install's own WebGUI folder
 async function fetchWebguiBundle(installPath) {
-  const url = new URL("/dcs-install/webgui-bundle", MISSION_AGENT_URL);
-  url.searchParams.set("path", installPath);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  const agentPath = `/dcs-install/webgui-bundle?${new URLSearchParams({ path: installPath })}`;
+  const res = await agentClient.agentFetch(agentPath);
   if (!res.ok) {
     throw new Error(`agent returned ${res.status}: ${await res.text()}`);
   }
@@ -575,7 +571,7 @@ async function fetchWebguiBundle(installPath) {
 }
 
 serversRouter.get("/webgui-sync", (req, res) => {
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+  if (!agentClient.isConfigured()) {
     return res.status(500).send(loadServersPageData(req, { error: "Mission agent is not configured." }));
   }
   res.send(views.webguiSyncPage({ admin: req.admin, servers: serversDb.getAllServers(), ...flash.readFlash(req, res) }));
@@ -584,7 +580,7 @@ serversRouter.get("/webgui-sync", (req, res) => {
 // two path segments deliberately, a bare "/webgui-sync" would be
 // shadowed by the earlier POST "/:id" route matching "webgui-sync" as an id
 serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+  if (!agentClient.isConfigured()) {
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
   }
@@ -761,9 +757,7 @@ function parseLogLines(text) {
 
 // fetch and parse the mission-agent's own log entries
 async function fetchAgentLogEntries() {
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured.");
-  const url = new URL("/logs", MISSION_AGENT_URL);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  const res = await agentClient.agentFetch("/logs");
   if (!res.ok) throw new Error(`agent returned ${res.status}`);
   return parseLogLines(await res.text());
 }
@@ -847,8 +841,7 @@ function loadMissionAccess(req) {
 // ask the agent for one instance's mission list, rejecting any reply
 // the view can't safely render instead of letting it throw later
 async function fetchMissionsList(instanceName) {
-  const url = new URL(`/missions/${encodeURIComponent(instanceName)}`, MISSION_AGENT_URL);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  const res = await agentClient.agentFetch(`/missions/${encodeURIComponent(instanceName)}`);
   if (!res.ok) throw new Error(`agent returned ${res.status}`);
   const { missions } = await res.json();
   if (!Array.isArray(missions) || missions.some((m) => typeof m?.modifiedAt !== "string")) {
@@ -860,8 +853,7 @@ async function fetchMissionsList(instanceName) {
 // ask the agent for one instance's trashed-mission list, same shape
 // check as fetchMissionsList above
 async function fetchTrashList(instanceName) {
-  const url = new URL(`/missions/${encodeURIComponent(instanceName)}/trash`, MISSION_AGENT_URL);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` } });
+  const res = await agentClient.agentFetch(`/missions/${encodeURIComponent(instanceName)}/trash`);
   if (!res.ok) throw new Error(`agent returned ${res.status}`);
   const { trash } = await res.json();
   if (!Array.isArray(trash) || trash.some((t) => typeof t?.trashedAt !== "string")) {
@@ -879,7 +871,7 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
   // the list is also needed to pick a mission for download/delete,
   // not shown only to admins with the view flag itself
   if (access.canView || access.canDownload || access.canDelete) {
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    if (!agentClient.isConfigured()) {
       pageError = pageError || "Mission agent is not configured.";
     } else {
       try {
@@ -921,7 +913,7 @@ app.post(
       flash.setFlash(res, { error: "No .miz file provided." });
       return res.redirect(missionsUrl);
     }
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) {
+    if (!agentClient.isConfigured()) {
       flash.setFlash(res, { error: "Mission agent is not configured." });
       return res.redirect(missionsUrl);
     }
@@ -933,11 +925,7 @@ app.post(
         new Blob([req.file.buffer], { type: "application/octet-stream" }),
         req.file.originalname
       );
-      const agentRes = await fetch(new URL("/upload", MISSION_AGENT_URL), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` },
-        body: form,
-      });
+      const agentRes = await agentClient.agentFetch("/upload", { method: "POST", body: form });
       if (!agentRes.ok) {
         const detail = await agentRes.text().catch(() => "");
         flash.setFlash(res, { error: `Mission agent rejected the upload: ${detail || agentRes.status}` });
@@ -964,11 +952,11 @@ app.post(
   asyncHandler(async (req, res) => {
     const names = [].concat(req.body?.mission || []);
     if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No missions selected." });
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    if (!agentClient.isConfigured()) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
     try {
-      const agentRes = await fetch(new URL(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/download`, MISSION_AGENT_URL), {
+      const agentRes = await agentClient.agentFetch(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/download`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ missions: names }),
       });
       if (!agentRes.ok) {
@@ -993,11 +981,11 @@ app.post(
   asyncHandler(async (req, res) => {
     const names = [].concat(req.body?.mission || []);
     if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No missions selected." });
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    if (!agentClient.isConfigured()) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
     try {
-      const agentRes = await fetch(new URL(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/trash`, MISSION_AGENT_URL), {
+      const agentRes = await agentClient.agentFetch(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/trash`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ missions: names }),
       });
       if (!agentRes.ok) {
@@ -1018,12 +1006,12 @@ app.post(
   asyncHandler(async (req, res) => {
     const names = [].concat(req.body?.trash || []);
     if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No trash entries selected." });
-    if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    if (!agentClient.isConfigured()) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
     let restored = names;
     try {
-      const agentRes = await fetch(new URL(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/trash/restore`, MISSION_AGENT_URL), {
+      const agentRes = await agentClient.agentFetch(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/trash/restore`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trash: names }),
       });
       if (!agentRes.ok) {

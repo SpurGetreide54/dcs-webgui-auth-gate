@@ -378,7 +378,21 @@ control-panel VM and the DCS host (see
 internet, so even the agent's ~96MB build should move in single-digit
 seconds.<br>Anything still running after a minute already means
 something's broken, not just slow, and failing fast beats an admin
-waiting minutes to find that out.
+waiting minutes to find that out. This same reasoning, not just the
+relay's own call, is why `agentClient.js` applies it as every agent
+call's default timeout, not only this one's.
+
+## Why does agentClient read its env vars lazily?
+
+`MISSION_AGENT_URL`/`MISSION_AGENT_TOKEN` used to be read once, at
+module load, independently in four different files.<br>A module-level
+read is exactly what forced `test/diagnostics.test.js` to bust
+`require.cache` and re-require `diagnostics.js` every time a test
+needed a different value -- a dance that would otherwise need
+extending to every module that reads these vars.<br>Reading
+`process.env` fresh inside `agentFetch`/`isConfigured`/`getUrl`/`getToken`
+at call time means any test can just set the env var before calling,
+no re-require needed, for every caller at once.
 
 ## Why does the auth-gate relay the agent's update?
 

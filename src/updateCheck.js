@@ -13,6 +13,7 @@ const { Readable, Transform } = require("node:stream");
 const tar = require("tar");
 const db = require("./db");
 const activeSlot = require("./activeSlot");
+const agentClient = require("./agentClient");
 const { GITHUB_REPO } = require("./updateConstants");
 
 // section: constants
@@ -21,8 +22,6 @@ const { GITHUB_REPO } = require("./updateConstants");
 // of the real github api
 const GITHUB_API_BASE = process.env.GITHUB_API_BASE_OVERRIDE || "https://api.github.com";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
-const MISSION_AGENT_URL = process.env.MISSION_AGENT_URL;
-const MISSION_AGENT_TOKEN = process.env.MISSION_AGENT_TOKEN;
 
 // read this install's own current version from package.json
 function getCurrentVersion() {
@@ -275,7 +274,7 @@ const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 60 
 // whatever bytes a token holder sends
 // see docs/Why.md#why-does-the-auth-gate-relay-the-agents-update
 async function relayAgentUpdate(archivePath, manifest) {
-  if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured; cannot relay its update.");
+  if (!agentClient.isConfigured()) throw new Error("Mission agent is not configured; cannot relay its update.");
   const fileBuffer = await fsp.readFile(archivePath);
   console.debug(`Update: uploading agent build to the mission agent (${fileBuffer.length} bytes)...`);
 
@@ -289,7 +288,6 @@ async function relayAgentUpdate(archivePath, manifest) {
   });
 
   const headers = {
-    Authorization: `Bearer ${MISSION_AGENT_TOKEN}`,
     "Content-Type": "application/octet-stream",
     "X-Manifest-Signed": JSON.stringify(signed),
     "X-Manifest-Signature": signature,
@@ -297,20 +295,16 @@ async function relayAgentUpdate(archivePath, manifest) {
   // branch: at least one rotation has ever been published
   if (history) headers["X-Key-State-History"] = JSON.stringify(history);
 
-  const stageRes = await fetch(new URL("/self-update/stage", MISSION_AGENT_URL), {
+  const stageRes = await agentClient.agentFetch("/self-update/stage", {
     method: "POST",
     headers,
     body: fileBuffer,
-    signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
+    timeoutMs: AGENT_RELAY_TIMEOUT_MS,
   });
   if (!stageRes.ok) throw new Error(`Agent rejected the staged update: ${await stageRes.text().catch(() => stageRes.status)}`);
   console.debug("Update: agent build staged, committing...");
 
-  const commitRes = await fetch(new URL("/self-update/commit", MISSION_AGENT_URL), {
-    method: "POST",
-    headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}` },
-    signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
-  });
+  const commitRes = await agentClient.agentFetch("/self-update/commit", { method: "POST", timeoutMs: AGENT_RELAY_TIMEOUT_MS });
   if (!commitRes.ok) throw new Error(`Agent rejected committing the staged update: ${await commitRes.text().catch(() => commitRes.status)}`);
   console.debug("Update: agent committed and is restarting.");
 }
