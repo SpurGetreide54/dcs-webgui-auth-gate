@@ -7,9 +7,11 @@
 #   sh scripts/release/build-release.sh \
 #     --version 1.5.1-alpha \
 #     --changelog-url https://github.com/SpurGetreide54/dcs-webgui-auth-gate/releases/tag/1.5.1-alpha \
+#     --key local-only/keys/key-rotation-primary.pem \
 #     [--needs-service-update] \
 #     [--tag 1.5.1-alpha] \
-#     [--audit-level <level>]
+#     [--audit-level <level>] \
+#     [--allow-legacy-key]
 #
 # Bump package.json's and VERSION's version by hand first, see
 # local-only/versioning.md. This script only reads them, never writes
@@ -22,6 +24,8 @@ TAG=""
 AUDIT_LEVEL=""
 VERSION_FLAG=""
 CHANGELOG_URL=""
+KEY_PATH=""
+ALLOW_LEGACY_KEY=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,6 +49,14 @@ while [ $# -gt 0 ]; do
       AUDIT_LEVEL="$2"
       shift 2
       ;;
+    --key)
+      KEY_PATH="$2"
+      shift 2
+      ;;
+    --allow-legacy-key)
+      ALLOW_LEGACY_KEY="--allow-legacy-key"
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 1
@@ -52,8 +64,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -z "$VERSION_FLAG" ] || [ -z "$CHANGELOG_URL" ]; then
-  echo "Usage: sh scripts/release/build-release.sh --version <v> --changelog-url <url> [--needs-service-update] [--tag <tag>] [--audit-level <level>]" >&2
+if [ -z "$VERSION_FLAG" ] || [ -z "$CHANGELOG_URL" ] || [ -z "$KEY_PATH" ]; then
+  echo "Usage: sh scripts/release/build-release.sh --version <v> --changelog-url <url> --key <path> [--needs-service-update] [--tag <tag>] [--audit-level <level>] [--allow-legacy-key]" >&2
   exit 1
 fi
 
@@ -85,12 +97,12 @@ sh "$ROOT_DIR/scripts/build-agent-manual-zip.sh"
 echo "###### Step 5/5: sign the update manifest ######"
 AUTH_GATE_TARBALL="$ROOT_DIR/local-only/release/auth-gate/auth-gate-$PKG_VERSION.tar.gz"
 AGENT_EXE="$ROOT_DIR/local-only/release/agent/agent-$PKG_VERSION.exe"
-SIGN_ARGS="--version $PKG_VERSION --changelog-url $CHANGELOG_URL --auth-gate $AUTH_GATE_TARBALL --agent $AGENT_EXE"
+SIGN_ARGS="--version $PKG_VERSION --changelog-url $CHANGELOG_URL --auth-gate $AUTH_GATE_TARBALL --agent $AGENT_EXE --key $KEY_PATH"
 if [ -n "$TAG" ]; then
   SIGN_ARGS="$SIGN_ARGS --tag $TAG"
 fi
 # shellcheck disable=SC2086
-node "$ROOT_DIR/scripts/release/sign-updates.js" $SIGN_ARGS $NEEDS_SERVICE_UPDATE
+node "$ROOT_DIR/scripts/release/sign-updates.js" $SIGN_ARGS $NEEDS_SERVICE_UPDATE $ALLOW_LEGACY_KEY
 
 RELEASE_TAG="${TAG:-$PKG_VERSION}"
 cat <<EOF

@@ -229,6 +229,7 @@ test("sign-updates.js produces a manifest the real verifyManifest() accepts, end
         agentPath,
         "--key",
         keyPath,
+        "--allow-legacy-key",
         "--out",
         manifestPath,
       ],
@@ -247,6 +248,112 @@ test("sign-updates.js produces a manifest the real verifyManifest() accepts, end
   } finally {
     fs.rmSync(scratchDir, { recursive: true, force: true });
   }
+});
+
+test("sign-updates.js refuses to sign with a key that doesn't match the current trust root, unless --allow-legacy-key is passed", () => {
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-updates-test-"));
+  try {
+    const { privateKey } = freshKeypair();
+    const keyPath = path.join(scratchDir, "key.pem");
+    fs.writeFileSync(keyPath, privateKey.export({ type: "pkcs8", format: "pem" }));
+
+    const authGatePath = path.join(scratchDir, "auth-gate-1.2.3.tar.gz");
+    const agentPath = path.join(scratchDir, "agent-1.2.3.exe");
+    fs.writeFileSync(authGatePath, "fake auth-gate tarball bytes");
+    fs.writeFileSync(agentPath, "fake agent exe bytes");
+
+    const { execFileSync } = require("node:child_process");
+    const runSign = (extraArgs = []) =>
+      execFileSync(
+        process.execPath,
+        [
+          path.join(__dirname, "..", "scripts", "release", "sign-updates.js"),
+          "--version",
+          "1.2.3",
+          "--changelog-url",
+          "https://example.test/changelog",
+          "--auth-gate",
+          authGatePath,
+          "--agent",
+          agentPath,
+          "--key",
+          keyPath,
+          "--out",
+          path.join(scratchDir, "signed_updates.json"),
+          ...extraArgs,
+        ],
+        { cwd: path.join(__dirname, ".."), stdio: "pipe" }
+      );
+
+    assert.throws(() => runSign(), /does not match the current trust root/);
+    // --allow-legacy-key is the one documented bypass
+    assert.doesNotThrow(() => runSign(["--allow-legacy-key"]));
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  }
+});
+
+test(
+  "sign-updates.js signs without --allow-legacy-key using the real, current primary key, which must match the trust root it resolves to",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
+  () => {
+    const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-updates-test-"));
+    try {
+      const authGatePath = path.join(scratchDir, "auth-gate-1.2.3.tar.gz");
+      const agentPath = path.join(scratchDir, "agent-1.2.3.exe");
+      fs.writeFileSync(authGatePath, "fake auth-gate tarball bytes");
+      fs.writeFileSync(agentPath, "fake agent exe bytes");
+      const manifestPath = path.join(scratchDir, "signed_updates.json");
+
+      const { execFileSync } = require("node:child_process");
+      execFileSync(
+        process.execPath,
+        [
+          path.join(__dirname, "..", "scripts", "release", "sign-updates.js"),
+          "--version",
+          "1.2.3",
+          "--changelog-url",
+          "https://example.test/changelog",
+          "--auth-gate",
+          authGatePath,
+          "--agent",
+          agentPath,
+          "--key",
+          REAL_PRIVATE_KEY_PATH,
+          "--out",
+          manifestPath,
+        ],
+        { cwd: path.join(__dirname, ".."), stdio: "pipe" }
+      );
+
+      assert.ok(fs.existsSync(manifestPath));
+    } finally {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test("sign-updates.js requires --key, with no hardcoded default path", () => {
+  const { execFileSync } = require("node:child_process");
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        [
+          path.join(__dirname, "..", "scripts", "release", "sign-updates.js"),
+          "--version",
+          "1.2.3",
+          "--changelog-url",
+          "https://example.test/changelog",
+          "--auth-gate",
+          "auth-gate.tar.gz",
+          "--agent",
+          "agent.exe",
+        ],
+        { cwd: path.join(__dirname, ".."), stdio: "pipe" }
+      ),
+    /--key is required/
+  );
 });
 
 test("updateConstants.js has no side effects: no db import, no sqlite file created", () => {
