@@ -350,6 +350,34 @@ test(
 );
 
 test(
+  "a failed checkForUpdate leaves an already-found pending update in place, instead of erasing it",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: "9.9.9-pending",
+      changelog_url: "https://example.test/pending-changelog",
+      needs_service_update: true,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "d".repeat(64) }],
+    });
+    serveManifest(manifest);
+    assert.equal(await updateCheck.checkForUpdate(), true);
+    const pending = updateCheck.getUpdateState();
+    assert.equal(pending.available_version, "9.9.9-pending");
+
+    // now a transient failure, same as a github 5xx or a dns blip
+    dummyGithubRespond = (req, res) => res.writeHead(500).end("boom");
+    await assert.rejects(() => updateCheck.checkForUpdate());
+
+    const after = updateCheck.getUpdateState();
+    assert.equal(after.available_version, "9.9.9-pending", "the pending update must survive a failed check");
+    assert.equal(after.changelog_url, "https://example.test/pending-changelog");
+    assert.equal(after.needs_service_update, 1);
+    assert.notEqual(after.last_checked_at, pending.last_checked_at, "the attempt must still be recorded");
+  }
+);
+
+test(
   "checkForUpdate resolves false when the latest release matches the current version",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
   async () => {

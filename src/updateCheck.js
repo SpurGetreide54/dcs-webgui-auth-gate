@@ -167,6 +167,12 @@ function recordUpdateCheckSucceeded(at) {
   db.prepare("UPDATE update_state SET last_succeeded_at = ? WHERE id = 1").run(at);
 }
 
+// records only that an attempt happened, leaving any already-found
+// pending update in place instead of erasing it on a transient failure
+function setLastCheckedAt(at) {
+  db.prepare("UPDATE update_state SET last_checked_at = ? WHERE id = 1").run(at);
+}
+
 // the hourly poll, also callable directly for an admin's "check now"
 // see docs/Why.md#why-does-checkforupdate-re-throw-its-own-errors
 async function checkForUpdate() {
@@ -186,7 +192,7 @@ async function checkForUpdate() {
     recordUpdateCheckSucceeded(now);
     return hasUpdate;
   } catch (err) {
-    setUpdateState({ lastCheckedAt: now, availableVersion: null, changelogUrl: null, needsServiceUpdate: false });
+    setLastCheckedAt(now);
     throw err;
   }
 }
