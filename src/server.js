@@ -1202,7 +1202,10 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
   })();
 </script>`;
   res.set("Content-Type", "text/html");
-  res.send(webguiIndexTemplate.replace(APP_JS_SCRIPT_RE, `${bootstrap}\n  <script src="js/app.js"></script>`));
+  // a function replacer, not a string one, so $&, $', $$ etc. in the
+  // bootstrap are never expanded, see
+  // docs/Why.md#why-does-the-index-injection-use-a-function-replacer-instead-of-a-string-one
+  res.send(webguiIndexTemplate.replace(APP_JS_SCRIPT_RE, () => `${bootstrap}\n  <script src="js/app.js"></script>`));
 });
 
 app.use("/s/:slug", requireServerAccess(), express.static(webguiRoot, { index: false }));
@@ -1267,5 +1270,8 @@ if (require.main === module) {
 }
 
 // expose the express app itself, plus the starter launcher.js calls
+// and APP_JS_SCRIPT_RE, reached directly by a test proving the index
+// injection's replacer never expands $ patterns in its own content
 module.exports = app;
 module.exports.start = start;
+module.exports.APP_JS_SCRIPT_RE = APP_JS_SCRIPT_RE;

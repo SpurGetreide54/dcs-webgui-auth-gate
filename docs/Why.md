@@ -798,6 +798,19 @@ DCS install, never a per-server secret.<br>Mirroring that same
 shortcut here, for the reverse-proxied case, is exactly as legitimate
 as the app's own file://+localhost path already is.
 
+## Why does the index injection use a function replacer instead of a string one?
+
+A string second argument to `String.prototype.replace` treats `$&`,
+`` $` ``, `$'`, `$$` and `$<name>` as special, expanding them against
+whatever the regex matched.<br>`APP_JS_SCRIPT_RE` has no capture group
+today, so `$1` in the bootstrap stays literal by accident, not by
+design -- adding a capture group later, or a `$`-containing token
+anywhere in the bootstrap script, would silently corrupt the injected
+JS with no error, just a webgui that shows "server not
+responding".<br>A function replacer's return value is inserted
+verbatim, with no such expansion, closing that off for good regardless
+of what the regex or the bootstrap script later become.
+
 ## Why does the fetch shim rebuild a Request instead of just reading its url?
 
 A plain string is the common, confirmed-real case (`fetch(url, options)` is

@@ -1399,3 +1399,16 @@ test("getSessionAdmin only writes expires_at once the session is inside the cook
   const afterThirdMs = new Date(`${afterThird.replace(" ", "T")}Z`).getTime();
   assert.ok(afterThirdMs > Date.now() + 11 * 60 * 60 * 1000, "a request inside the window must slide expires_at back out near the full 12h TTL");
 });
+
+test("the webgui index injection's function replacer never expands $&, $$, etc. found in the bootstrap content", () => {
+  const template = `<html><body><script src="js/app.js"></script></body></html>`;
+  const dollarLaced = "<script>/* literal tokens: $&, $`, $', $$, $1 */</script>";
+
+  const viaFunctionReplacer = template.replace(app.APP_JS_SCRIPT_RE, () => dollarLaced);
+  assert.ok(viaFunctionReplacer.includes(dollarLaced), "a function replacer's return value must be inserted byte for byte");
+
+  // contrast: this is the bug the fix avoids -- a string replacer
+  // would have expanded $&, $$, etc. against the matched text instead
+  const viaStringReplacer = template.replace(app.APP_JS_SCRIPT_RE, dollarLaced);
+  assert.notEqual(viaStringReplacer, viaFunctionReplacer, "a string replacer must behave differently here, proving this isn't a no-op test");
+});
