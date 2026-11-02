@@ -812,6 +812,18 @@ DCS install, never a per-server secret.<br>Mirroring that same
 shortcut here, for the reverse-proxied case, is exactly as legitimate
 as the app's own file://+localhost path already is.
 
+## Why does the missions page fetch its lists concurrently?
+
+`fetchMissionsList` and `fetchTrashList` are two independent agent
+round trips -- neither needs the other's result, so awaiting them one
+after another only adds a second network hop's worth of latency to
+every missions-page load (and every POST that re-renders it) for no
+reason.<br>`Promise.all` runs them together, with the trash fetch
+kept behind the same `access.canDelete` gate it already had, as a
+`Promise.resolve([])` stand-in when it doesn't apply -- so a
+view-only or download-only admin still pays for exactly one agent
+call, not two.
+
 ## Why does the index injection use a function replacer instead of a string one?
 
 A string second argument to `String.prototype.replace` treats `$&`,

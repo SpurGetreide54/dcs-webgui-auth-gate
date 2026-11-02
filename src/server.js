@@ -875,9 +875,15 @@ async function renderMissionsPage(req, res, { status = 200, error, notice } = {}
       pageError = pageError || "Mission agent is not configured.";
     } else {
       try {
-        missions = await fetchMissionsList(req.dcsServer.instance_name);
-        // trash restore needs the same permission as trash itself
-        if (access.canDelete) trash = await fetchTrashList(req.dcsServer.instance_name);
+        // neither list needs the other's result, so both round trips
+        // run concurrently instead of paying for them one after the
+        // other; trash restore needs the same permission as trash itself
+        const [fetchedMissions, fetchedTrash] = await Promise.all([
+          fetchMissionsList(req.dcsServer.instance_name),
+          access.canDelete ? fetchTrashList(req.dcsServer.instance_name) : Promise.resolve([]),
+        ]);
+        missions = fetchedMissions;
+        trash = fetchedTrash;
       } catch (err) {
         pageError = pageError || `Could not reach the mission agent: ${err.message}`;
       }

@@ -80,6 +80,10 @@ let dummyAgentLogsShouldFail = false;
 // null means the default { missions: [] } below
 let dummyAgentMissionsOverride = null;
 
+// delays the plain missions-list response, set per test to prove the
+// trash-list call isn't waiting on it first
+let dummyAgentMissionsDelayMs = 0;
+
 // stands in for the real github api updateCheck.js's checkForUpdate()
 // reaches, set per test via dummyGithubRespond
 let dummyGithub, dummyGithubBase;
@@ -93,7 +97,13 @@ test.before(async () => {
     const chunks = [];
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
-      dummyAgentCalls.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: Buffer.concat(chunks) });
+      dummyAgentCalls.push({
+        method: req.method,
+        url: req.url,
+        authorization: req.headers.authorization,
+        body: Buffer.concat(chunks),
+        receivedAt: Date.now(),
+      });
       if (req.method === "GET" && req.url === "/logs") {
         if (dummyAgentLogsShouldFail) {
           res.writeHead(502, { "Content-Type": "text/plain" });
@@ -102,18 +112,23 @@ test.before(async () => {
         res.writeHead(200, { "Content-Type": "text/plain" });
         return res.end(dummyAgentLogText);
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
       // a trash list get needs its own { trash: [...] } shape, distinct
       // from the plain list's { missions: [...] }, matching src/agent.js
       if (req.method === "GET" && req.url.startsWith("/missions/") && req.url.endsWith("/trash")) {
+        res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ trash: [] }));
       }
       // a list get needs a real { missions: [...] } shape, not the
       // generic { ok: true } every other stubbed endpoint returns,
-      // overridable per test to exercise a malformed reply
+      // overridable per test to exercise a malformed reply; delayable
+      // to prove the trash-list call above doesn't wait on this one
       if (req.method === "GET" && req.url.startsWith("/missions/")) {
-        return res.end(JSON.stringify(dummyAgentMissionsOverride || { missions: [] }));
+        return setTimeout(() => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(dummyAgentMissionsOverride || { missions: [] }));
+        }, dummyAgentMissionsDelayMs);
       }
+      res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     });
   });
@@ -469,11 +484,27 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
       .run("deleteonlyadmin", auth.hashPassword("delete-only-long-password")).lastInsertRowid;
     serversDb.setAccess(deleteOnlyId, trainingServerId, { canDeleteMissions: true });
     const deleteOnlyCookie = await loginAs("deleteonlyadmin", "delete-only-long-password");
+
+    // the missions list and the trash list must be fetched concurrently,
+    // not one after the other, see docs/Why.md#why-does-the-missions-page-fetch-its-lists-concurrently
+    const missionsDelayForThisCheck = 150;
+    dummyAgentMissionsDelayMs = missionsDelayForThisCheck;
+    const callsBeforeDeleteOnly = dummyAgentCalls.length;
     const deleteOnlyRes = await fetch(`${base}/s/training/missions`, { headers: { Cookie: deleteOnlyCookie } });
+    dummyAgentMissionsDelayMs = 0;
     assert.equal(deleteOnlyRes.status, 200, "delete-only access must be enough to reach the missions page");
     const deleteOnlyHtml = await deleteOnlyRes.text();
     assert.match(deleteOnlyHtml, /<h2>Trash<\/h2>/, "delete rights must show the trash section");
     assert.match(deleteOnlyHtml, /Restore selected/, "delete rights must show the restore button");
+
+    const thisPageLoadCalls = dummyAgentCalls.slice(callsBeforeDeleteOnly);
+    const missionsCall = thisPageLoadCalls.find((c) => c.method === "GET" && c.url === "/missions/training");
+    const trashCall = thisPageLoadCalls.find((c) => c.method === "GET" && c.url === "/missions/training/trash");
+    assert.ok(missionsCall && trashCall, "this page load must have made both an agent list call and a trash call");
+    assert.ok(
+      Math.abs(trashCall.receivedAt - missionsCall.receivedAt) < missionsDelayForThisCheck,
+      "the trash call must arrive at the agent well before the deliberately-delayed missions call responds, proving they're concurrent, not sequential"
+    );
 
     const forbiddenRestore = await fetch(`${base}/s/training/missions/trash/restore`, {
       method: "POST",
