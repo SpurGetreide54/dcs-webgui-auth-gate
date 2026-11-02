@@ -15,12 +15,10 @@ const db = require("./db");
 const activeSlot = require("./activeSlot");
 const agentClient = require("./agentClient");
 const { GITHUB_REPO } = require("./updateConstants");
+const { GITHUB_API_BASE, fetchGithub } = require("./githubApi");
 
 // section: constants
 
-// overridable so tests can point this at a local dummy server instead
-// of the real github api
-const GITHUB_API_BASE = process.env.GITHUB_API_BASE_OVERRIDE || "https://api.github.com";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 // read this install's own current version from package.json
@@ -57,7 +55,7 @@ function verifyManifest(manifest) {
 
 // fetch a url and parse its response as json
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { "User-Agent": "dcs-webgui-auth-gate-update-check" } });
+  const res = await fetchGithub(url, "dcs-webgui-auth-gate-update-check");
   if (!res.ok) throw new Error(`${url} returned ${res.status}`);
   return res.json();
 }

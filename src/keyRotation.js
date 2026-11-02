@@ -8,12 +8,12 @@ const db = require("./db");
 const { GITHUB_REPO } = require("./updateConstants");
 const { CHECK_INTERVAL_MS } = require("./updateCheck");
 const { keyStateMessage } = require("./keyRotationConstants");
+const { GITHUB_API_BASE, fetchGithub } = require("./githubApi");
 
 // section: constants
 
-// overridable so tests can point this at a local dummy server instead
-// of the real github api, same env var updateCheck.js reads
-const GITHUB_API_BASE = process.env.GITHUB_API_BASE_OVERRIDE || "https://api.github.com";
+// identifies this module's own requests, distinct from updateCheck.js's
+const USER_AGENT = "dcs-webgui-auth-gate-key-state-check";
 
 // fixed release tag the rotation history is published under, never a
 // version tag, its one asset reuploaded in place on every rotation
@@ -41,7 +41,7 @@ function setKeyStateLastCheckedAt(lastCheckedAt) {
 
 // fetch a url and parse its response as json
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { "User-Agent": "dcs-webgui-auth-gate-key-state-check" } });
+  const res = await fetchGithub(url, USER_AGENT);
   if (!res.ok) throw new Error(`${url} returned ${res.status}`);
   return res.json();
 }
@@ -51,7 +51,7 @@ async function fetchJson(url) {
 // see docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
 async function fetchKeyStateHistory() {
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/tags/${KEY_STATE_TAG}`;
-  const res = await fetch(url, { headers: { "User-Agent": "dcs-webgui-auth-gate-key-state-check" } });
+  const res = await fetchGithub(url, USER_AGENT);
   // branch: no rotation has ever been published under this tag
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`${url} returned ${res.status}`);
