@@ -12,9 +12,7 @@ const COOKIE_REFRESH_THRESHOLD_SECONDS = 60 * 60;
 const SESSION_COOKIE = "dcs_session";
 const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
-// 4x the per-username ceiling: enough headroom for several usernames
-// behind one shared NAT address, while still bounding total
-// bcrypt-cost-12 compute a single source can spend spraying logins
+// bounds total attempts from one ip across any number of usernames
 // see docs/Why.md#why-is-there-a-separate-per-ip-login-throttle
 const RATE_LIMIT_IP_MAX_ATTEMPTS = 20;
 // the one place this rule is defined; server.js and views.js both read it
