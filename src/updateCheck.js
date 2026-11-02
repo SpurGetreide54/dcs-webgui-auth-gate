@@ -39,11 +39,18 @@ function getTrustedPublicKey() {
   return crypto.createPublicKey(row.primary_public_key_pem);
 }
 
+// pull a manifest apart into the signed payload and its signature,
+// the one split every signer and verifier of it must agree on
+function splitManifestSignature(manifest) {
+  const { signature, ...signed } = manifest;
+  return { signed, signature };
+}
+
 // true if the manifest's signature matches everything else in it,
 // secondary is never accepted here, only primary
 function verifyManifest(manifest) {
   // the signature covers everything except itself
-  const { signature, ...signed } = manifest;
+  const { signed, signature } = splitManifestSignature(manifest);
   if (typeof signature !== "string") return false;
   const message = Buffer.from(JSON.stringify(signed));
   return crypto.verify(null, message, getTrustedPublicKey(), Buffer.from(signature, "hex"));
@@ -256,15 +263,37 @@ async function stageAuthGateSlot(archivePath, slotDir) {
 // see docs/Why.md#why-is-the-agent-relay-timeout-only-60-seconds
 const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 60 * 1000;
 
-// upload and commit the agent's new build over the internal channel
+// upload and commit the agent's new build over the internal channel,
+// forwarding the manifest's own signature and the key-rotation history
+// so the agent can verify authenticity itself instead of trusting
+// whatever bytes a token holder sends
 // see docs/Why.md#why-does-the-auth-gate-relay-the-agents-update
-async function relayAgentUpdate(archivePath, sha256) {
+async function relayAgentUpdate(archivePath, manifest) {
   if (!MISSION_AGENT_URL || !MISSION_AGENT_TOKEN) throw new Error("Mission agent is not configured; cannot relay its update.");
   const fileBuffer = await fsp.readFile(archivePath);
   console.debug(`Update: uploading agent build to the mission agent (${fileBuffer.length} bytes)...`);
+
+  const { signed, signature } = splitManifestSignature(manifest);
+  // required here, not at module load, to avoid a circular require --
+  // keyRotation.js itself requires this module for CHECK_INTERVAL_MS
+  const keyRotation = require("./keyRotation");
+  const history = await keyRotation.fetchKeyStateHistory().catch((err) => {
+    console.warn(`Could not fetch key-state history to relay to the agent: ${err.message}`);
+    return null;
+  });
+
+  const headers = {
+    Authorization: `Bearer ${MISSION_AGENT_TOKEN}`,
+    "Content-Type": "application/octet-stream",
+    "X-Manifest-Signed": JSON.stringify(signed),
+    "X-Manifest-Signature": signature,
+  };
+  // branch: at least one rotation has ever been published
+  if (history) headers["X-Key-State-History"] = JSON.stringify(history);
+
   const stageRes = await fetch(new URL("/self-update/stage", MISSION_AGENT_URL), {
     method: "POST",
-    headers: { Authorization: `Bearer ${MISSION_AGENT_TOKEN}`, "Content-Type": "application/octet-stream", "X-Sha256": sha256 },
+    headers,
     body: fileBuffer,
     signal: AbortSignal.timeout(AGENT_RELAY_TIMEOUT_MS),
   });
@@ -321,7 +350,7 @@ async function applyUpdate() {
       const agentExe = path.join(scratchDir, "agent.exe");
       await downloadAndVerify(agentDownload.url, agentDownload.sha256, agentExe);
       console.debug("Update: downloaded and verified the agent build.");
-      await relayAgentUpdate(agentExe, agentDownload.sha256);
+      await relayAgentUpdate(agentExe, manifest);
 
       activeSlot.writeActiveSlot(idleSlot);
       setUpdateState({
@@ -360,6 +389,7 @@ module.exports = {
   fetchVerifiedManifest,
   checkForUpdate,
   startHourlyCheck,
+  relayAgentUpdate,
   applyUpdate,
   getUpdateState,
   recordUpdateTriggered,

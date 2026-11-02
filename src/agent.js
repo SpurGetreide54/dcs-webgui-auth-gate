@@ -538,6 +538,88 @@ app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) 
 // relayed through the auth-gate since this host has no internet access
 // see docs/Why.md#why-does-the-auth-gate-relay-the-agents-update
 
+// ported, not required, from keyRotation.js/keyRotationConstants.js --
+// keyRotation.js pulls in db.js's native sqlite, wrong for this
+// standalone exe, see docs/Why.md#why-does-the-agent-verify-the-staged-builds-signature-itself
+const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT, keyStateMessage } = require("./keyRotationConstants");
+
+// pinned next to agent-token.txt, same stable-across-slots reasoning
+// as resolveAgentToken's own token file, above
+const AGENT_KEY_STATE_FILE = process.env.AGENT_KEY_STATE_FILE || path.join(path.dirname(process.execPath), "agent-key-state.json");
+
+// persist the trust state after a verified rotation
+function saveKeyState(state) {
+  fsSync.writeFileSync(AGENT_KEY_STATE_FILE, JSON.stringify(state), "utf8");
+}
+
+// read the persisted trust state, seeding it from the built-in keys
+// on first run
+function loadOrSeedKeyState() {
+  try {
+    return JSON.parse(fsSync.readFileSync(AGENT_KEY_STATE_FILE, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  const seeded = {
+    primary_public_key_pem: PRIMARY_PUBLIC_KEY_PEM,
+    primary_rotated_at: INITIAL_KEY_ROTATED_AT,
+    secondary_public_key_pem: SECONDARY_PUBLIC_KEY_PEM,
+    secondary_rotated_at: INITIAL_KEY_ROTATED_AT,
+  };
+  saveKeyState(seeded);
+  return seeded;
+}
+
+// loaded once at startup, same pattern as AGENT_TOKEN above, mutated
+// in place and persisted whenever a relayed rotation record verifies
+let agentKeyState = loadOrSeedKeyState();
+
+// true only if every one of a rotation record's checks pass -- ported
+// verbatim from keyRotation.js's own verifyKeyState
+function verifyKeyState(record, currentState) {
+  try {
+    // branch: an unrecognized slot name
+    if (record.rotated_slot !== "primary" && record.rotated_slot !== "secondary") return false;
+    if (!Array.isArray(record.signatures) || record.signatures.length !== 2) return false;
+
+    const message = keyStateMessage(record);
+
+    // the new key proving it holds the private half it claims to
+    const newPublicKey = crypto.createPublicKey(record.new_public_key_pem);
+    const selfSignatureOk = crypto.verify(null, message, newPublicKey, Buffer.from(record.signatures[0], "hex"));
+
+    // the slot NOT being rotated is the one that actually authorizes this
+    const survivingSlot = record.rotated_slot === "primary" ? "secondary" : "primary";
+    const survivingPublicKey = crypto.createPublicKey(currentState[`${survivingSlot}_public_key_pem`]);
+    const vouchSignatureOk = crypto.verify(null, message, survivingPublicKey, Buffer.from(record.signatures[1], "hex"));
+
+    // rejects an attacker replaying an old, previously-valid record
+    const currentRotatedAt = currentState[`${record.rotated_slot}_rotated_at`];
+    const isNewer = new Date(record.rotated_at).getTime() > new Date(currentRotatedAt).getTime();
+
+    return selfSignatureOk && vouchSignatureOk && isNewer;
+  } catch {
+    // any malformed field (bad pem, bad hex, bad date) is a rejection
+    return false;
+  }
+}
+
+// replay the gate-relayed rotation history into the trust state,
+// same skip-older-than-trusted logic keyRotation.js's own checkKeyState
+// has, applying (and persisting) each record that verifies
+function applyKeyStateHistory(history) {
+  for (const record of history) {
+    const currentRotatedAt = agentKeyState[`${record.rotated_slot}_rotated_at`];
+    // skip: already applied or older than what's trusted
+    if (new Date(record.rotated_at).getTime() <= new Date(currentRotatedAt).getTime()) continue;
+    if (verifyKeyState(record, agentKeyState)) {
+      agentKeyState[`${record.rotated_slot}_public_key_pem`] = record.new_public_key_pem;
+      agentKeyState[`${record.rotated_slot}_rotated_at`] = record.rotated_at;
+      saveKeyState(agentKeyState);
+    }
+  }
+}
+
 // overrides the root for local dev/tests, where process.execPath
 // points at node itself, not a packaged agent.exe next to a real
 // "current" junction
@@ -563,15 +645,54 @@ function otherAgentSlot(slot) {
 const selfUpdateUpload = express.raw({ type: "application/octet-stream", limit: MAX_MISSION_BYTES });
 
 app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async (req, res) => {
-  const expectedSha256 = req.get("X-Sha256");
-  if (!expectedSha256) return res.status(400).send("Missing X-Sha256 header.");
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).send("No file body received.");
 
-  // re-hash independently, catches corruption on this specific hop,
-  // on top of the signature check already done on the auth-gate side
+  // branch: the gate relayed at least one rotation record, replay it
+  // into the trust state before trusting anything signed with a
+  // possibly-rotated key
+  const historyHeader = req.get("X-Key-State-History");
+  if (historyHeader) {
+    let history;
+    try {
+      history = JSON.parse(historyHeader);
+    } catch {
+      history = null;
+    }
+    if (!Array.isArray(history)) return res.status(400).send("Malformed X-Key-State-History header.");
+    applyKeyStateHistory(history);
+  }
+
+  const signedHeader = req.get("X-Manifest-Signed");
+  const signature = req.get("X-Manifest-Signature");
+  if (!signedHeader || !signature) return res.status(400).send("Missing X-Manifest-Signed/X-Manifest-Signature header.");
+  let signed;
+  try {
+    signed = JSON.parse(signedHeader);
+  } catch {
+    return res.status(400).send("Malformed X-Manifest-Signed header.");
+  }
+
+  // verify against the (possibly just-rotated) trusted primary key,
+  // never secondary, same rule as updateCheck.js's own verifyManifest
+  const message = Buffer.from(JSON.stringify(signed));
+  let manifestOk;
+  try {
+    const trustedKey = crypto.createPublicKey(agentKeyState.primary_public_key_pem);
+    manifestOk = crypto.verify(null, message, trustedKey, Buffer.from(signature, "hex"));
+  } catch {
+    manifestOk = false;
+  }
+  if (!manifestOk) return res.status(400).send("Manifest signature verification failed.");
+
+  const agentEntry = (signed.downloads || []).find((d) => d.artifact === "agent");
+  if (!agentEntry) return res.status(400).send('Manifest has no download entry for "agent".');
+
+  // hashes the received bytes against the signed manifest's own claim,
+  // not a caller-supplied header -- this is what actually authenticates
+  // the upload, see docs/Why.md#why-does-the-agent-verify-the-staged-builds-signature-itself
   const actualSha256 = crypto.createHash("sha256").update(req.body).digest("hex");
-  if (actualSha256 !== expectedSha256) {
-    return res.status(400).send(`sha256 mismatch (expected ${expectedSha256}, got ${actualSha256}).`);
+  if (actualSha256 !== agentEntry.sha256) {
+    return res.status(400).send(`sha256 mismatch (expected ${agentEntry.sha256}, got ${actualSha256}).`);
   }
 
   const idleSlot = otherAgentSlot(readActiveAgentSlot());

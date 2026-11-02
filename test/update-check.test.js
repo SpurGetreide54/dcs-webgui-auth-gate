@@ -41,14 +41,22 @@ function cleanupSqlite(sqlitePath) {
 let updateCheck;
 let dummyGithub, dummyGithubBase;
 let dummyGithubRespond; // set per test to control what the dummy "GitHub API" returns
+let dummyAgent, dummyAgentBase;
+let dummyAgentRespond; // set per test to control what the dummy mission agent returns
 let sqlitePath;
 
 const REAL_PRIVATE_KEY_PATH = path.join(__dirname, "..", "local-only", "keys", "key-rotation-primary.pem");
+const MISSION_AGENT_TEST_TOKEN = "update-check-relay-test-token";
 
 test.before(async () => {
   dummyGithub = await startDummyHttpServer((req, res) => dummyGithubRespond(req, res));
   dummyGithubBase = `http://127.0.0.1:${dummyGithub.address().port}`;
   process.env.GITHUB_API_BASE_OVERRIDE = dummyGithubBase;
+
+  dummyAgent = await startDummyHttpServer((req, res) => dummyAgentRespond(req, res));
+  dummyAgentBase = `http://127.0.0.1:${dummyAgent.address().port}`;
+  process.env.MISSION_AGENT_URL = dummyAgentBase;
+  process.env.MISSION_AGENT_TOKEN = MISSION_AGENT_TEST_TOKEN;
 
   sqlitePath = tempSqlitePath("update-check");
   process.env.SQLITE_PATH = sqlitePath;
@@ -58,6 +66,7 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise((resolve) => dummyGithub.close(resolve));
+  await new Promise((resolve) => dummyAgent.close(resolve));
   require("../src/db").close();
   cleanupSqlite(sqlitePath);
 });
@@ -274,6 +283,42 @@ function serveManifest(manifest) {
   };
 }
 
+// no key-state release has ever been published under the key-state tag
+function serveNoKeyStateHistory() {
+  dummyGithubRespond = (req, res) => res.writeHead(404).end();
+}
+
+// a key-state release exists, its asset is the given rotation records
+function serveKeyStateHistory(records) {
+  dummyGithubRespond = (req, res) => {
+    if (req.url.includes("/releases/tags/key-state")) {
+      sendJson(res, 200, { assets: [{ name: "key_state.json", browser_download_url: `${dummyGithubBase}/key_state.json` }] });
+    } else {
+      sendJson(res, 200, records);
+    }
+  };
+}
+
+// captures one /self-update/stage request's headers and body, replying
+// as the real agent would on success
+function captureStageRequest() {
+  const captured = { request: null };
+  dummyAgentRespond = (req, res) => {
+    if (req.url === "/self-update/stage") {
+      const chunks = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        captured.request = { headers: req.headers, body: Buffer.concat(chunks) };
+        sendJson(res, 200, { ok: true, slot: "b" });
+      });
+      return;
+    }
+    if (req.url === "/self-update/commit") return sendJson(res, 200, { ok: true, activeSlot: "b" });
+    res.writeHead(404).end();
+  };
+  return captured;
+}
+
 test(
   "checkForUpdate resolves true and records the new version when a newer signed release is available",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
@@ -410,4 +455,56 @@ test("checkForUpdate rejects and still records the attempt when the check fails"
   assert.ok(after.last_checked_at, "a failed check must still record that an attempt was made");
   assert.equal(after.last_succeeded_at, before.last_succeeded_at, "a failed check must not touch the last-succeeded timestamp");
   assert.equal(after.available_version, null);
+});
+
+test("relayAgentUpdate forwards the manifest's own signature and signed payload, not the caller-computed sha256", async () => {
+  serveNoKeyStateHistory();
+  const captured = captureStageRequest();
+
+  const archivePath = path.join(os.tmpdir(), `relay-test-${crypto.randomBytes(6).toString("hex")}.bin`);
+  const body = Buffer.from("fake agent exe bytes");
+  fs.writeFileSync(archivePath, body);
+  const manifest = {
+    version: "1.2.3",
+    changelog_url: "https://example.test/changelog",
+    needs_service_update: false,
+    downloads: [{ artifact: "agent", url: "https://example.test/agent.exe", sha256: "f".repeat(64) }],
+    signature: "ab".repeat(32),
+  };
+  try {
+    await updateCheck.relayAgentUpdate(archivePath, manifest);
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+  }
+
+  assert.ok(captured.request, "the dummy agent must have received a /self-update/stage request");
+  assert.equal(captured.request.headers.authorization, `Bearer ${MISSION_AGENT_TEST_TOKEN}`);
+  assert.equal(captured.request.headers["x-manifest-signature"], manifest.signature);
+  const { signature, ...signed } = manifest;
+  assert.deepEqual(JSON.parse(captured.request.headers["x-manifest-signed"]), signed);
+  assert.equal(captured.request.headers["x-key-state-history"], undefined, "no rotation was ever published, so the header must be omitted");
+  assert.equal(captured.request.headers["x-sha256"], undefined, "the gate must no longer send a self-supplied sha256 for the agent to trust blindly");
+  assert.ok(captured.request.body.equals(body));
+});
+
+test("relayAgentUpdate forwards the key-state rotation history when one has been published", async () => {
+  const records = [{ rotated_slot: "primary", new_public_key_pem: "fake-pem", rotated_at: "2026-11-01T00:00:00.000Z", signatures: ["aa", "bb"] }];
+  serveKeyStateHistory(records);
+  const captured = captureStageRequest();
+
+  const archivePath = path.join(os.tmpdir(), `relay-test-${crypto.randomBytes(6).toString("hex")}.bin`);
+  fs.writeFileSync(archivePath, Buffer.from("more fake agent exe bytes"));
+  const manifest = {
+    version: "1.2.3",
+    downloads: [{ artifact: "agent", url: "https://example.test/agent.exe", sha256: "f".repeat(64) }],
+    signature: "cd".repeat(32),
+  };
+  try {
+    await updateCheck.relayAgentUpdate(archivePath, manifest);
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+  }
+
+  assert.ok(captured.request, "the dummy agent must have received a /self-update/stage request");
+  assert.deepEqual(JSON.parse(captured.request.headers["x-key-state-history"]), records);
 });

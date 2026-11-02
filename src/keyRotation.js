@@ -167,6 +167,7 @@ function startKeyStateCheck() {
 module.exports = {
   KEY_STATE_TAG,
   getKeyState,
+  fetchKeyStateHistory,
   verifyKeyState,
   applyKeyStateRecord,
   checkKeyState,

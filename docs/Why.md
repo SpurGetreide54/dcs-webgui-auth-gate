@@ -388,6 +388,35 @@ host's internet-facing side (see
 the one that reaches GitHub, so it hands the bytes onward over the
 existing internal auth-gate to agent channel instead.
 
+## Why does the agent verify the staged build's signature itself?
+
+Before this, `/self-update/stage` only checked the uploaded bytes
+against an `X-Sha256` header the same caller supplied -- that
+authenticates nothing by itself, since a leaked bearer token plus the
+right network position could push any exe past it.<br>The real
+signature check against the key-rotation trust root happened only on
+the auth-gate side, before it relayed the bytes onward (see "Why does
+the auth-gate relay the agent's update?" above); anyone who could
+still reach the agent after that hop could push unsigned code.
+
+A key baked into `agent.exe` at build time can't work: the primary
+signing key rotates independently of app releases
+(`scripts/release/rotate-key.js`), and a fixed key would reject a
+manifest signed after a legitimate rotation, bricking self-update
+until someone fixes it by hand.<br>So the agent keeps its own
+persisted trust file (`agent-key-state.json`, seeded from the same
+`keyRotationConstants.js` placeholder keys db.js seeds `key_state`
+from) and replays whatever rotation history the gate forwards in
+`X-Key-State-History` through a ported copy of `keyRotation.js`'s own
+`verifyKeyState` -- the agent can't require that module directly, since
+it pulls in `db.js`'s native sqlite, wrong for a standalone Windows
+exe.<br>Once the trust file reflects any relayed rotations,
+`/self-update/stage` verifies `X-Manifest-Signed`/`X-Manifest-Signature`
+against the (possibly just-updated) trusted primary key, then checks
+the uploaded bytes' own hash against that signed manifest's `"agent"`
+download entry -- not a caller-supplied header -- which is what
+actually closes the gap.
+
 ## Why does applyUpdate() exit(0) instead of exit(1)?
 
 Confirmed the hard way in production: `exit(1)` made this deliberate,
