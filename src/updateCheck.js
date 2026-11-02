@@ -179,7 +179,7 @@ async function checkForUpdate() {
   try {
     const manifest = await fetchVerifiedManifest();
     const hasUpdate = isVersionGreater(manifest.version, getCurrentVersion());
-    if (!hasUpdate) {
+    if (isVersionGreater(getCurrentVersion(), manifest.version)) {
       console.warn(`Offered version ${manifest.version} is not newer than the current ${getCurrentVersion()}, ignoring.`);
     }
     setUpdateState({

@@ -378,9 +378,10 @@ test(
 );
 
 test(
-  "checkForUpdate resolves false when the latest release matches the current version",
+  "checkForUpdate resolves false when the latest release matches the current version, logging no warning",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
-  async () => {
+  async (t) => {
+    const warn = t.mock.method(console, "warn");
     const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
     const manifest = signManifest(privateKey, {
       version: updateCheck.getCurrentVersion(),
@@ -394,13 +395,15 @@ test(
     assert.equal(hasUpdate, false);
     const state = updateCheck.getUpdateState();
     assert.equal(state.available_version, null);
+    assert.equal(warn.mock.calls.length, 0, "an equal version is the normal state, not worth a warning");
   }
 );
 
 test(
-  "checkForUpdate rejects a downgrade: a lower, validly-signed version is not an update",
+  "checkForUpdate rejects a downgrade: a lower, validly-signed version is not an update, and logs a warning",
   { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
-  async () => {
+  async (t) => {
+    const warn = t.mock.method(console, "warn");
     const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
     const manifest = signManifest(privateKey, {
       version: "0.0.1",
@@ -414,6 +417,7 @@ test(
     assert.equal(hasUpdate, false, "a lower version must not be treated as an update, even though its signature is valid");
     const state = updateCheck.getUpdateState();
     assert.equal(state.available_version, null);
+    assert.equal(warn.mock.calls.length, 1, "a lower offered version is unusual and worth a warning");
   }
 );
 
