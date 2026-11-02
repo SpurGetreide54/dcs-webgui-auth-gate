@@ -26,7 +26,8 @@ mkdir -p "$BUILD_DIR" "$RELEASE_DIR"
 cd "$BUILD_DIR"
 
 echo "==> Bundling src/agent.js"
-npx esbuild "$ROOT_DIR/src/agent.js" --bundle --platform=node --target=node24 --outfile=agent-bundle.js
+npx esbuild "$ROOT_DIR/src/agent.js" --bundle --platform=node --target=node24 --outfile=agent-bundle.js \
+  --define:__AGENT_VERSION__='"'$VERSION'"'
 
 echo "==> Generating SEA blob"
 cat > sea-config.json <<'EOF'

@@ -14,6 +14,12 @@ const util = require("node:util");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const tar = require("tar");
 const archiver = require("archiver");
+const { isVersionGreater } = require("./versionCompare");
+
+// __AGENT_VERSION__ is baked in at build time by build-agent-exe.sh's
+// esbuild --define; unbundled (tests, local dev under node) falls
+// through to reading package.json live
+const AGENT_VERSION = typeof __AGENT_VERSION__ !== "undefined" ? __AGENT_VERSION__ : require("../package.json").version;
 
 // wrap console.* into the same ndjson line shape as src/appLog.js
 // see docs/Why.md#why-does-agentjs-duplicate-applogjss-log-format-instead-of-importing-it
@@ -710,6 +716,13 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async 
   const actualSha256 = crypto.createHash("sha256").update(req.body).digest("hex");
   if (actualSha256 !== agentEntry.sha256) {
     return res.status(400).send(`sha256 mismatch (expected ${agentEntry.sha256}, got ${actualSha256}).`);
+  }
+
+  // the gate's own downgrade guard protects only callers that go
+  // through it; a validly signed old manifest must still be rejected
+  // here, see docs/Why.md#why-does-the-agent-also-check-the-offered-version-at-self-updatestage
+  if (!isVersionGreater(signed.version, AGENT_VERSION)) {
+    return res.status(400).send(`Offered version ${signed.version} is not newer than the current ${AGENT_VERSION}, refusing to stage.`);
   }
 
   const idleSlot = otherAgentSlot(readActiveAgentSlot());

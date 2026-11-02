@@ -383,6 +383,24 @@ call.<br>No deliberate-rollback path exists through this channel: the
 automatic, local, crash-triggered rollback unit already covers a bad
 release's real failure mode without touching GitHub at all.
 
+## Why does the agent also check the offered version at /self-update/stage?
+
+`/self-update/stage`'s own signature and sha256 checks only prove the
+bytes match a validly signed manifest, not that the manifest is the
+newest one, and the gate's own downgrade guard (above) only protects
+a caller going through the gate's own `checkForUpdate`/`applyUpdate`
+path, not one calling `stage` directly with an old but still validly
+signed manifest replayed from a past release.<br>The agent therefore
+runs the same `isVersionGreater` check itself, against its own
+running version (`AGENT_VERSION`, baked in at build time by
+`scripts/build-agent-exe.sh`'s esbuild `--define`), before staging
+the bytes.<br>`src/versionCompare.js` exists precisely so this pure,
+side-effect-free check is written once and required by both sides,
+not ported a second time the way the key-rotation trust logic has to
+be.<br>No rollback flag exists to bypass this either: the A/B slot
+flip is the sole sanctioned way back to an older build, matching the
+gate's own downgrade guard, which has no override either.
+
 ## Why is the agent relay timeout only 60 seconds?
 
 Without it, a stalled upload to a real remote host can hang

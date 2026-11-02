@@ -64,9 +64,9 @@ function sha256(buf) {
 
 // signs a manifest claiming the given body's real sha256 under
 // artifact "agent", the shape the agent's /self-update/stage expects
-function manifestHeadersFor(body) {
+function manifestHeadersFor(body, version = "9.9.9") {
   const signed = {
-    version: "1.2.3",
+    version,
     changelog_url: "https://example.test/changelog",
     needs_service_update: false,
     downloads: [{ artifact: "agent", url: "https://example.test/agent.exe", sha256: sha256(body) }],
@@ -114,6 +114,24 @@ test("stage rejects a manifest signed with a key other than the trusted primary"
     body,
   });
   assert.equal(res.status, 400);
+});
+
+test("stage rejects a manifest whose version is not strictly newer than the agent's own, even with a valid signature and sha256", async () => {
+  const currentVersion = require("../package.json").version;
+  const body = Buffer.from("fake exe bytes");
+  const equalRes = await fetch(`${base}/self-update/stage`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/octet-stream", ...manifestHeadersFor(body, currentVersion) }),
+    body,
+  });
+  assert.equal(equalRes.status, 400);
+
+  const lowerRes = await fetch(`${base}/self-update/stage`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/octet-stream", ...manifestHeadersFor(body, "0.0.1") }),
+    body,
+  });
+  assert.equal(lowerRes.status, 400);
 });
 
 // order matters, AGENT_SELF_UPDATE_ROOT is read once at module load and

@@ -86,7 +86,7 @@ test("a rotation record relayed through X-Key-State-History updates the agent's 
 
   const body = Buffer.from("build staged after a primary rotation");
   const signed = {
-    version: "1.2.3",
+    version: "9.9.9",
     downloads: [{ artifact: "agent", url: "https://example.test/agent.exe", sha256: sha256(body) }],
   };
   const signature = crypto.sign(null, Buffer.from(JSON.stringify(signed)), newPrimaryPriv).toString("hex");
