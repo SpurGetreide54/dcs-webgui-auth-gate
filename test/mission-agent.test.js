@@ -197,7 +197,7 @@ test("rejects non-.miz files", async () => {
 // section: webgui control port, status + ensure-port
 
 test("status reports no config and no port when autoexec.cfg doesn't exist", async () => {
-  const res = await fetch(`${base}/webgui/${INSTANCE}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${INSTANCE}/status`, { headers: authHeaders() });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.deepEqual(body, { configExists: false, webguiPort: null });
@@ -208,7 +208,7 @@ test("status picks up webgui_port from a real autoexec.cfg", async () => {
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
   fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), 'some_other_key = "x"\nwebgui_port = 8123\n');
 
-  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${instance}/status`, { headers: authHeaders() });
   const body = await res.json();
   assert.deepEqual(body, { configExists: true, webguiPort: 8123 });
 });
@@ -223,7 +223,7 @@ test("status parses a byte-for-byte real-world autoexec.cfg with mixed value typ
     'webgui_port = 8089\ndisable_write_track = true\ncrash_report_mode = "silent"'
   );
 
-  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${instance}/status`, { headers: authHeaders() });
   const body = await res.json();
   assert.deepEqual(body, { configExists: true, webguiPort: 8089 });
 });
@@ -233,7 +233,7 @@ test("status ignores a commented-out webgui_port line", async () => {
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
   fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), "-- webgui_port = 8088\n");
 
-  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${instance}/status`, { headers: authHeaders() });
   const body = await res.json();
   assert.deepEqual(body, { configExists: true, webguiPort: null });
 });
@@ -243,7 +243,7 @@ test("status takes the last webgui_port assignment when several exist", async ()
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
   fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), "webgui_port = 8080\nwebgui_port = 8081\n");
 
-  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${instance}/status`, { headers: authHeaders() });
   const body = await res.json();
   assert.deepEqual(body, { configExists: true, webguiPort: 8081 }, "lua evaluates repeated assignments in order, last one wins");
 });
@@ -252,12 +252,12 @@ test("ensure-port then status round-trips the same port", async () => {
   const instance = "Example_RoundTrip";
   fs.mkdirSync(instanceDir(instance), { recursive: true });
 
-  await fetch(`${base}/webgui/${instance}/ensure-port`, {
+  await fetch(`${base}/admin/webgui/${instance}/ensure-port`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ port: 8095 }),
   });
-  const res = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${instance}/status`, { headers: authHeaders() });
   const body = await res.json();
   assert.deepEqual(body, { configExists: true, webguiPort: 8095 });
 });
@@ -270,7 +270,7 @@ test("ensure-port appends onto a real-world multi-key file without disturbing th
     'disable_write_track = true\ncrash_report_mode = "silent"'
   );
 
-  const res = await fetch(`${base}/webgui/${instance}/ensure-port`, {
+  const res = await fetch(`${base}/admin/webgui/${instance}/ensure-port`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ port: 8090 }),
@@ -285,7 +285,7 @@ test("ensure-port appends onto a real-world multi-key file without disturbing th
 test("status rejects an invalid instance name before touching the filesystem", async () => {
   // ".." itself gets collapsed by url normalization before the request
   // is even sent, so this uses a value that survives normalization intact
-  const res = await fetch(`${base}/webgui/${encodeURIComponent("not*valid")}/status`, { headers: authHeaders() });
+  const res = await fetch(`${base}/admin/webgui/${encodeURIComponent("not*valid")}/status`, { headers: authHeaders() });
   assert.equal(res.status, 400);
 });
 
@@ -293,7 +293,7 @@ test("ensure-port creates a fresh single-line file when none exists", async () =
   const instance = "Example_Fresh";
   fs.mkdirSync(instanceDir(instance), { recursive: true });
 
-  const res = await fetch(`${base}/webgui/${instance}/ensure-port`, {
+  const res = await fetch(`${base}/admin/webgui/${instance}/ensure-port`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ port: 8089 }),
@@ -310,7 +310,7 @@ test("ensure-port appends without clobbering existing unrelated config", async (
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
   fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), 'net.log_onerror = true\n');
 
-  const res = await fetch(`${base}/webgui/${instance}/ensure-port`, {
+  const res = await fetch(`${base}/admin/webgui/${instance}/ensure-port`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ port: 8090 }),
@@ -326,7 +326,7 @@ test("ensure-port is a no-op when the key is already present", async () => {
   fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
   fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), "webgui_port = 9999\n");
 
-  const res = await fetch(`${base}/webgui/${instance}/ensure-port`, {
+  const res = await fetch(`${base}/admin/webgui/${instance}/ensure-port`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ port: 8091 }),
@@ -338,12 +338,44 @@ test("ensure-port is a no-op when the key is already present", async () => {
 });
 
 test("ensure-port rejects an out-of-range port", async () => {
-  const res = await fetch(`${base}/webgui/${INSTANCE}/ensure-port`, {
+  const res = await fetch(`${base}/admin/webgui/${INSTANCE}/ensure-port`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ port: 99999 }),
   });
   assert.equal(res.status, 400);
+});
+
+test("a client request to /webgui/<instance>/status or /ensure-port falls through to the relayed proxy, not the agent's own internal handler", async () => {
+  const dummyDcs = await new Promise((resolve) => {
+    const s = require("node:http").createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ path: req.url }));
+    });
+    s.listen(0, "127.0.0.1", () => resolve(s));
+  });
+  try {
+    const port = dummyDcs.address().port;
+    const instance = "Example_StatusEnsurePortNotShadowed";
+    fs.mkdirSync(path.join(instanceDir(instance), "Config"), { recursive: true });
+    fs.writeFileSync(path.join(instanceDir(instance), "Config", "autoexec.cfg"), `webgui_port = ${port}\n`);
+
+    const statusRes = await fetch(`${base}/webgui/${instance}/status`, { headers: authHeaders() });
+    assert.equal(statusRes.status, 200);
+    const statusBody = await statusRes.json();
+    assert.equal(statusBody.path, "/status", "must reach the proxied dummy DCS backend, not the agent's own status handler");
+
+    const ensurePortRes = await fetch(`${base}/webgui/${instance}/ensure-port`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ port: 9999 }),
+    });
+    assert.equal(ensurePortRes.status, 200);
+    const ensurePortBody = await ensurePortRes.json();
+    assert.equal(ensurePortBody.path, "/ensure-port", "must reach the proxied dummy DCS backend, not the agent's own ensure-port handler");
+  } finally {
+    dummyDcs.close();
+  }
 });
 
 // section: webgui relay

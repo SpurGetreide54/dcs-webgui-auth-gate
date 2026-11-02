@@ -85,6 +85,28 @@ never from anything the client supplies directly, which is what stops
 "just try a different port" from reaching a server without a grant
 for it.
 
+## Why do the agent's own /status and /ensure-port routes live under /admin?
+
+They used to live at `/webgui/:instanceName/status` and
+`/webgui/:instanceName/ensure-port`, inside the same prefix the relay's
+own `pathRewrite` forwards arbitrary client-supplied sub-paths
+into.<br>Express matches routes in registration order, so those two
+routes, registered before the `/webgui/:instanceName` proxy mount,
+shadowed it: any admin with a bare "access" grant on the server (not
+just a site admin) could reach them directly, flipping a
+`webgui_port` the real `/admin/servers/webgui-ports` flow is meant to
+gate.<br>Moving them to `/admin/webgui/:instanceName/...`, entirely
+outside the `/webgui/:instanceName/*` namespace, is the root-cause
+fix: nothing a token holder appends after the instance name under
+`/webgui/...` can ever reach them again, and no future internal route
+needs its own case carved out of the proxy's own exclusion list.<br>No
+dual-route compatibility shim exists for the rename: during the one
+release that ships it, if the gate updates before the agent commits
+its own self-update (or vice versa), `/admin/servers/webgui-ports`
+502s/404s until both sides are current, documented in that release's
+changelog -- admin-only tooling, not a live/security path, so it
+self-heals once the lagging side updates.
+
 ## Why doesn't the control-port proxy handle websocket upgrades?
 
 The real DCS webgui doesn't use WebSockets at all (confirmed by

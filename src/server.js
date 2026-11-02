@@ -488,7 +488,7 @@ serversRouter.post("/:id/delete", (req, res) => {
 
 // ask the agent what webgui_port (if any) an instance already has
 async function agentStatus(instanceName) {
-  const res = await agentClient.agentFetch(`/webgui/${encodeURIComponent(instanceName)}/status`);
+  const res = await agentClient.agentFetch(`/admin/webgui/${encodeURIComponent(instanceName)}/status`);
   if (!res.ok) throw new Error(`agent returned ${res.status} for ${instanceName}`);
   return res.json();
 }
@@ -547,7 +547,7 @@ serversRouter.post("/webgui-ports/confirm", express.urlencoded({ extended: false
     }
 
     for (const { server, proposedPort } of proposals) {
-      const agentRes = await agentClient.agentFetch(`/webgui/${encodeURIComponent(server.instance_name)}/ensure-port`, {
+      const agentRes = await agentClient.agentFetch(`/admin/webgui/${encodeURIComponent(server.instance_name)}/ensure-port`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ port: proposedPort }),

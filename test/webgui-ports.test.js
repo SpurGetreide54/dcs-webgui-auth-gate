@@ -34,16 +34,16 @@ function startDummyAgent() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, "http://localhost");
-      const parts = url.pathname.split("/").filter(Boolean); // ["webgui", "<instance>", "status"|"ensure-port"]
-      const instanceName = decodeURIComponent(parts[1] || "");
+      const parts = url.pathname.split("/").filter(Boolean); // ["admin", "webgui", "<instance>", "status"|"ensure-port"]
+      const instanceName = decodeURIComponent(parts[2] || "");
 
-      if (req.method === "GET" && parts[2] === "status") {
+      if (req.method === "GET" && parts[3] === "status") {
         const port = instancePorts.has(instanceName) ? instancePorts.get(instanceName) : null;
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ configExists: port !== null, webguiPort: port }));
       }
 
-      if (req.method === "POST" && parts[2] === "ensure-port") {
+      if (req.method === "POST" && parts[3] === "ensure-port") {
         const chunks = [];
         req.on("data", (c) => chunks.push(c));
         req.on("end", () => {

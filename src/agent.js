@@ -461,12 +461,15 @@ app.post(
 
 // section: webgui control port, status, config write, relay
 
-app.get("/webgui/:instanceName/status", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {
+// kept entirely outside the /webgui/:instanceName/* namespace below,
+// since that prefix's own pathRewrite forwards arbitrary
+// client-supplied sub-paths into the proxy, see docs/Why.md#why-do-the-agents-own-status-and-ensure-port-routes-live-under-admin
+app.get("/admin/webgui/:instanceName/status", checkToken, requireInstanceDir, asyncHandler(async (req, res) => {
   const status = await readWebguiPort(req.instanceDir);
   res.json(status);
 }));
 
-app.post("/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
+app.post("/admin/webgui/:instanceName/ensure-port", checkToken, requireInstanceDir, express.json(), asyncHandler(async (req, res) => {
   const port = Number(req.body?.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return res.status(400).json({ error: "port must be an integer in 1..65535" });
