@@ -17,11 +17,17 @@ function asyncHandler(fn) {
 
 // catches whatever asyncHandler forwarded, or any other next(err) call;
 // must be registered last, after every route and the app's own 404
-// see docs/Why.md#why-does-every-async-handler-need-asynchandler
+// see docs/Why.md#why-does-errorhandler-pass-through-4xx-status-and-message
 function errorHandler(err, req, res, next) {
-  console.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err.message}`);
+  const code = err.status ?? err.statusCode;
+  const status = Number.isInteger(code) && code >= 400 && code < 500 ? code : 500;
+  if (status === 500) {
+    console.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err.message}`);
+  } else {
+    console.warn(`Client error on ${req.method} ${req.originalUrl}: ${err.message}`);
+  }
   if (res.headersSent) return res.end();
-  res.status(500).send("Internal server error.");
+  res.status(status).send(status === 500 ? "Internal server error." : err.message);
 }
 
 // logs a crash that reached neither asyncHandler nor errorHandler
