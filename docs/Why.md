@@ -1006,15 +1006,32 @@ call, not two.
 
 The download handler sets `Content-Type: application/zip` and
 `Content-Disposition` from the agent's response headers, then pipes
-the agent's body straight through with `pipeline`.<br>If the agent's
-connection drops after it answered 200 but before any body bytes
-arrive, `res.headersSent` is still `false` -- Express only actually
-sends headers on the first write -- so the `catch` block falls back to
-`renderMissionsPage` for the error.<br>Without removing the
-already-`res.set()` headers first, that error page would render as
-html but still carry the zip's `Content-Type` and `Content-Disposition`,
-so the browser would try to save and open it as a corrupt zip file
-instead of showing the error.
+the agent's body straight through with `pipeline`.<br>`stream/promises`'
+`pipeline()` destroys every stream it's given, including the
+destination, as soon as one of them errors -- even before a single
+byte has been written and before `res.headersSent` becomes
+`true`. A repro confirmed this directly: a source that errors before
+its first byte leaves `res` with `headersSent=false,
+destroyed=true`.<br>That splits this handler into two genuinely
+different failure paths, not one. A pre-pipeline failure (`agentFetch`
+itself rejecting, or the agent answering a non-200) never touches
+`res` at all, so the outer `catch` removes the already-`res.set()`
+headers and falls back to `renderMissionsPage` for the error --
+without that removal, the error page would render as html but still
+carry the zip's `Content-Type` and `Content-Disposition`, so the
+browser would try to save and open it as a corrupt zip file instead
+of showing the error. A pipeline failure, by contrast, always finds
+`res` already destroyed, so its own local `.catch` only calls
+`res.destroy(err)` to reset the connection -- attempting a reply
+there would throw on an already-destroyed stream.<br>The agent's own
+three download/bundle handlers apply the same split, with one
+exception: its single-mission download opens the file before setting
+any header at all, so a failure that narrow (the file vanishing in
+the moment between the earlier existence check and this open) still
+gets a real 500 body -- cheap to offer there, since it's one file,
+checked to exist moments earlier, unlike the zip and tar-bundle sites,
+where headers are already streaming by the time a per-entry read
+could fail.
 
 ## Why doesn't the mission download have a body-stream timeout?
 
@@ -1342,7 +1359,10 @@ slots, the same way `.env` is shared on the auth-gate side.
 `AGENT_LOG_FILE` is pinned for the identical reason, and to the exact
 path `AppStdout`/`AppStderr` already write to, since `/admin/logs`
 relays through this same file and has to agree with where NSSM is
-actually writing it.
+actually writing it. `AGENT_KEY_STATE_FILE` is pinned for the same
+slot-local-default reason again, see
+[Why does the agent migrate a legacy key-state file?](#why-does-the-agent-migrate-a-legacy-key-state-file)
+for what an install from before this pin needs on top of it.
 
 ## Why does install.sh leave an existing active-slot file alone?
 
@@ -1572,3 +1592,81 @@ moves the draft back by hand.<br>The two key PEM files live under
 `key_state.json` does live here too, but every rotation step rewrites
 it unconditionally from `local-only/keys/`'s own history, so archiving
 a stale copy costs nothing.
+
+## Why does the agent migrate a legacy key-state file?
+
+`AGENT_KEY_STATE_FILE` is now pinned to `InstallDir` by `install.ps1`,
+matching `MISSION_AGENT_TOKEN_FILE`/`AGENT_LOG_FILE`.<br>An install
+from before that pin has its real trust state sitting at the old
+slot-relative default instead. Copying it once, the first time the
+pinned path is empty, means re-running `install.ps1` after an
+upgrade never looks like a factory-reset of trust to an admin who
+didn't ask for one.
+
+## Why is the relay timeout size-scaled instead of fixed?
+
+The mission upload and the agent's own self-update stage both relay
+a body through `agentClient.agentFetch`, which otherwise applies one
+fixed `AGENT_RELAY_TIMEOUT_MS` (60s default) meant for small
+pings.<br>A mission upload can be 200MB and the staged agent build
+~90MB; either can still be transferring well past 60s on a slow
+gate-to-agent link, long after the agent itself received every
+byte. A fixed larger constant would just move the same cliff to a
+bigger file. Scaling the deadline by the body's own size, against a
+deliberately pessimistic 256 KB/s floor, lets a slow link degrade
+instead of aborting a transfer that was always going to finish.
+
+## Why does errorHandler pass through 4xx status and message?
+
+`errorHandler` used to hard-code every error to a 500 with a generic
+message, including body-parser's own 400 (bad JSON) and 413
+(oversized body), which Express already sets `err.status` for.<br>
+Those messages carry no server internals — this codebase already
+sends `err.message` straight to callers everywhere else, e.g. every
+"Could not stage update: ..." site — so passing them through is no
+new leak, and it tells the caller what was actually wrong instead of
+a generic 500. A 4xx is logged at `warn`, not `error`: a client
+mistake isn't an unhandled server fault. The 500 path is unchanged:
+generic message, `error` level, no message leak.
+
+## Why does applyUpdate refuse without AUTH_GATE_STATE_DIR or ACTIVE_SLOT_PATH?
+
+`stateDir.js` and `launcher.js` resolve the active-slot path with
+identical precedence for both vars, diverging only on the final
+fallback, when neither is set: each then falls back to a path
+relative to its own module's directory, and those are genuinely
+different directories in the real A/B layout (inside the current
+release slot for the gate, the install root for `launcher.js`).<br>A successful
+update would then flip the slot the gate wrote to, while the
+launcher restarts into the slot it already had, silently splitting
+the gate and the agent onto different versions. Refusing up front,
+before any download, is cheaper than discovering the mismatch after
+a slot flip that already happened.
+
+## Why does webgui-sync keep serving the old template after a failed reload?
+
+Extracting and swapping the new bundle into `webgui-static/` and
+reloading `webguiIndexTemplate` from it used to share one `try`
+block, so an unreadable `index.html` after a successful swap
+reported "Sync failed" even though the live files on disk were
+already the new, complete bundle.<br>The two are split now: a reload
+failure only ever means this process's in-memory cache is stale
+until the next restart or a successful reload, not that the sync
+itself failed, so it keeps serving the old in-memory template and
+reports "Synced, but could not reload..." instead of dropping to a
+503 state that would make a cosmetic reload hiccup look like a worse
+outage than it is.
+
+## Why does the permissions popup keep its own live state?
+
+`render()` used to always run from a fresh `JSON.parse` of the
+button's own `data-access` attribute, a snapshot frozen at page
+load.<br>`toggle()` only ever mutated the DOM cells, never that
+snapshot, so closing and reopening the same popup without a page
+reload showed stale grants: a toggle from earlier in the session
+reverted to "denied" on reopen, and a failed request's revert only
+restored the one clicked cell, leaving the rest of that row
+mismatched from the server. Keeping one persistent `state` object per
+row, updated on every successful toggle and restored wholesale (not
+cell-by-cell) on a failed one, keeps the popup's view consistent with
+the server across any number of opens within the same page load.

@@ -85,3 +85,14 @@ It should **not** fire after an update that completed and restarted
 cleanly.<br>If it does, the exit-on-success fix is not live yet.<br>See
 [FAQ](FAQ.md).<br>See [A/B Self-Update](A-B-Self-Update.md) if the
 rollback unit was never installed.
+
+## Updates keep restarting into the same slot, or the agent and gate end up on different versions
+
+`AUTH_GATE_STATE_DIR` (or the older `ACTIVE_SLOT_PATH`) is not
+set.<br>Without it, the gate resolves the active-slot file to a path
+inside the current release slot, while `launcher.js` resolves it to
+a different path under the install root, so a successful update
+flips the slot the gate wrote to, not the one the launcher
+reads.<br>Set `AUTH_GATE_STATE_DIR` in `.env`, see
+[Configuration](Configuration.md#auth-gate-srcserverjs). The sidebar
+diagnostics panel also flags this before you ever click "Update now".
