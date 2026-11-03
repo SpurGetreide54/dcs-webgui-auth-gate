@@ -219,9 +219,6 @@ async function stageAuthGateSlot(archivePath, slotDir) {
 
 // section: relaying the agent's own update through this process
 
-// see docs/Why.md#why-is-the-agent-relay-timeout-only-60-seconds
-const AGENT_RELAY_TIMEOUT_MS = Number(process.env.AGENT_RELAY_TIMEOUT_MS) || 60 * 1000;
-
 // upload and commit the agent's new build over the internal channel,
 // forwarding the manifest's own signature and the key-rotation history
 // so the agent can verify authenticity itself instead of trusting
@@ -253,12 +250,11 @@ async function relayAgentUpdate(archivePath, manifest) {
     method: "POST",
     headers,
     body: fileBuffer,
-    timeoutMs: AGENT_RELAY_TIMEOUT_MS,
   });
   if (!stageRes.ok) throw new Error(`Agent rejected the staged update: ${await stageRes.text().catch(() => stageRes.status)}`);
   console.debug("Update: agent build staged, committing...");
 
-  const commitRes = await agentClient.agentFetch("/self-update/commit", { method: "POST", timeoutMs: AGENT_RELAY_TIMEOUT_MS });
+  const commitRes = await agentClient.agentFetch("/self-update/commit", { method: "POST" });
   if (!commitRes.ok) throw new Error(`Agent rejected committing the staged update: ${await commitRes.text().catch(() => commitRes.status)}`);
   console.debug("Update: agent committed and is restarting.");
 }
