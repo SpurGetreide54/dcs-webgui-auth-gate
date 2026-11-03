@@ -1671,6 +1671,22 @@ row, updated on every successful toggle and restored wholesale (not
 cell-by-cell) on a failed one, keeps the popup's view consistent with
 the server across any number of opens within the same page load.
 
+## Why does the rollback script install outside $INSTALL_DIR?
+
+`install.sh` used to install the rendered rollback script at
+`$INSTALL_DIR/scripts/systemd/...sh`, inside the same tree it chowns
+to the service account right afterward for `$AUTH_GATE_STATE_DIR`.<br>
+The service account could rename that `scripts/` directory aside and
+substitute its own script, then crash the unit three times in 60
+seconds so root's `OnFailure=` runs it — turning a compromised
+service account into root. The fix installs the rendered copy at
+`/usr/local/lib/dcs-webgui-auth-gate/`, a root-owned, FHS-appropriate
+path for a locally-installed package's own internal executable,
+mirroring the already-root-owned `/etc/systemd/system/` used for the
+unit files themselves. `$AUTH_GATE_STATE_DIR` itself staying
+service-owned is unchanged — that's a separate, broader question
+about who owns the install directory, out of scope for this fix.
+
 ## Why does the rollback script validate active-slot and refuse a symlinked log?
 
 The rollback unit runs as root against two files the service account
