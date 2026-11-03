@@ -493,16 +493,34 @@ manifest signed after a legitimate rotation, bricking self-update
 until someone fixes it by hand.<br>So the agent keeps its own
 persisted trust file (`agent-key-state.json`, seeded from the same
 `keyRotationConstants.js` placeholder keys db.js seeds `key_state`
-from) and replays whatever rotation history the gate forwards in
-`X-Key-State-History` through a ported copy of `keyRotation.js`'s own
-`verifyKeyState` -- the agent can't require that module directly, since
-it pulls in `db.js`'s native sqlite, wrong for a standalone Windows
-exe.<br>Once the trust file reflects any relayed rotations,
+from) and replays whatever rotation history the gate posts to
+`/self-update/key-state` (see "Why does relayAgentUpdate post the
+key-state history instead of heading it?" below) through the same
+`verifyKeyState` logic `keyRotation.js` uses -- the agent can't require
+that module directly, since it pulls in `db.js`'s native sqlite, wrong
+for a standalone Windows exe.<br>Once the trust file reflects any
+relayed rotations,
 `/self-update/stage` verifies `X-Manifest-Signed`/`X-Manifest-Signature`
 against the (possibly just-updated) trusted primary key, then checks
 the uploaded bytes' own hash against that signed manifest's `"agent"`
 download entry -- not a caller-supplied header -- which is what
 actually closes the gap.
+
+## Why does relayAgentUpdate post the key-state history instead of heading it?
+
+It used to ride in an `X-Key-State-History` header on `/self-update/stage`.<br>`key_state.json`
+is an append-only history, never pruned (see "Why is key_state.json an
+append-only history instead of a single record?" below), so it grows
+without bound.<br>Node's default header-size limit
+(`http.maxHeaderSize`, 16 KiB) means that history eventually stops
+fitting in a header at all, and every later relay fails with a 431
+until the install is stuck on an old build it can't self-update past.
+
+Posting it as its own request (`POST /self-update/key-state`, a JSON
+body) has no such limit, and resending the full history every time
+instead of just newer records is deliberately simple: the same
+append-only entry already notes the history stays negligible in size
+even over decades of rotations, so there's no real cost to trim.
 
 ## Why does applyUpdate() exit(0) instead of exit(1)?
 

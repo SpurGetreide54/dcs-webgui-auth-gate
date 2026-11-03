@@ -255,13 +255,27 @@ async function relayAgentUpdate(archivePath, manifest) {
     return null;
   });
 
+  // branch: at least one rotation has ever been published; relayed as
+  // its own request body, not a header, which the full history would
+  // eventually outgrow, see docs/Why.md#why-does-relayagentupdate-post-the-key-state-history-instead-of-heading-it
+  if (history) {
+    await agentClient
+      .agentFetch("/self-update/key-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ history }),
+      })
+      .then(async (res) => {
+        if (!res.ok) console.warn(`Agent rejected the relayed key-state history: ${await res.text().catch(() => res.status)}`);
+      })
+      .catch((err) => console.warn(`Could not relay key-state history to the agent: ${err.message}`));
+  }
+
   const headers = {
     "Content-Type": "application/octet-stream",
     "X-Manifest-Signed": JSON.stringify(signed),
     "X-Manifest-Signature": signature,
   };
-  // branch: at least one rotation has ever been published
-  if (history) headers["X-Key-State-History"] = JSON.stringify(history);
 
   const stageRes = await agentClient.agentFetch("/self-update/stage", {
     method: "POST",

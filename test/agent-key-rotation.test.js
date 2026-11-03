@@ -69,7 +69,7 @@ function signRecord(record, selfPrivateKey, vouchPrivateKey) {
   };
 }
 
-test("a rotation record relayed through X-Key-State-History updates the agent's persisted trust file, and a subsequent manifest signed by the new key verifies", async () => {
+test("a rotation record relayed through /self-update/key-state updates the agent's persisted trust file, and a subsequent manifest signed by the new key verifies", async () => {
   const { publicKey: newPrimaryPub, privateKey: newPrimaryPriv } = crypto.generateKeyPairSync("ed25519");
 
   // vouched by the surviving secondary slot, exactly as real rotation
@@ -84,6 +84,17 @@ test("a rotation record relayed through X-Key-State-History updates the agent's 
     secondaryPriv
   );
 
+  const keyStateRes = await fetch(`${base}/self-update/key-state`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ history: [record] }),
+  });
+  assert.equal(keyStateRes.status, 200, await keyStateRes.text().catch(() => ""));
+
+  const persisted = JSON.parse(fs.readFileSync(keyStateFile, "utf8"));
+  assert.equal(persisted.primary_public_key_pem, record.new_public_key_pem);
+  assert.equal(persisted.primary_rotated_at, record.rotated_at);
+
   const body = Buffer.from("build staged after a primary rotation");
   const signed = {
     version: "9.9.9",
@@ -95,17 +106,21 @@ test("a rotation record relayed through X-Key-State-History updates the agent's 
     method: "POST",
     headers: authHeaders({
       "Content-Type": "application/octet-stream",
-      "X-Key-State-History": JSON.stringify([record]),
       "X-Manifest-Signed": JSON.stringify(signed),
       "X-Manifest-Signature": signature,
     }),
     body,
   });
   assert.equal(res.status, 200, await res.text().catch(() => ""));
+});
 
-  const persisted = JSON.parse(fs.readFileSync(keyStateFile, "utf8"));
-  assert.equal(persisted.primary_public_key_pem, record.new_public_key_pem);
-  assert.equal(persisted.primary_rotated_at, record.rotated_at);
+test("/self-update/key-state rejects a malformed body instead of applying nothing silently", async () => {
+  const res = await fetch(`${base}/self-update/key-state`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ history: "not an array" }),
+  });
+  assert.equal(res.status, 400);
 });
 
 test("a manifest signed with the now-superseded old primary key is rejected after a rotation has been applied", async () => {

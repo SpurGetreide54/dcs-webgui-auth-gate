@@ -667,26 +667,23 @@ function otherAgentSlot(slot) {
   return slot === "a" ? "b" : "a";
 }
 
+// a separate route rather than a header on /self-update/stage: the
+// full rotation history is unbounded (see
+// docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record)
+// and would eventually outgrow node's default header-size limit, see
+// docs/Why.md#why-does-relayagentupdate-post-the-key-state-history-instead-of-heading-it
+app.post("/self-update/key-state", checkToken, express.json({ limit: "1mb" }), asyncHandler(async (req, res) => {
+  const { history } = req.body;
+  if (!Array.isArray(history)) return res.status(400).send("Malformed history in request body.");
+  applyKeyStateHistory(history);
+  res.json({ ok: true });
+}));
+
 // the staged build arrives as a raw binary body, not multipart
 const selfUpdateUpload = express.raw({ type: "application/octet-stream", limit: MAX_MISSION_BYTES });
 
 app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).send("No file body received.");
-
-  // branch: the gate relayed at least one rotation record, replay it
-  // into the trust state before trusting anything signed with a
-  // possibly-rotated key
-  const historyHeader = req.get("X-Key-State-History");
-  if (historyHeader) {
-    let history;
-    try {
-      history = JSON.parse(historyHeader);
-    } catch {
-      history = null;
-    }
-    if (!Array.isArray(history)) return res.status(400).send("Malformed X-Key-State-History header.");
-    applyKeyStateHistory(history);
-  }
 
   const signedHeader = req.get("X-Manifest-Signed");
   const signature = req.get("X-Manifest-Signature");

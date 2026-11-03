@@ -415,10 +415,11 @@ function serveKeyStateHistory(records) {
   };
 }
 
-// captures one /self-update/stage request's headers and body, replying
-// as the real agent would on success
+// captures one /self-update/stage request's headers and body, and one
+// /self-update/key-state request's parsed body, replying as the real
+// agent would on success
 function captureStageRequest() {
-  const captured = { request: null };
+  const captured = { request: null, keyState: null };
   dummyAgentRespond = (req, res) => {
     if (req.url === "/self-update/stage") {
       const chunks = [];
@@ -426,6 +427,15 @@ function captureStageRequest() {
       req.on("end", () => {
         captured.request = { headers: req.headers, body: Buffer.concat(chunks) };
         sendJson(res, 200, { ok: true, slot: "b" });
+      });
+      return;
+    }
+    if (req.url === "/self-update/key-state") {
+      const chunks = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        captured.keyState = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        sendJson(res, 200, { ok: true });
       });
       return;
     }
@@ -715,7 +725,7 @@ test("relayAgentUpdate forwards the manifest's own signature and signed payload,
   assert.equal(captured.request.headers["x-manifest-signature"], manifest.signature);
   const { signature, ...signed } = manifest;
   assert.deepEqual(JSON.parse(captured.request.headers["x-manifest-signed"]), signed);
-  assert.equal(captured.request.headers["x-key-state-history"], undefined, "no rotation was ever published, so the header must be omitted");
+  assert.equal(captured.keyState, null, "no rotation was ever published, so the key-state request must never be sent");
   assert.equal(captured.request.headers["x-sha256"], undefined, "the gate must no longer send a self-supplied sha256 for the agent to trust blindly");
   assert.ok(captured.request.body.equals(body));
 });
@@ -739,5 +749,5 @@ test("relayAgentUpdate forwards the key-state rotation history when one has been
   }
 
   assert.ok(captured.request, "the dummy agent must have received a /self-update/stage request");
-  assert.deepEqual(JSON.parse(captured.request.headers["x-key-state-history"]), records);
+  assert.deepEqual(captured.keyState, { history: records });
 });
