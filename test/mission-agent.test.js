@@ -527,6 +527,33 @@ test("webgui-bundle 404s when the install path has no WebGUI folder", async () =
   }
 });
 
+test("webgui-bundle: the folder disappearing right after the existence check resets the connection instead of a 200", async () => {
+  const vanishingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mission-agent-vanishing-install-"));
+  fs.mkdirSync(path.join(vanishingRoot, "WebGUI"), { recursive: true });
+  fs.writeFileSync(path.join(vanishingRoot, "WebGUI", "index.html"), "<html>about to vanish</html>");
+
+  const originalAccess = fsp.access;
+  fsp.access = async (target, ...rest) => {
+    const result = await originalAccess(target, ...rest);
+    // the existence check passes, then the whole folder disappears
+    // before tar.c actually reads it, well after headers are set
+    if (target === path.join(vanishingRoot, "WebGUI", "index.html")) {
+      fs.rmSync(vanishingRoot, { recursive: true, force: true });
+    }
+    return result;
+  };
+
+  try {
+    await assert.rejects(
+      () => fetch(`${base}/dcs-install/webgui-bundle?path=${encodeURIComponent(vanishingRoot)}`, { headers: authHeaders() }).then((res) => res.arrayBuffer()),
+      "the client must see the connection reset, not a 200 with a silently truncated body"
+    );
+  } finally {
+    fsp.access = originalAccess;
+    fs.rmSync(vanishingRoot, { recursive: true, force: true });
+  }
+});
+
 // section: mission list
 
 test("list is empty when the Missions folder doesn't exist yet", async () => {
@@ -637,6 +664,35 @@ test("download: aborting the client mid-stream destroys the server-side file han
   }
 });
 
+test("download: a file removed between the existence check and the actual open gets a real 500 body, not a reset connection", async () => {
+  const instance = "Example_DownloadOpenFailsAfterCheck";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  const missionPath = path.join(missionsDir, "vanishes.miz");
+  fs.writeFileSync(missionPath, "about to vanish");
+
+  const originalStat = fsp.stat;
+  fsp.stat = async (target, ...rest) => {
+    const result = await originalStat(target, ...rest);
+    // the existence check passes, then the file disappears before
+    // the route's own open, simulating the race this todo covers
+    if (target === missionPath) fs.rmSync(missionPath, { force: true });
+    return result;
+  };
+
+  try {
+    const res = await fetch(`${base}/missions/${instance}/download`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ missions: ["vanishes.miz"] }),
+    });
+    assert.equal(res.status, 500);
+    assert.match(await res.text(), /Failed to read mission/);
+  } finally {
+    fsp.stat = originalStat;
+  }
+});
+
 test("download Content-Disposition carries an ascii fallback and the real UTF-8 name", async () => {
   const instance = "Example_DownloadUnicodeName";
   const missionsDir = path.join(instanceDir(instance), "Missions");
@@ -676,6 +732,39 @@ test("download of multiple selected missions bundles them into one zip", async (
   assert.ok(body.includes("alpha bytes"), "zip must contain alpha.miz's content");
   assert.ok(body.includes("bravo.miz"), "zip must contain bravo.miz's name");
   assert.ok(body.includes("bravo bytes"), "zip must contain bravo.miz's content");
+});
+
+test("download: a file removed right as archiver opens it resets the connection instead of a corrupt 200", async () => {
+  const instance = "Example_DownloadZipFailsMidBuild";
+  const missionsDir = path.join(instanceDir(instance), "Missions");
+  fs.mkdirSync(missionsDir, { recursive: true });
+  fs.writeFileSync(path.join(missionsDir, "alpha.miz"), "alpha bytes");
+  const vanishesPath = path.join(missionsDir, "bravo.miz");
+  fs.writeFileSync(vanishesPath, "bravo bytes, about to vanish");
+
+  // archiver's own lstat check only ever emits a 'warning' on a
+  // missing file; deleting right as the real content read opens it
+  // is what surfaces as a genuine stream error, through graceful-fs
+  const gracefulFs = require("graceful-fs");
+  const originalCreateReadStream = gracefulFs.createReadStream;
+  gracefulFs.createReadStream = function (...args) {
+    if (args[0] === vanishesPath) fs.rmSync(vanishesPath, { force: true });
+    return originalCreateReadStream.apply(gracefulFs, args);
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        fetch(`${base}/missions/${instance}/download`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ missions: ["alpha.miz", "bravo.miz"] }),
+        }).then((res) => res.arrayBuffer()),
+      "the client must see the connection reset, not a 200 with a silently truncated body"
+    );
+  } finally {
+    gracefulFs.createReadStream = originalCreateReadStream;
+  }
 });
 
 test("download rejects an unknown mission name", async () => {

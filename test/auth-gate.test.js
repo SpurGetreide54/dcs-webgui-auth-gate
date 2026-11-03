@@ -94,6 +94,11 @@ let dummyAgentDownloadShouldStall = false;
 // of ending the body cleanly
 let dummyAgentDownloadShouldStallMidBody = false;
 
+// set per test: when true, a POST .../download flushes the zip
+// headers over the wire, then destroys the socket with zero body
+// bytes, unlike dummyAgentDownloadShouldStall above, whose headers never arrive
+let dummyAgentDownloadShouldStallAfterHeaders = false;
+
 // stands in for the real github api updateCheck.js's checkForUpdate()
 // reaches, set per test via dummyGithubRespond
 let dummyGithub, dummyGithubBase;
@@ -128,6 +133,10 @@ test.before(async () => {
       if (req.method === "POST" && req.url.endsWith("/download")) {
         res.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": 'attachment; filename="missions.zip"' });
         if (dummyAgentDownloadShouldStall) return req.socket.destroy();
+        if (dummyAgentDownloadShouldStallAfterHeaders) {
+          res.flushHeaders();
+          return req.socket.destroy();
+        }
         if (dummyAgentDownloadShouldStallMidBody) {
           res.write(Buffer.from("partial zip bytes"));
           // gives the chunk above time to actually reach the
@@ -516,9 +525,9 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.equal(realDownloadRes.status, 200);
     assert.match(realDownloadRes.headers.get("content-type") || "", /application\/zip/);
 
-    // a stall partway through the agent's response (socket destroyed
-    // after headers, before any body bytes) must not leak the
-    // zip-attachment headers onto the auth-gate's own error page
+    // writeHead() alone never flushes; the agent's socket dies first,
+    // so the gate's own agentFetch call rejects pre-pipeline, same
+    // outer-catch path as before, res still genuinely untouched
     dummyAgentDownloadShouldStall = true;
     const stalledDownloadRes = await fetch(`${base}/s/training/missions/download`, {
       method: "POST",
@@ -530,6 +539,22 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(stalledDownloadRes.headers.get("content-type") || "", /text\/html/, "the error page must be served as html, not the zip attachment headers it inherited");
     assert.equal(stalledDownloadRes.headers.get("content-disposition"), null, "no attachment header must survive onto the error page");
     assert.match(await stalledDownloadRes.text(), /Could not reach the mission agent/);
+
+    // true pipeline-destroys-res race: the agent flushes headers (so
+    // agentFetch resolves ok, past the outer try) then dies with zero
+    // body bytes, exercising pipeline()'s own local .catch instead
+    // see docs/Why.md#why-does-the-download-handler-remove-its-own-content-type-header-on-failure
+    dummyAgentDownloadShouldStallAfterHeaders = true;
+    await assert.rejects(
+      () =>
+        fetch(`${base}/s/training/missions/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: downloadOnlyCookie },
+          body: "mission=some-mission.miz",
+        }),
+      "a zero-byte pipeline failure destroys res before this process ever replies, so the request itself must fail"
+    );
+    dummyAgentDownloadShouldStallAfterHeaders = false;
 
     // a failure after some body bytes already streamed (headers sent,
     // not just the zip-attachment headers staged) must reset the

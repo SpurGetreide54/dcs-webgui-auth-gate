@@ -998,21 +998,19 @@ app.post(
       const disposition = agentRes.headers.get("content-disposition");
       res.set("Content-Type", agentRes.headers.get("content-type") || "application/zip");
       if (disposition) res.set("Content-Disposition", disposition);
-      await pipeline(Readable.fromWeb(agentRes.body), res);
+      // pipeline() destroys res itself on a source error, even before
+      // the first byte, so this .catch only resets the connection,
+      // never tries to reply on an already-destroyed res
+      // see docs/Why.md#why-does-the-download-handler-remove-its-own-content-type-header-on-failure
+      await pipeline(Readable.fromWeb(agentRes.body), res).catch((err) => res.destroy(err));
     } catch (err) {
       clearTimeout(headersTimeout);
-      if (!res.headersSent) {
-        // undo the zip-attachment headers set above before the stream
-        // failed, so the error page renders as html, not a corrupt
-        // zip download, see docs/Why.md#why-does-the-download-handler-remove-its-own-content-type-header-on-failure
-        res.removeHeader("Content-Type");
-        res.removeHeader("Content-Disposition");
-        return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
-      }
-      // a mid-body failure must reset the connection, not end it
-      // cleanly, so the browser can't mistake a truncated file for a
-      // complete one, see docs/Why.md#why-doesnt-the-mission-download-have-a-body-stream-timeout
-      res.destroy(err);
+      // only reached by a pre-pipeline failure (agentFetch itself
+      // rejecting, or the !agentRes.ok branch above, which already
+      // returned); res is still genuinely untouched here
+      res.removeHeader("Content-Type");
+      res.removeHeader("Content-Disposition");
+      return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
     }
   })
 );

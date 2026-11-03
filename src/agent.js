@@ -301,15 +301,22 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
   // one .miz is already a zip, renamed, so it needs no wrapping at all
   if (resolvedPaths.length === 1) {
     const { safeName, finalPath } = resolvedPaths[0];
+    // open before setting any header: a file removed or replaced by
+    // something unreadable after the isExistingFile check above gets
+    // a real 500 body instead of a reset connection
+    // see docs/Why.md#why-does-the-download-handler-remove-its-own-content-type-header-on-failure
+    let fd;
+    try {
+      fd = fsSync.openSync(finalPath, "r");
+    } catch (err) {
+      return res.status(500).send(`Failed to read mission: ${err.message}`);
+    }
     res.set("Content-Disposition", contentDispositionValue(safeName));
     res.set("Content-Type", "application/zip");
-    const stream = fsSync.createReadStream(finalPath);
-    // a file removed or replaced by something unreadable after the
-    // isExistingFile check above would otherwise crash the agent
-    return pipeline(stream, res).catch((err) => {
-      if (!res.headersSent) res.status(500);
-      res.end(`Failed to read mission: ${err.message}`);
-    });
+    const stream = fsSync.createReadStream(finalPath, { fd });
+    // the open above already ruled out the likely failure; anything
+    // past this point can only reset the connection, not reply
+    return pipeline(stream, res).catch((err) => res.destroy(err));
   }
 
   // more than one gets bundled, unmodified, into one outer zip
@@ -317,12 +324,10 @@ app.post("/missions/:instanceName/download", checkToken, requireInstanceDir, exp
   res.set("Content-Type", "application/zip");
   // already-compressed .miz files, re-compressing just burns cpu
   const archive = archiver("zip", { zlib: { level: 0 } });
-  // the pipeline has to start before finalize(), since archiver
-  // buffers internally until finalize() signals end
-  const done = pipeline(archive, res).catch((err) => {
-    if (!res.headersSent) res.status(500);
-    res.end(`Failed to build zip: ${err.message}`);
-  });
+  // starts before finalize(), since archiver buffers internally until
+  // finalize() signals end; archiver reads each file lazily from
+  // there, after headers are already streamed, so a failure can only reset
+  const done = pipeline(archive, res).catch((err) => res.destroy(err));
   for (const { safeName, finalPath } of resolvedPaths) {
     archive.file(finalPath, { name: safeName });
   }
@@ -542,10 +547,9 @@ app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) 
 
   res.set("Content-Type", "application/x-tar");
   const stream = tar.c({ cwd: webguiDir }, ["."]);
-  await pipeline(stream, res).catch((err) => {
-    if (!res.headersSent) res.status(500);
-    res.end(`Failed to read webgui bundle: ${err.message}`);
-  });
+  // tar streams the whole directory as it reads it, after headers
+  // are already streamed, so a failure here can only reset, not reply
+  await pipeline(stream, res).catch((err) => res.destroy(err));
 }));
 
 // section: self-update, stage and commit
