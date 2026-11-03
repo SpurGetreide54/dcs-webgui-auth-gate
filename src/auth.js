@@ -17,6 +17,9 @@ const RATE_LIMIT_MAX_ATTEMPTS = 5;
 const RATE_LIMIT_IP_MAX_ATTEMPTS = 20;
 // the one place this rule is defined; server.js and views.js both read it
 const MIN_PASSWORD_LENGTH = 12;
+// bcryptjs 2.x only looks at the first 72 bytes of its input, see
+// docs/Why.md#why-does-validatenewpassword-reject-passwords-over-72-bytes
+const MAX_PASSWORD_BYTES = 72;
 
 // every expiry/window check below compares against sqlite's own
 // datetime('now'), never a js Date, see docs/Why.md#why-does-every-expiry-use-sqlites-own-datetime-instead-of-js-date
@@ -32,6 +35,12 @@ function hashPassword(password) {
 function validateNewPassword(password) {
   if (!password || password.length < MIN_PASSWORD_LENGTH) {
     return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  // bcrypt silently ignores anything past 72 bytes, see
+  // docs/Why.md#why-does-validatenewpassword-reject-passwords-over-72-bytes
+  const byteLength = Buffer.byteLength(password, "utf8");
+  if (byteLength > MAX_PASSWORD_BYTES) {
+    return `Password must be at most ${MAX_PASSWORD_BYTES} bytes (${byteLength} bytes given); multibyte characters count for more than one byte each.`;
   }
   return null;
 }
@@ -209,6 +218,7 @@ module.exports = {
   SESSION_TTL_SECONDS,
   DUMMY_PASSWORD_HASH,
   MIN_PASSWORD_LENGTH,
+  MAX_PASSWORD_BYTES,
   hashPassword,
   verifyPassword,
   validateNewPassword,

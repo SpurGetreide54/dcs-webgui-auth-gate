@@ -12,7 +12,13 @@ const diagnostics = require("./diagnostics");
 // db.js is already required (and its sqlite connection already open)
 // by the three modules above, so requiring auth.js here adds no new
 // side effect to this already-booted server process
-const { MIN_PASSWORD_LENGTH } = require("./auth");
+const { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES } = require("./auth");
+
+// shown next to every new-password field instead of a maxlength
+// attribute -- html's maxlength counts utf-16 code units, not bytes,
+// so it can't express bcrypt's byte-based limit accurately, see
+// docs/Why.md#why-does-validatenewpassword-reject-passwords-over-72-bytes
+const PASSWORD_LENGTH_HINT = `${MIN_PASSWORD_LENGTH}–${MAX_PASSWORD_BYTES} characters (fewer if you use non-ASCII characters)`;
 
 // escape a value for safe interpolation into html
 function escapeHtml(str) {
@@ -151,6 +157,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post" action="/setup">
   <label>Username <input type="text" name="username" required autofocus></label>
   <label>Password <input type="password" name="password" required minlength="${MIN_PASSWORD_LENGTH}"></label>
+  <p class="hint">${PASSWORD_LENGTH_HINT}</p>
   <button type="submit">Create account</button>
 </form>`
   );
@@ -324,6 +331,7 @@ function changePasswordSection() {
 <form method="post" action="/admin/accounts/change-password">
   <label>Current password <input type="password" name="current_password" required></label>
   <label>New password <input type="password" name="new_password" required minlength="${MIN_PASSWORD_LENGTH}"></label>
+  <p class="hint">${PASSWORD_LENGTH_HINT}</p>
   <label>Confirm new password <input type="password" name="confirm_password" required minlength="${MIN_PASSWORD_LENGTH}"></label>
   <button type="submit" class="destructive">Change password</button>
 </form>`;
@@ -416,6 +424,7 @@ ${acctForms}${inviteForms}
   <form method="post" action="/admin/accounts" class="create-form create-form-fixed">
     <label>Username <input type="text" name="username" required></label>
     <label>Password <input type="password" name="password" required minlength="${MIN_PASSWORD_LENGTH}"></label>
+    <p class="hint">${PASSWORD_LENGTH_HINT}</p>
     <label><input type="checkbox" name="can_manage_accounts"> Site admin (can manage accounts)</label>
     <button type="submit">Create account</button>
   </form>
@@ -473,6 +482,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post">
   <label>Username <input type="text" name="username" required autofocus></label>
   <label>Password <input type="password" name="password" required minlength="${MIN_PASSWORD_LENGTH}"></label>
+  <p class="hint">${PASSWORD_LENGTH_HINT}</p>
   <label>Confirm password <input type="password" name="confirm_password" required minlength="${MIN_PASSWORD_LENGTH}"></label>
   <button type="submit">Create account</button>
 </form>`

@@ -169,6 +169,7 @@ form {
   padding: 1.25rem;
 }
 label { font-size: 0.9rem; color: var(--text-muted); }
+.hint { font-size: 0.8rem; color: var(--text-muted); margin: -0.4rem 0 0; }
 
 /* every out-of-band <form id="..."> in views.js must carry this class
    see docs/Why.md#why-does-each-table-row-get-its-own-out-of-band-form */

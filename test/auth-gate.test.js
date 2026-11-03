@@ -1430,6 +1430,21 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
   }
 });
 
+test("validateNewPassword rejects a password over 72 bytes, accepts one at exactly 72", () => {
+  assert.equal(auth.validateNewPassword("a".repeat(72)), null, "exactly 72 bytes must be accepted");
+  const over = auth.validateNewPassword("a".repeat(73));
+  assert.match(over, /72 bytes/);
+  assert.match(over, /73 bytes given/);
+});
+
+test("validateNewPassword counts bytes, not characters, so multibyte input can fail well under 72 characters", () => {
+  // "é" (U+00E9) is 2 bytes in utf-8, so 40 of them is 80 bytes while
+  // only 40 characters long -- well past minlength but still rejected
+  const multibyte = "é".repeat(40);
+  const error = auth.validateNewPassword(multibyte);
+  assert.match(error, /80 bytes given/);
+});
+
 test("getSessionAdmin only writes expires_at once the session is inside the cookie-refresh window, not on every call", () => {
   const adminId = db.prepare("SELECT id FROM admins WHERE username = ?").get("siteadmin").id;
   const token = auth.createSession(adminId);

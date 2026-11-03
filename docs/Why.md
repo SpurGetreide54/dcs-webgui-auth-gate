@@ -213,6 +213,31 @@ hash of no real password computed once at module load, is compared
 via that same call whenever the submitted username doesn't match a
 real admin, so both paths always pay for one real bcrypt compare.
 
+## Why does validateNewPassword reject passwords over 72 bytes?
+
+`bcryptjs` 2.x silently truncates its input to 72 bytes: anything past
+that point is ignored both when hashing and when comparing, so an
+admin who sets a 100-character passphrase could later log in with any
+string sharing just the first 72 bytes, with no visible symptom at
+either step.<br>Multibyte characters reach that limit sooner than the
+character count suggests, hence the byte count
+(`Buffer.byteLength(password, "utf8")`), not `.length`.
+
+Rejecting over the limit was chosen over pre-hashing the password (for
+example with SHA-256) before bcrypt, which would remove the limit
+entirely: this project already has a live deployment with real stored
+admin password hashes, and pre-hashing changes every hash's input
+going forward, needing a hash-version marker and a re-hash-on-login
+upgrade path for every account created before that shipped. That's
+real migration work, filed separately
+(`local-only/todo/pre-hash-passwords-before-bcrypt.md`) rather than
+bundled into this fix.
+
+The form fields show a plain hint instead of a `maxlength` attribute:
+HTML's `maxlength` counts UTF-16 code units, not bytes, so it can't
+express this limit accurately. The real enforcement stays server-side
+in `validateNewPassword`, same as the minimum length already is.
+
 ## Why does requireAuth check Sec-Fetch-Dest?
 
 `Sec-Fetch-Dest` is set by the browser itself, `app.js` can't override
