@@ -16,6 +16,7 @@ const tar = require("tar");
 const archiver = require("archiver");
 const { isVersionGreater } = require("./versionCompare");
 const { INSTANCE_NAME_RE, asyncHandler, errorHandler, logFatalAndExit } = require("./common");
+const { otherSlot } = require("./activeSlot");
 
 // __AGENT_VERSION__ is baked in at build time by build-agent-exe.sh's
 // esbuild --define; unbundled (tests, local dev under node) falls
@@ -647,11 +648,6 @@ function readActiveAgentSlot() {
   }
 }
 
-// return whichever slot isn't the one passed in
-function otherAgentSlot(slot) {
-  return slot === "a" ? "b" : "a";
-}
-
 // a separate route rather than a header on /self-update/stage: the
 // full rotation history is unbounded and would eventually outgrow
 // node's default header-size limit
@@ -710,7 +706,7 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async 
     return res.status(409).send(`Offered version ${signed.version} is not newer than the current ${AGENT_VERSION}, refusing to stage.`);
   }
 
-  const idleSlot = otherAgentSlot(readActiveAgentSlot());
+  const idleSlot = otherSlot(readActiveAgentSlot());
   const slotDir = path.join(RELEASES_DIR, idleSlot);
   await fs.mkdir(slotDir, { recursive: true });
   const finalPath = path.join(slotDir, "agent.exe");
@@ -727,7 +723,7 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async 
 }));
 
 app.post("/self-update/commit", checkToken, asyncHandler(async (req, res) => {
-  const idleSlot = otherAgentSlot(readActiveAgentSlot());
+  const idleSlot = otherSlot(readActiveAgentSlot());
   const idleSlotDir = path.join(RELEASES_DIR, idleSlot);
   if (!fsSync.existsSync(path.join(idleSlotDir, "agent.exe"))) {
     return res.status(400).send(`No staged build in slot ${idleSlot}. Stage one first.`);
