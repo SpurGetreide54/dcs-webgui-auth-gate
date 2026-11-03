@@ -941,7 +941,11 @@ app.post(
         new Blob([req.file.buffer], { type: "application/octet-stream" }),
         req.file.originalname
       );
-      const agentRes = await agentClient.agentFetch("/upload", { method: "POST", body: form });
+      const agentRes = await agentClient.agentFetch("/upload", {
+        method: "POST",
+        body: form,
+        timeoutMs: agentClient.scaledTimeoutMs(req.file.buffer.length),
+      });
       if (!agentRes.ok) {
         const detail = await agentRes.text().catch(() => "");
         flash.setFlash(res, { error: `Mission agent rejected the upload: ${detail || agentRes.status}` });

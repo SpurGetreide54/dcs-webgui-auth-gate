@@ -101,6 +101,15 @@ test("a per-call timeoutMs overrides the default, letting a slower-than-default 
   }
 });
 
+test("scaledTimeoutMs grows with body size and never returns less than the default", () => {
+  const defaultMs = agentClient.getDefaultTimeoutMs();
+  assert.equal(agentClient.scaledTimeoutMs(0), defaultMs);
+  const small = agentClient.scaledTimeoutMs(1024 * 1024);
+  const large = agentClient.scaledTimeoutMs(100 * 1024 * 1024);
+  assert.ok(small > defaultMs, "a non-empty body must push the deadline past the bare default");
+  assert.ok(large > small, "a larger body must push the deadline out further than a smaller one");
+});
+
 test("getUrl/getToken expose the raw env values, for callers that configure a proxy target rather than fetching", () => {
   process.env.MISSION_AGENT_URL = "http://127.0.0.1:9999";
   process.env.MISSION_AGENT_TOKEN = "raw-token";

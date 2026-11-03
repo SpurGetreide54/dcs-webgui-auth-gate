@@ -20,9 +20,19 @@ async function agentFetch(path, init = {}) {
   return fetch(url, { ...init, headers, signal: init.signal || AbortSignal.timeout(init.timeoutMs || DEFAULT_TIMEOUT_MS) });
 }
 
+// a size-scaled deadline for a body-carrying relay call: the existing
+// 60s default, plus the body's own size divided by a conservative
+// minimum-acceptable throughput, so a slow link degrades instead of aborting
+// see docs/Why.md#why-is-the-relay-timeout-size-scaled-instead-of-fixed
+function scaledTimeoutMs(bodyBytes) {
+  const MIN_THROUGHPUT_BYTES_PER_MS = (256 * 1024) / 1000; // 256 KB/s
+  return Math.ceil(DEFAULT_TIMEOUT_MS + bodyBytes / MIN_THROUGHPUT_BYTES_PER_MS);
+}
+
 module.exports = {
   isConfigured,
   agentFetch,
+  scaledTimeoutMs,
   getUrl: () => process.env.MISSION_AGENT_URL,
   getToken: () => process.env.MISSION_AGENT_TOKEN,
   getDefaultTimeoutMs: () => DEFAULT_TIMEOUT_MS,

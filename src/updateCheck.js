@@ -293,6 +293,7 @@ async function relayAgentUpdate(archivePath, manifest) {
     method: "POST",
     headers,
     body: fileBuffer,
+    timeoutMs: agentClient.scaledTimeoutMs(fileBuffer.length),
   });
   // a retry after a half-done update (agent committed, gate's own
   // slot flip never ran): the agent already has this build, so skip
