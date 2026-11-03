@@ -958,6 +958,20 @@ kept behind the same `access.canDelete` gate it already had, as a
 view-only or download-only admin still pays for exactly one agent
 call, not two.
 
+## Why does the download handler remove its own Content-Type header on failure?
+
+The download handler sets `Content-Type: application/zip` and
+`Content-Disposition` from the agent's response headers, then pipes
+the agent's body straight through with `pipeline`.<br>If the agent's
+connection drops after it answered 200 but before any body bytes
+arrive, `res.headersSent` is still `false` -- Express only actually
+sends headers on the first write -- so the `catch` block falls back to
+`renderMissionsPage` for the error.<br>Without removing the
+already-`res.set()` headers first, that error page would render as
+html but still carry the zip's `Content-Type` and `Content-Disposition`,
+so the browser would try to save and open it as a corrupt zip file
+instead of showing the error.
+
 ## Why does the index injection use a function replacer instead of a string one?
 
 A string second argument to `String.prototype.replace` treats `$&`,

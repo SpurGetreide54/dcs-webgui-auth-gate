@@ -84,6 +84,11 @@ let dummyAgentMissionsOverride = null;
 // trash-list call isn't waiting on it first
 let dummyAgentMissionsDelayMs = 0;
 
+// set per test: when true, a POST .../download writes the zip headers
+// then destroys the socket before any body bytes, instead of the
+// generic { ok: true } default
+let dummyAgentDownloadShouldStall = false;
+
 // stands in for the real github api updateCheck.js's checkForUpdate()
 // reaches, set per test via dummyGithubRespond
 let dummyGithub, dummyGithubBase;
@@ -111,6 +116,14 @@ test.before(async () => {
         }
         res.writeHead(200, { "Content-Type": "text/plain" });
         return res.end(dummyAgentLogText);
+      }
+      // a mission download: write the zip headers, then (per test)
+      // either stream a real body or destroy the socket before any
+      // body bytes, simulating a stall partway through the response
+      if (req.method === "POST" && req.url.endsWith("/download")) {
+        res.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": 'attachment; filename="missions.zip"' });
+        if (dummyAgentDownloadShouldStall) return req.socket.destroy();
+        return res.end(Buffer.from("fake zip bytes"));
       }
       // a trash list get needs its own { trash: [...] } shape, distinct
       // from the plain list's { missions: [...] }, matching src/agent.js
@@ -476,6 +489,30 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(downloadOnlyHtml, /<h2>Missions<\/h2>/, "download rights alone must still show the list to pick a mission from");
     assert.match(downloadOnlyHtml, /Download selected/, "download rights must show the download button");
     assert.doesNotMatch(downloadOnlyHtml, /<h2>Trash<\/h2>/, "no delete rights means no trash section at all");
+
+    // a real download still works end to end
+    const realDownloadRes = await fetch(`${base}/s/training/missions/download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: downloadOnlyCookie },
+      body: "mission=some-mission.miz",
+    });
+    assert.equal(realDownloadRes.status, 200);
+    assert.match(realDownloadRes.headers.get("content-type") || "", /application\/zip/);
+
+    // a stall partway through the agent's response (socket destroyed
+    // after headers, before any body bytes) must not leak the
+    // zip-attachment headers onto the auth-gate's own error page
+    dummyAgentDownloadShouldStall = true;
+    const stalledDownloadRes = await fetch(`${base}/s/training/missions/download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: downloadOnlyCookie },
+      body: "mission=some-mission.miz",
+    });
+    dummyAgentDownloadShouldStall = false;
+    assert.equal(stalledDownloadRes.status, 502);
+    assert.match(stalledDownloadRes.headers.get("content-type") || "", /text\/html/, "the error page must be served as html, not the zip attachment headers it inherited");
+    assert.equal(stalledDownloadRes.headers.get("content-disposition"), null, "no attachment header must survive onto the error page");
+    assert.match(await stalledDownloadRes.text(), /Could not reach the mission agent/);
 
     // delete rights gate both the trash section's visibility and the
     // restore route itself, same permission as trashing

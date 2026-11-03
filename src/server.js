@@ -992,7 +992,14 @@ app.post(
       if (disposition) res.set("Content-Disposition", disposition);
       await pipeline(Readable.fromWeb(agentRes.body), res);
     } catch (err) {
-      if (!res.headersSent) return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
+      if (!res.headersSent) {
+        // undo the zip-attachment headers set above before the stream
+        // failed, so the error page renders as html, not a corrupt
+        // zip download, see docs/Why.md#why-does-the-download-handler-remove-its-own-content-type-header-on-failure
+        res.removeHeader("Content-Type");
+        res.removeHeader("Content-Disposition");
+        return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
+      }
       res.end();
     }
   })
