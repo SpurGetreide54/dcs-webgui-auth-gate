@@ -42,6 +42,27 @@ function getAccessibleServers(adminId) {
     .all(adminId);
 }
 
+// same join as getAccessibleServers, but for every admin id at once;
+// used by the accounts page to avoid one query per row
+function getAccessibleServersBatch(adminIds) {
+  if (adminIds.length === 0) return new Map();
+  const placeholders = adminIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT servers.*, admin_server_access.admin_id, admin_server_access.server_id,
+              admin_server_access.can_upload_missions, admin_server_access.can_view_missions,
+              admin_server_access.can_download_missions, admin_server_access.can_delete_missions
+       FROM servers
+       JOIN admin_server_access ON admin_server_access.server_id = servers.id
+       WHERE admin_server_access.admin_id IN (${placeholders})
+       ORDER BY servers.id`
+    )
+    .all(...adminIds);
+  const byAdmin = new Map(adminIds.map((id) => [id, []]));
+  for (const row of rows) byAdmin.get(row.admin_id).push(row);
+  return byAdmin;
+}
+
 // read one admin's raw access row for one server, or undefined
 function getAccess(adminId, serverId) {
   return db
@@ -145,6 +166,7 @@ module.exports = {
   getServerById,
   getAllServers,
   getAccessibleServers,
+  getAccessibleServersBatch,
   getAccess,
   hasServerAccess,
   hasPermission,

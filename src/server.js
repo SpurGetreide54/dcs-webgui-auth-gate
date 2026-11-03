@@ -241,10 +241,9 @@ function loadAccountsPageData(req, { error, notice, inviteUrl } = {}) {
     return views.accountsPage({ admin: req.admin, own, servers, error, notice });
   }
   invitesDb.pruneExpired();
-  const accounts = db
-    .prepare("SELECT id, username, can_manage_accounts FROM admins ORDER BY id")
-    .all()
-    .map((a) => ({ ...a, access: serversDb.getAccessibleServers(a.id) }));
+  const admins = db.prepare("SELECT id, username, can_manage_accounts FROM admins ORDER BY id").all();
+  const accessByAdmin = serversDb.getAccessibleServersBatch(admins.map((a) => a.id));
+  const accounts = admins.map((a) => ({ ...a, access: accessByAdmin.get(a.id) }));
   const invites = invitesDb.listValidInvites();
   return views.accountsPage({ admin: req.admin, accounts, servers, invites, error, notice, inviteUrl });
 }

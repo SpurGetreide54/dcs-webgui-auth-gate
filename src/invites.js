@@ -47,12 +47,24 @@ function getInviteAccess(inviteId) {
   return db.prepare("SELECT * FROM invite_server_access WHERE invite_id = ?").all(inviteId);
 }
 
+// same lookup as getInviteAccess, but for every invite id at once;
+// used by listValidInvites to avoid one query per invite
+function getInviteAccessBatch(inviteIds) {
+  if (inviteIds.length === 0) return new Map();
+  const placeholders = inviteIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT * FROM invite_server_access WHERE invite_id IN (${placeholders})`)
+    .all(...inviteIds);
+  const byInvite = new Map(inviteIds.map((id) => [id, []]));
+  for (const row of rows) byInvite.get(row.invite_id).push(row);
+  return byInvite;
+}
+
 // list every invite that hasn't expired yet, with its access rows attached
 function listValidInvites() {
-  return db
-    .prepare("SELECT * FROM invites WHERE expires_at > datetime('now') ORDER BY id")
-    .all()
-    .map((invite) => ({ ...invite, access: getInviteAccess(invite.id) }));
+  const invites = db.prepare("SELECT * FROM invites WHERE expires_at > datetime('now') ORDER BY id").all();
+  const accessByInvite = getInviteAccessBatch(invites.map((invite) => invite.id));
+  return invites.map((invite) => ({ ...invite, access: accessByInvite.get(invite.id) }));
 }
 
 // look up a still-valid invite by its row id
@@ -85,6 +97,7 @@ module.exports = {
   setInvitePermission,
   revokeInviteAccess,
   getInviteAccess,
+  getInviteAccessBatch,
   listValidInvites,
   getValidInviteById,
   getValidInviteByToken,
