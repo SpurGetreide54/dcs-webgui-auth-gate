@@ -50,10 +50,15 @@ let app, db, sqlitePath, webguiStaticPath, authGateLogPath;
 let dummyAgent, dummyAgentPort;
 let bundleTar, bundleRequests;
 
+// set per test: when non-null, the dummy agent awaits this promise
+// before answering a good-install-path bundle request, so a test can
+// hold the first sync open while it fires a second one
+let bundleResponseGate = null;
+
 // a minimal http server standing in for the real mission-agent
 function startDummyAgent() {
   return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
+    const server = http.createServer(async (req, res) => {
       const url = new URL(req.url, "http://localhost");
       if (url.pathname !== "/dcs-install/webgui-bundle") {
         res.writeHead(404);
@@ -66,6 +71,7 @@ function startDummyAgent() {
         res.writeHead(404, { "Content-Type": "text/plain" });
         return res.end(`No WebGUI folder found at ${installPath}\\WebGUI (index.html missing).`);
       }
+      if (bundleResponseGate) await bundleResponseGate;
       res.writeHead(200, { "Content-Type": "application/x-tar" });
       res.end(bundleTar);
     });
@@ -322,6 +328,60 @@ test("webgui-sync: rejects confirming without a server that has an install path 
     assert.match(await res.text(), /Pick a server that has a DCS install path set/);
     assert.equal(bundleRequests.length, 0, "must not call the agent for a server with no install path");
   } finally {
+    server.close();
+  }
+});
+
+test("webgui-sync: a second confirm while one is still running gets refused, without touching the filesystem", async () => {
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  bundleRequests = [];
+
+  let releaseGate;
+  bundleResponseGate = new Promise((resolve) => {
+    releaseGate = resolve;
+  });
+
+  try {
+    const loginRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=siteadmin&password=correct-horse-battery-staple",
+      redirect: "manual",
+    });
+    const siteAdminCookie = extractCookie(loginRes);
+
+    const insert = db
+      .prepare("INSERT INTO servers (slug, name, instance_name, dcs_install_path) VALUES (?, ?, ?, ?)")
+      .run("concurrent-sync", "Concurrent Sync Server", "Example_ConcurrentSync", GOOD_INSTALL_PATH);
+    const serverId = insert.lastInsertRowid;
+
+    // fired but not yet awaited: the dummy agent holds its response
+    // open on bundleResponseGate, so this confirm is still in flight
+    const firstSyncPromise = postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `server_id=${serverId}`,
+    });
+
+    // wait for the first request to actually reach the agent before
+    // firing the second, so this is a genuine overlap, not a race on connect
+    while (bundleRequests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const secondSyncRes = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `server_id=${serverId}`,
+    });
+    assert.match(await secondSyncRes.text(), /A sync is already running/);
+    assert.deepEqual(bundleRequests, [GOOD_INSTALL_PATH], "the second confirm must never reach the agent at all");
+
+    releaseGate();
+    const firstSyncRes = await firstSyncPromise;
+    assert.match(await firstSyncRes.text(), /Synced webgui-static/, "the first request must still complete normally once released");
+  } finally {
+    bundleResponseGate = null;
     server.close();
   }
 });

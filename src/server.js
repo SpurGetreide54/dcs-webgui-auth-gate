@@ -602,6 +602,12 @@ serversRouter.get("/webgui-sync", (req, res) => {
   res.send(views.webguiSyncPage({ admin: req.admin, servers: serversDb.getAllServers(), ...flash.readFlash(req, res) }));
 });
 
+// true only while this process's own webgui-sync is still running;
+// swapDirectoryInto has no lock of its own, so two concurrent confirms
+// would otherwise interleave and strand a swap-backup directory
+// see docs/Why.md#why-does-webgui-syncconfirm-guard-against-a-concurrent-sync
+let webguiSyncInFlight = false;
+
 // two path segments deliberately, a bare "/webgui-sync" would be
 // shadowed by the earlier POST "/:id" route matching "webgui-sync" as an id
 serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
@@ -609,39 +615,48 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
     flash.setFlash(res, { error: "Mission agent is not configured." });
     return res.redirect("/admin/servers");
   }
+  if (webguiSyncInFlight) {
+    flash.setFlash(res, { error: "A sync is already running." });
+    return res.redirect("/admin/servers/webgui-sync");
+  }
   const server = serversDb.getServerById(Number(req.body.server_id));
   if (!server || !server.dcs_install_path) {
     flash.setFlash(res, { error: "Pick a server that has a DCS install path set." });
     return res.redirect("/admin/servers/webgui-sync");
   }
 
-  // extract into a scratch dir and validate before touching the live
-  // webgui-static/ at all, then swap via two fast same-filesystem renames
-  // see docs/Why.md#why-must-the-webgui-sync-scratch-directory-be-a-sibling-of-webguiroot
-  const tmpDir = `${webguiRoot}.sync-tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
+  webguiSyncInFlight = true;
   try {
-    const bundleRes = await fetchWebguiBundle(server.dcs_install_path);
-    await fs.mkdir(tmpDir, { recursive: true });
-    await pipeline(Readable.fromWeb(bundleRes.body), tar.x({ cwd: tmpDir }));
-    await fs.access(path.join(tmpDir, "index.html"));
-    await updateCheck.swapDirectoryInto(webguiRoot, tmpDir);
-  } catch (err) {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-    flash.setFlash(res, { error: `Sync failed: ${err.message}` });
-    return res.redirect("/admin/servers/webgui-sync");
-  }
+    // extract into a scratch dir and validate before touching the live
+    // webgui-static/ at all, then swap via two fast same-filesystem renames
+    // see docs/Why.md#why-must-the-webgui-sync-scratch-directory-be-a-sibling-of-webguiroot
+    const tmpDir = `${webguiRoot}.sync-tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-  // the swap already succeeded; webgui-static/ on disk is correct
-  // regardless of whether this reload itself works
-  // see docs/Why.md#why-does-webgui-sync-keep-serving-the-old-template-after-a-failed-reload
-  try {
-    webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
-    flash.setFlash(res, { notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).` });
-  } catch (err) {
-    flash.setFlash(res, { error: `Synced, but could not reload index.html: ${err.message}` });
+    try {
+      const bundleRes = await fetchWebguiBundle(server.dcs_install_path);
+      await fs.mkdir(tmpDir, { recursive: true });
+      await pipeline(Readable.fromWeb(bundleRes.body), tar.x({ cwd: tmpDir }));
+      await fs.access(path.join(tmpDir, "index.html"));
+      await updateCheck.swapDirectoryInto(webguiRoot, tmpDir);
+    } catch (err) {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      flash.setFlash(res, { error: `Sync failed: ${err.message}` });
+      return res.redirect("/admin/servers/webgui-sync");
+    }
+
+    // the swap already succeeded; webgui-static/ on disk is correct
+    // regardless of whether this reload itself works
+    // see docs/Why.md#why-does-webgui-sync-keep-serving-the-old-template-after-a-failed-reload
+    try {
+      webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
+      flash.setFlash(res, { notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).` });
+    } catch (err) {
+      flash.setFlash(res, { error: `Synced, but could not reload index.html: ${err.message}` });
+    }
+    res.redirect("/admin/servers/webgui-sync");
+  } finally {
+    webguiSyncInFlight = false;
   }
-  res.redirect("/admin/servers/webgui-sync");
 }));
 
 app.use("/admin/servers", serversRouter);

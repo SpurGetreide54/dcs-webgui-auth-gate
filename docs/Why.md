@@ -1671,6 +1671,24 @@ row, updated on every successful toggle and restored wholesale (not
 cell-by-cell) on a failed one, keeps the popup's view consistent with
 the server across any number of opens within the same page load.
 
+## Why does webgui-sync/confirm guard against a concurrent sync?
+
+`swapDirectoryInto` does an `existsSync`/`rename`/`rename` sequence
+with no lock of its own.<br>Two concurrent `POST
+/admin/servers/webgui-sync/confirm` requests could interleave: one
+moves `webgui-static/` to its own backup, the other then sees it
+missing and renames its own tmp dir into place first, and the first
+request's own renames onto the now-occupied target fail, surfacing a
+raw rename error and stranding a `webgui-static.swap-backup-*`
+directory on disk. A process-local `webguiSyncInFlight` flag, checked
+before anything touches the filesystem, answers a second request
+immediately instead. `stageAuthGateSlot` (the self-update path) needs
+no equivalent guard here: it already has its own `updateInFlight`
+flag for its own concern, and its target directory
+(`releases/<idle slot>`) never overlaps `webgui-sync`'s
+(`webgui-static/`) — `swapDirectoryInto` only ever races against a
+concurrent call on the same `targetDir`.
+
 ## Why does the rollback script install outside $INSTALL_DIR?
 
 `install.sh` used to install the rendered rollback script at
