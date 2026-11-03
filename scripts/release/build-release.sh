@@ -97,12 +97,17 @@ sh "$ROOT_DIR/scripts/build-agent-manual-zip.sh"
 echo "###### Step 5/5: sign the update manifest ######"
 AUTH_GATE_TARBALL="$ROOT_DIR/local-only/release/auth-gate/auth-gate-$PKG_VERSION.tar.gz"
 AGENT_EXE="$ROOT_DIR/local-only/release/agent/agent-$PKG_VERSION.exe"
-SIGN_ARGS="--version $PKG_VERSION --changelog-url $CHANGELOG_URL --auth-gate $AUTH_GATE_TARBALL --agent $AGENT_EXE --key $KEY_PATH"
+set -- --version "$PKG_VERSION" --changelog-url "$CHANGELOG_URL" --auth-gate "$AUTH_GATE_TARBALL" --agent "$AGENT_EXE" --key "$KEY_PATH"
 if [ -n "$TAG" ]; then
-  SIGN_ARGS="$SIGN_ARGS --tag $TAG"
+  set -- "$@" --tag "$TAG"
 fi
-# shellcheck disable=SC2086
-node "$ROOT_DIR/scripts/release/sign-updates.js" $SIGN_ARGS $NEEDS_SERVICE_UPDATE $ALLOW_LEGACY_KEY
+if [ -n "$NEEDS_SERVICE_UPDATE" ]; then
+  set -- "$@" --needs-service-update
+fi
+if [ -n "$ALLOW_LEGACY_KEY" ]; then
+  set -- "$@" --allow-legacy-key
+fi
+node "$ROOT_DIR/scripts/release/sign-updates.js" "$@"
 
 RELEASE_TAG="${TAG:-$PKG_VERSION}"
 cat <<EOF
