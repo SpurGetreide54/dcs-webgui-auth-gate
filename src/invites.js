@@ -26,21 +26,6 @@ function createInvite({ canManageAccounts }) {
   return { id: info.lastInsertRowid, token };
 }
 
-// grant (or overwrite) an invite's permissions on one server
-function setInviteAccess(inviteId, serverId, grants = {}) {
-  const { canUploadMissions = false, canViewMissions = false, canDownloadMissions = false, canDeleteMissions = false } = grants;
-  db.prepare(
-    `INSERT INTO invite_server_access
-       (invite_id, server_id, can_upload_missions, can_view_missions, can_download_missions, can_delete_missions)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (invite_id, server_id) DO UPDATE SET
-       can_upload_missions = excluded.can_upload_missions,
-       can_view_missions = excluded.can_view_missions,
-       can_download_missions = excluded.can_download_missions,
-       can_delete_missions = excluded.can_delete_missions`
-  ).run(inviteId, serverId, canUploadMissions ? 1 : 0, canViewMissions ? 1 : 0, canDownloadMissions ? 1 : 0, canDeleteMissions ? 1 : 0);
-}
-
 // remove an invite's access row for one server entirely
 function revokeInviteAccess(inviteId, serverId) {
   db.prepare("DELETE FROM invite_server_access WHERE invite_id = ? AND server_id = ?").run(inviteId, serverId);
@@ -108,7 +93,6 @@ module.exports = {
   INVITE_TTL_SECONDS,
   pruneExpired,
   createInvite,
-  setInviteAccess,
   setInvitePermission,
   revokeInviteAccess,
   getInviteAccess,

@@ -54,12 +54,6 @@ function hasServerAccess(adminId, serverId) {
   return Boolean(getAccess(adminId, serverId));
 }
 
-// true if this admin can upload missions to this server specifically
-function canUploadMissions(adminId, serverId) {
-  const access = getAccess(adminId, serverId);
-  return Boolean(access && access.can_upload_missions);
-}
-
 // true if this admin holds the named permission; "any-mission" is a
 // sentinel for "any of the four mission permissions", not a real column
 // see docs/Why.md#why-does-any-mission-exist-alongside-view
@@ -132,7 +126,6 @@ module.exports = {
   getAccessibleServers,
   getAccess,
   hasServerAccess,
-  canUploadMissions,
   hasPermission,
   setAccess,
   setPermission,
