@@ -357,20 +357,58 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const permPopupScriptMatch = accountsHtmlWithXssServer.match(/<div id="perm-popup"[^>]*><\/div>\s*<script>([\s\S]*?)<\/script>/);
     assert.ok(permPopupScriptMatch, "accounts page must render the perm-popup's own inline script");
 
+    // a minimal cell stub standing in for a real <td>, tracking its
+    // own granted/denied class the same way setCell() flips it
+    function makeCellStub(serverId, permission, granted) {
+      let cls = granted ? "granted" : "denied";
+      const listeners = [];
+      return {
+        getAttribute: (attr) => (attr === "data-server-id" ? String(serverId) : attr === "data-permission" ? permission : null),
+        classList: { contains: (c) => c === cls, toggle: (c, force) => { if (force) cls = c; } },
+        set textContent(_v) {},
+        addEventListener: (type, handler) => { if (type === "click") listeners.push(handler); },
+        click: () => listeners.forEach((h) => h()),
+      };
+    }
+    // every .perm-cell this render's own markup carries, parsed back
+    // out of the captured html, since this stub has no real DOM
+    function cellsFromHtml(html) {
+      const cells = [];
+      const re = /<td class="perm-cell (granted|denied)" data-server-id="(\d+)" data-permission="([a-z]+)">/g;
+      let m;
+      while ((m = re.exec(html))) cells.push(makeCellStub(Number(m[2]), m[3], m[1] === "granted"));
+      return cells;
+    }
+    function matchesSelector(cell, sel) {
+      if (sel === ".perm-cell") return true;
+      const serverMatch = sel.match(/data-server-id="(\d+)"/);
+      const permMatch = sel.match(/data-permission="([a-z]+)"/);
+      if (serverMatch && cell.getAttribute("data-server-id") !== serverMatch[1]) return false;
+      if (permMatch && cell.getAttribute("data-permission") !== permMatch[1]) return false;
+      return true;
+    }
+
     let capturedPopupInnerHtml = "";
-    let permBtnClickHandler;
+    let currentCells = [];
     const popupStub = {
       style: {},
       getBoundingClientRect: () => ({ width: 0, height: 0 }),
-      querySelector: (sel) => (sel === ".perm-close" ? { addEventListener: () => {} } : null),
-      querySelectorAll: () => [],
+      querySelector: (sel) => (sel === ".perm-close" ? { addEventListener: () => {} } : currentCells.filter((c) => matchesSelector(c, sel))[0] || null),
+      querySelectorAll: (sel) => (sel === ".perm-close" ? [] : currentCells.filter((c) => matchesSelector(c, sel))),
       contains: () => false,
       set innerHTML(value) {
         capturedPopupInnerHtml = value;
+        currentCells = cellsFromHtml(value);
       },
     };
+    let permBtnClickHandler;
     const permBtnStub = {
-      getAttribute: (attr) => ({ "data-kind": "account", "data-id": "999", "data-access": "[]" })[attr],
+      getAttribute: (attr) =>
+        ({
+          "data-kind": "account",
+          "data-id": "999",
+          "data-access": JSON.stringify([{ server_id: trainingServerId, access: true, upload: false, view: true, download: false, delete: false }]),
+        })[attr],
       addEventListener: (type, handler) => {
         if (type === "click") permBtnClickHandler = handler;
       },
@@ -382,6 +420,7 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
         addEventListener: () => {},
       },
       window: { innerWidth: 1000, innerHeight: 800 },
+      fetch: async () => ({ ok: true }),
     };
     vm.createContext(permPopupContext);
     vm.runInContext(permPopupScriptMatch[1], permPopupContext);
@@ -390,6 +429,21 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
 
     assert.doesNotMatch(capturedPopupInnerHtml, /<img/, "a server name must never reach popup.innerHTML as a live html sink");
     assert.match(capturedPopupInnerHtml, /&lt;img src=x onerror=alert\(1\)&gt;/, "the server name must render escaped instead");
+
+    // regression check: close/reopen without a page reload must keep
+    // a toggle made earlier, not fall back to the original data-access
+    // snapshot, see docs/Why.md#why-does-the-permissions-popup-keep-its-own-live-state
+    const uploadCellBeforeToggle = currentCells.filter((c) => matchesSelector(c, `.perm-cell[data-server-id="${trainingServerId}"][data-permission="upload"]`))[0];
+    assert.equal(uploadCellBeforeToggle.classList.contains("granted"), false, "upload starts denied per this test's own data-access");
+    uploadCellBeforeToggle.click();
+    await new Promise((resolve) => setImmediate(resolve)); // let the fetch().then() microtask settle
+    assert.equal(uploadCellBeforeToggle.classList.contains("granted"), true, "clicking upload must flip it granted right away");
+
+    // reopen (the real popup's hidden flag plays no part in this stub;
+    // the script's own kept state is what this test is checking)
+    permBtnClickHandler({ clientX: 0, clientY: 0, stopPropagation: () => {} });
+    const uploadCellAfterReopen = currentCells.filter((c) => matchesSelector(c, `.perm-cell[data-server-id="${trainingServerId}"][data-permission="upload"]`))[0];
+    assert.equal(uploadCellAfterReopen.classList.contains("granted"), true, "reopening without a reload must keep the earlier toggle, not the stale data-access snapshot");
 
     // crash safety net: an error thrown inside an async handler must
     // return 500, not take the whole process down with it

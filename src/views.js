@@ -228,6 +228,12 @@ function permPopupMarkup(servers) {
   var CATEGORIES = ${categoriesJson};
   var popup = document.getElementById("perm-popup");
 
+  // one row's grants, kept live across close/reopen; seeded from
+  // data-access only the first time a given button is ever opened
+  // see docs/Why.md#why-does-the-permissions-popup-keep-its-own-live-state
+  var state = {};
+  function stateKey(kind, id) { return kind + ":" + id; }
+
   // escape a value before it goes into popup.innerHTML, mirrors
   // escapeHtml's own map, not reachable from this client-side script
   function esc(str) {
@@ -276,17 +282,34 @@ function permPopupMarkup(servers) {
     cell.textContent = granted ? "\\u2713" : "\\u2715";
   }
 
-  // flip one cell, post the change, revert it if the request fails
+  // flip one cell, update the kept-live row state, post the change,
+  // and restore the whole row from a snapshot if the request fails
   function toggle(kind, id, cell) {
+    var key = stateKey(kind, id);
     var serverId = Number(cell.getAttribute("data-server-id"));
     var permission = cell.getAttribute("data-permission");
     var granted = !cell.classList.contains("granted");
+    var row = state[key].filter(function (r) { return r.server_id === serverId; })[0];
+    var before = Object.assign({}, row);
+
     setCell(cell, granted);
-    // turning access off visually clears every other cell in the row
-    // too, the server is what's actually authoritative, this just mirrors it
-    if (permission === "access" && !granted) {
-      Array.prototype.forEach.call(popup.querySelectorAll('.perm-cell[data-server-id="' + serverId + '"]'), function (c) { setCell(c, false); });
+    // case: access itself, clears every other permission in the row
+    if (permission === "access") {
+      row.access = granted;
+      if (!granted) {
+        ["upload", "view", "download", "delete"].forEach(function (p) { row[p] = false; });
+        Array.prototype.forEach.call(popup.querySelectorAll('.perm-cell[data-server-id="' + serverId + '"]'), function (c) { setCell(c, false); });
+      }
+    } else {
+      // case: a sub-permission, mirrors servers.js's own setPermission:
+      // granting it implicitly creates the access row server-side too
+      row[permission] = granted;
+      if (granted && !row.access) {
+        row.access = true;
+        setCell(popup.querySelector('.perm-cell[data-server-id="' + serverId + '"][data-permission="access"]'), true);
+      }
     }
+
     var url = (kind === "invite" ? "/admin/accounts/invites/" : "/admin/accounts/") + id + "/permissions";
     fetch(url, {
       method: "POST",
@@ -295,7 +318,8 @@ function permPopupMarkup(servers) {
     }).then(function (res) {
       if (!res.ok) throw new Error("request failed");
     }).catch(function () {
-      setCell(cell, !granted);
+      Object.assign(row, before);
+      render(kind, id, state[key]);
     });
   }
 
@@ -304,7 +328,11 @@ function permPopupMarkup(servers) {
 
   Array.prototype.forEach.call(document.querySelectorAll(".perm-btn"), function (btn) {
     btn.addEventListener("click", function (e) {
-      render(btn.getAttribute("data-kind"), btn.getAttribute("data-id"), JSON.parse(btn.getAttribute("data-access")));
+      var kind = btn.getAttribute("data-kind");
+      var id = btn.getAttribute("data-id");
+      var key = stateKey(kind, id);
+      if (!(key in state)) state[key] = JSON.parse(btn.getAttribute("data-access"));
+      render(kind, id, state[key]);
       popup.hidden = false;
       var rect = popup.getBoundingClientRect();
       var x = Math.min(Math.max(12, e.clientX), window.innerWidth - rect.width - 12);
