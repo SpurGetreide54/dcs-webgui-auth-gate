@@ -431,7 +431,13 @@ serversRouter.get("/", (req, res) => {
 
 serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
   const { slug, name, instance_name, dcs_install_path } = req.body;
-  if (!slug || !name || !instance_name) {
+  if (
+    !allStrings(req.body, ["slug", "name", "instance_name"]) ||
+    !slug ||
+    !name ||
+    !instance_name ||
+    (dcs_install_path !== undefined && typeof dcs_install_path !== "string")
+  ) {
     flash.setFlash(res, { error: "All fields are required." });
     return res.redirect("/admin/servers");
   }
@@ -448,6 +454,7 @@ serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
   try {
     db.prepare("INSERT INTO servers (slug, name, instance_name, dcs_install_path) VALUES (?, ?, ?, ?)").run(slug, name, instance_name, installPath);
   } catch (err) {
+    if (err.code !== "SQLITE_CONSTRAINT_UNIQUE") throw err;
     flash.setFlash(res, { error: "That slug is already in use." });
     return res.redirect("/admin/servers");
   }
@@ -460,7 +467,12 @@ serversRouter.post("/", express.urlencoded({ extended: false }), (req, res) => {
 serversRouter.post("/:id", express.urlencoded({ extended: false }), (req, res) => {
   const targetId = Number(req.params.id);
   const { name, instance_name, dcs_install_path } = req.body;
-  if (!name || !instance_name) {
+  if (
+    !allStrings(req.body, ["name", "instance_name"]) ||
+    !name ||
+    !instance_name ||
+    (dcs_install_path !== undefined && typeof dcs_install_path !== "string")
+  ) {
     flash.setFlash(res, { error: "All fields are required." });
     return res.redirect("/admin/servers");
   }

@@ -753,6 +753,31 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     });
     assert.match(await badInstanceRes.text(), /DCS instance name must be letters, numbers, underscores, dots, and hyphens only/);
 
+    // a repeated form field key parses to an array under
+    // express.urlencoded; must flash-and-redirect, not 500
+    const repeatedNameRes = await postAndFollowFlash(`${base}/admin/servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `slug=community4&name=X&name=Y&instance_name=x`,
+    });
+    assert.match(await repeatedNameRes.text(), /All fields are required/);
+    assert.equal(db.prepare("SELECT * FROM servers WHERE slug = ?").get("community4"), undefined);
+
+    const repeatedInstallPathRes = await postAndFollowFlash(`${base}/admin/servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `slug=community5&name=X&instance_name=x&dcs_install_path=a&dcs_install_path=b`,
+    });
+    assert.match(await repeatedInstallPathRes.text(), /All fields are required/);
+    assert.equal(db.prepare("SELECT * FROM servers WHERE slug = ?").get("community5"), undefined);
+
+    const repeatedUpdateNameRes = await postAndFollowFlash(`${base}/admin/servers/${newServerRow.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `name=X&name=Y&instance_name=community2`,
+    });
+    assert.match(await repeatedUpdateNameRes.text(), /All fields are required/);
+
     // edit the server
     const editServerRes = await fetch(`${base}/admin/servers/${newServerRow.id}`, {
       method: "POST",
