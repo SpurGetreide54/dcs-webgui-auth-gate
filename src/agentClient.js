@@ -25,7 +25,8 @@ async function agentFetch(path, init = {}) {
 // minimum-acceptable throughput, so a slow link degrades instead of aborting
 // see docs/Why.md#why-is-the-relay-timeout-size-scaled-instead-of-fixed
 function scaledTimeoutMs(bodyBytes) {
-  const MIN_THROUGHPUT_BYTES_PER_MS = (256 * 1024) / 1000; // 256 KB/s
+  // 256 KB/s
+  const MIN_THROUGHPUT_BYTES_PER_MS = (256 * 1024) / 1000;
   return Math.ceil(DEFAULT_TIMEOUT_MS + bodyBytes / MIN_THROUGHPUT_BYTES_PER_MS);
 }
 
