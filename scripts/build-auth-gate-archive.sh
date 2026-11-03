@@ -40,9 +40,8 @@ if [ "$VERSION" != "$VERSION_FILE" ]; then
 fi
 
 # the archive's contents, named explicitly, an include list not a
-# glob with excludes, anything not named here never ships
-# scripts/release and scripts/windows are left out, maintainer-only
-# and the other OS's installer respectively
+# glob with excludes, so anything not named here never ships;
+# scripts/release and scripts/windows are maintainer/other-os only
 INCLUDE_LIST="src public launcher.js package.json package-lock.json LICENSE DISCLAIMER README.md .env.example docs scripts/linux scripts/systemd"
 
 echo "==> Building auth-gate archive for $VERSION"

@@ -1,7 +1,6 @@
-// small stateless infra helpers shared between server.js (the webgui
-// auth gate) and agent.js (the mission agent), kept here instead of
-// duplicated in both; never requires db.js, since agent.js's esbuild
-// SEA bundle has no sqlite dependency of its own
+// small stateless infra helpers shared between server.js (the
+// webgui auth gate) and agent.js (the mission agent); never requires
+// db.js, since agent.js's esbuild bundle has no sqlite of its own
 const util = require("node:util");
 
 // admin-typed dcs instance folder name under saved games, dots are

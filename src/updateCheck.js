@@ -89,11 +89,9 @@ function findDownload(manifest, artifact) {
   return entry;
 }
 
-// total deadline for the whole download, covering the whole body
-// stream for a release artifact of tens of mb over a modest connection;
-// read fresh on every call, not cached at module load, so a test can
-// exercise a stall without waiting 10 minutes without affecting any
-// other test in the same file
+// total deadline for the whole download, covering the full body
+// stream of a release artifact over a modest connection; read fresh
+// on every call, see docs/Why.md#why-does-getdownloadtimeoutms-read-its-env-var-fresh-on-every-call
 function getDownloadTimeoutMs() {
   return Number(process.env.UPDATE_DOWNLOAD_TIMEOUT_MS) || 10 * 60 * 1000;
 }
@@ -252,9 +250,8 @@ async function stageAuthGateSlot(archivePath, slotDir) {
 // section: relaying the agent's own update through this process
 
 // upload and commit the agent's new build over the internal channel,
-// forwarding the manifest's own signature and the key-rotation history
-// so the agent can verify authenticity itself instead of trusting
-// whatever bytes a token holder sends
+// forwarding the manifest's own signature and key-rotation history so
+// the agent can verify authenticity itself, not trusting the caller
 // see docs/Why.md#why-does-the-auth-gate-relay-the-agents-update
 async function relayAgentUpdate(archivePath, manifest) {
   if (!agentClient.isConfigured()) throw new Error("Mission agent is not configured; cannot relay its update.");
@@ -315,10 +312,9 @@ async function relayAgentUpdate(archivePath, manifest) {
 
 // section: the whole update, start to finish
 
-// fail fast, before touching the agent or downloading anything, if
-// the active-slot file (or its directory, on a very first update)
-// isn't writable -- a late failure here would leave the gate and
-// the agent on different versions
+// fail fast if the active-slot file (or its directory, on a very
+// first update) isn't writable, before touching the agent or
+// downloading anything, so a late failure can't split them onto different versions
 function assertActiveSlotWritable() {
   try {
     fs.accessSync(activeSlot.ACTIVE_SLOT_PATH, fs.constants.W_OK);

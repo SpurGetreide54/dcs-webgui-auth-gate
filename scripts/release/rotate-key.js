@@ -103,9 +103,8 @@ function rotateSecondary() {
 // secondary's vouch), self-signs, and drafts the record for signing
 function rotatePrimaryDraft() {
   // refuse rather than back up: a second draft makes the first
-  // draft's vouch signature useless anyway, so silently backing it
-  // up would hide that a first draft was already pending, not
-  // preserve anything worth keeping
+  // draft's vouch signature useless anyway, so backing it up would
+  // hide that a draft was already pending, not preserve anything useful
   const existing = [DRAFT_PATH, keyPath("primary", ".next"), pubKeyPath("primary", ".next")].filter(fs.existsSync);
   if (existing.length > 0) {
     throw new Error(`A primary draft is already pending: ${existing.join(", ")}. Finalize it with primary-finalize, or delete these files first.`);

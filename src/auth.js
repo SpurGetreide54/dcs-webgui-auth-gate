@@ -84,8 +84,8 @@ function recordLoginAttempt(req, username, purpose = "login") {
   db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(rateLimitKey(req, username, purpose));
 }
 
-// build the rate-limit bucket key for one ip alone, no username --
-// bounds a spray across many usernames, see
+// build the rate-limit bucket key for one ip alone, no username, so
+// it bounds a spray across many usernames, see
 // docs/Why.md#why-is-there-a-separate-per-ip-login-throttle
 function ipRateLimitKey(req) {
   return `login-ip:${req.ip}`;

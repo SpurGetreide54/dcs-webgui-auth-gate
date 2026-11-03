@@ -71,9 +71,8 @@ function setSessionCookie(res, token) {
 }
 
 // true only if every named body field is a plain string, not an
-// array or missing -- a repeated form field key parses to an array
-// under express.urlencoded, which would otherwise reach
-// .toLowerCase()/.length/hashPassword downstream and throw
+// array or missing, since a repeated form field key parses to an
+// array under express.urlencoded, which would throw downstream
 function allStrings(body, names) {
   return names.every((name) => typeof body[name] === "string");
 }

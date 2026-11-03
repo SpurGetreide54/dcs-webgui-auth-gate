@@ -499,6 +499,18 @@ waiting minutes to find that out. This same reasoning, not just the
 relay's own call, is why `agentClient.js` applies it as every agent
 call's default timeout, not only this one's.
 
+## Why does getDownloadTimeoutMs read its env var fresh on every call?
+
+A module-level constant computed once at load time can't be changed
+after `updateCheck.js` is first required, which every test file in
+the same process does exactly once.<br>Reading `process.env.UPDATE_DOWNLOAD_TIMEOUT_MS`
+fresh inside the function instead means a test exercising a stalled
+download can set the env var to a few milliseconds just for that one
+call, without waiting out the real 10-minute default and without
+leaving a shorter timeout in place for any other test in the same
+file, the same `agentClient.js` reasoning below applied to this
+module's own env var.
+
 ## Why does agentClient read its env vars lazily?
 
 `MISSION_AGENT_URL`/`MISSION_AGENT_TOKEN` used to be read once, at

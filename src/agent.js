@@ -494,9 +494,9 @@ async function requireWebguiPort(req, res, next) {
   next();
 }
 
-// the actual control-port proxy, routed per instance from above --
-// requireWebguiPort already guarantees req.webguiPort is set, so this
-// never re-reads autoexec.cfg itself
+// the actual control-port proxy, routed per instance from above,
+// since requireWebguiPort already guarantees req.webguiPort is set,
+// so this never re-reads autoexec.cfg itself
 const webguiProxyMiddleware = createProxyMiddleware({
   router: (req) => `http://127.0.0.1:${req.webguiPort}`,
   pathRewrite: (reqPath, req) => {
@@ -629,10 +629,9 @@ function otherAgentSlot(slot) {
 }
 
 // a separate route rather than a header on /self-update/stage: the
-// full rotation history is unbounded (see
-// docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record)
-// and would eventually outgrow node's default header-size limit, see
-// docs/Why.md#why-does-relayagentupdate-post-the-key-state-history-instead-of-heading-it
+// full rotation history is unbounded and would eventually outgrow
+// node's default header-size limit
+// see docs/Why.md#why-does-relayagentupdate-post-the-key-state-history-instead-of-heading-it
 app.post("/self-update/key-state", checkToken, express.json({ limit: "1mb" }), asyncHandler(async (req, res) => {
   const { history } = req.body;
   if (!Array.isArray(history)) return res.status(400).send("Malformed history in request body.");
@@ -672,7 +671,7 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async 
   if (!agentEntry) return res.status(400).send('Manifest has no download entry for "agent".');
 
   // hashes the received bytes against the signed manifest's own claim,
-  // not a caller-supplied header -- this is what actually authenticates
+  // not a caller-supplied header, which is what actually authenticates
   // the upload, see docs/Why.md#why-does-the-agent-verify-the-staged-builds-signature-itself
   const actualSha256 = crypto.createHash("sha256").update(req.body).digest("hex");
   if (actualSha256 !== agentEntry.sha256) {
