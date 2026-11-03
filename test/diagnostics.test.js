@@ -216,6 +216,9 @@ test("getActiveIssues assembles every currently-active issue, dismissed rollback
   delete process.env.MISSION_AGENT_URL;
   delete process.env.MISSION_AGENT_TOKEN;
   delete process.env.WEBGUI_STATIC_PATH;
+  // unrelated to this test's own issues; set so active_slot_path_mismatch
+  // never fires here, covered by its own test below instead
+  process.env.ACTIVE_SLOT_PATH = path.join(os.tmpdir(), "diagnostics-test-active-slot");
   const fresh = freshDiagnostics();
   fs.rmSync(authGateLogPath, { force: true });
 
@@ -252,6 +255,29 @@ test("getActiveIssues assembles every currently-active issue, dismissed rollback
     issues = fresh.getActiveIssues({ updateState: freshUpdateState, updateCheckIntervalMs: hourMs, staleMultiplier: 3 });
     assert.ok(!issues.map((i) => i.key).includes("rollback"), "a dismissed rollback must not appear as active");
   });
+});
+
+test("getActiveIssues flags active_slot_path_mismatch when neither AUTH_GATE_STATE_DIR nor ACTIVE_SLOT_PATH is set, and omits it once either is", () => {
+  const savedStateDir = process.env.AUTH_GATE_STATE_DIR;
+  const savedActiveSlot = process.env.ACTIVE_SLOT_PATH;
+  delete process.env.AUTH_GATE_STATE_DIR;
+  delete process.env.ACTIVE_SLOT_PATH;
+  try {
+    const neither = freshDiagnostics();
+    const updateState = { last_succeeded_at: new Date().toISOString() };
+    let issues = neither.getActiveIssues({ updateState, updateCheckIntervalMs: 60 * 60 * 1000, staleMultiplier: 3 });
+    assert.ok(issues.map((i) => i.key).includes("active_slot_path_mismatch"), "must flag when neither var is set");
+
+    process.env.ACTIVE_SLOT_PATH = path.join(os.tmpdir(), "diagnostics-test-active-slot-2");
+    const withActiveSlot = freshDiagnostics();
+    issues = withActiveSlot.getActiveIssues({ updateState, updateCheckIntervalMs: 60 * 60 * 1000, staleMultiplier: 3 });
+    assert.ok(!issues.map((i) => i.key).includes("active_slot_path_mismatch"), "must not flag once ACTIVE_SLOT_PATH is set");
+  } finally {
+    if (savedStateDir === undefined) delete process.env.AUTH_GATE_STATE_DIR;
+    else process.env.AUTH_GATE_STATE_DIR = savedStateDir;
+    if (savedActiveSlot === undefined) delete process.env.ACTIVE_SLOT_PATH;
+    else process.env.ACTIVE_SLOT_PATH = savedActiveSlot;
+  }
 });
 
 test("runDiagnosticsCheck records last_checked_at even when an individual check throws", async () => {

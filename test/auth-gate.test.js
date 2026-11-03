@@ -172,6 +172,9 @@ test.before(async () => {
   process.env.GITHUB_API_BASE_OVERRIDE = dummyGithubBase;
   authGateLogPath = path.join(os.tmpdir(), `auth-gate-test-log-${crypto.randomBytes(6).toString("hex")}.log`);
   process.env.AUTH_GATE_LOG_PATH = authGateLogPath;
+  // unrelated to this suite's own diagnostics assertions; set so the
+  // active_slot_path_mismatch issue never surfaces as a false "active issue"
+  process.env.ACTIVE_SLOT_PATH = path.join(os.tmpdir(), `auth-gate-test-active-slot-${crypto.randomBytes(6).toString("hex")}`);
 
   app = require("../src/server");
   db = require("../src/db");
@@ -189,6 +192,7 @@ test.after(async () => {
   db.close();
   cleanupSqlite(sqlitePath);
   for (const suffix of ["", ".1"]) fs.rmSync(authGateLogPath + suffix, { force: true });
+  fs.rmSync(process.env.ACTIVE_SLOT_PATH, { force: true });
 });
 
 test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, logout", async (t) => {

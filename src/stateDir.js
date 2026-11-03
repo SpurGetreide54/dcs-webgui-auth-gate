@@ -31,4 +31,10 @@ const deprecatedVarsSet = ["WEBGUI_STATIC_PATH", "ACTIVE_SLOT_PATH", "AUTH_GATE_
   (name) => process.env[name]
 );
 
-module.exports = { WEBGUI_STATIC_PATH, ACTIVE_SLOT_PATH, AUTH_GATE_LOG_PATH, SQLITE_PATH, deprecatedVarsSet };
+// true once either var is set. With neither, the active-slot file
+// falls back to a path relative to this module's own directory, and
+// launcher.js's own fallback no longer agrees with this one
+// see docs/Why.md#why-does-applyupdate-refuse-without-auth_gate_state_dir-or-active_slot_path
+const hasExternalStateDir = Boolean(STATE_DIR || process.env.ACTIVE_SLOT_PATH);
+
+module.exports = { WEBGUI_STATIC_PATH, ACTIVE_SLOT_PATH, AUTH_GATE_LOG_PATH, SQLITE_PATH, deprecatedVarsSet, hasExternalStateDir };

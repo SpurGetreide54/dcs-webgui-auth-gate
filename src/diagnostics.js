@@ -212,6 +212,16 @@ function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }
     });
   }
 
+  if (!stateDir.hasExternalStateDir) {
+    issues.push({
+      key: "active_slot_path_mismatch",
+      severity: "error",
+      message: "AUTH_GATE_STATE_DIR (or ACTIVE_SLOT_PATH) is not set; self-update would restart into the wrong slot.",
+      link: "Troubleshooting.md#updates-keep-restarting-into-the-same-slot-or-the-agent-and-gate-end-up-on-different-versions",
+      seen: false,
+    });
+  }
+
   if (state.deprecated_env_vars_detected) {
     issues.push({
       key: "deprecated_env_vars",

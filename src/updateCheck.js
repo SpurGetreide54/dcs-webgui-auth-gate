@@ -13,6 +13,7 @@ const { Readable, Transform } = require("node:stream");
 const tar = require("tar");
 const db = require("./db");
 const activeSlot = require("./activeSlot");
+const stateDir = require("./stateDir");
 const agentClient = require("./agentClient");
 const { GITHUB_REPO } = require("./updateConstants");
 const { GITHUB_API_BASE, fetchGithub, fetchGithubJson } = require("./githubApi");
@@ -340,6 +341,11 @@ async function applyUpdate() {
   updateInFlight = true;
   try {
     console.debug(`Update: starting applyUpdate()...`);
+    if (!stateDir.hasExternalStateDir) {
+      throw new Error(
+        "AUTH_GATE_STATE_DIR (or the older ACTIVE_SLOT_PATH) is not set. Without it, the gate and launcher.js resolve the active-slot file to two different paths, and a successful update would restart into the slot it just left. Set AUTH_GATE_STATE_DIR in .env; see docs/Configuration.md."
+      );
+    }
     assertActiveSlotWritable();
     const manifest = await fetchVerifiedManifest();
     console.debug(`Update: verified manifest for version ${manifest.version}.`);
