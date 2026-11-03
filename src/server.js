@@ -1050,7 +1050,7 @@ app.post(
     } catch (err) {
       return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
     }
-    renderMissionsPage(req, res, { notice: names.length === 1 ? `Moved "${names[0]}" to trash.` : `Moved ${names.length} missions to trash.` });
+    return renderMissionsPage(req, res, { notice: names.length === 1 ? `Moved "${names[0]}" to trash.` : `Moved ${names.length} missions to trash.` });
   })
 );
 
@@ -1079,7 +1079,7 @@ app.post(
     } catch (err) {
       return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
     }
-    renderMissionsPage(req, res, {
+    return renderMissionsPage(req, res, {
       notice: restored.length === 1 ? `Restored "${restored[0]}" from trash.` : `Restored ${restored.length} missions from trash.`,
     });
   })
