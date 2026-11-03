@@ -1,6 +1,7 @@
-// node's own filesystem and path modules
+// node's own filesystem, path and crypto modules
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 // a plain flat file, not a db row, see db.js's update_state comment
 // overridden in production via ACTIVE_SLOT_PATH or AUTH_GATE_STATE_DIR in .env
@@ -27,10 +28,14 @@ function otherSlot(slot) {
 }
 
 // write which slot is now live
+// writes to a tmp file first, then renames it into place, so a crash
+// mid-write can never leave an empty or partial active-slot file
 function writeActiveSlot(slot) {
   // refuse anything that isn't a real slot name
   if (slot !== "a" && slot !== "b") throw new Error(`Invalid slot: ${slot}`);
-  fs.writeFileSync(ACTIVE_SLOT_PATH, slot, "utf8");
+  const tmpPath = `${ACTIVE_SLOT_PATH}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  fs.writeFileSync(tmpPath, slot, "utf8");
+  fs.renameSync(tmpPath, ACTIVE_SLOT_PATH);
 }
 
 // expose the path (other modules need it too) and all three functions
