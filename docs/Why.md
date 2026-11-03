@@ -460,8 +460,9 @@ running version (`AGENT_VERSION`, baked in at build time by
 `scripts/build-agent-exe.sh`'s esbuild `--define`), before staging
 the bytes.<br>`src/versionCompare.js` exists precisely so this pure,
 side-effect-free check is written once and required by both sides,
-not ported a second time the way the key-rotation trust logic has to
-be.<br>No rollback flag exists to bypass this either: the A/B slot
+the same shape `src/keyRotationVerify.js` later followed for the
+key-rotation trust check.<br>No rollback flag exists to bypass this
+either: the A/B slot
 flip is the sole sanctioned way back to an older build, matching the
 gate's own downgrade guard, which has no override either.
 
