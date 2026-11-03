@@ -695,11 +695,6 @@ app.use("/admin/update", updateRouter);
 
 // section: diagnostics, site admins only
 
-// the configured stale-check multiplier, or diagnostics.js's own default
-function getStaleMultiplier() {
-  return Number(settings.getSetting("update_check_stale_multiplier")) || diagnostics.DEFAULT_STALE_MULTIPLIER;
-}
-
 const diagRouter = express.Router();
 diagRouter.use(auth.requireAccountManager);
 
@@ -707,7 +702,7 @@ diagRouter.get("/", (req, res) => {
   const issues = diagnostics.getActiveIssues({
     updateState: updateCheck.getUpdateState(),
     updateCheckIntervalMs: updateCheck.CHECK_INTERVAL_MS,
-    staleMultiplier: getStaleMultiplier(),
+    staleMultiplier: diagnostics.getStaleMultiplier(),
   });
   // the first visit after a rollback appears mutes its highlight from then on
   diagnostics.markRollbackSeen();
@@ -733,7 +728,7 @@ settingsRouter.get("/", (req, res) => {
       admin: req.admin,
       pinUpdateNav: settings.getSetting("pin_update_nav") === "1",
       pinDiagNav: settings.getSetting("pin_diag_nav") === "1",
-      staleMultiplier: getStaleMultiplier(),
+      staleMultiplier: diagnostics.getStaleMultiplier(),
       ...flash.readFlash(req, res),
     })
   );

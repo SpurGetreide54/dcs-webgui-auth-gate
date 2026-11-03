@@ -73,7 +73,7 @@ function sidebarNav(admin, active) {
     const activeIssueCount = diagnostics.getActiveIssues({
       updateState,
       updateCheckIntervalMs: updateCheck.CHECK_INTERVAL_MS,
-      staleMultiplier: Number(settings.getSetting("update_check_stale_multiplier")) || diagnostics.DEFAULT_STALE_MULTIPLIER,
+      staleMultiplier: diagnostics.getStaleMultiplier(),
     }).length;
     if (activeIssueCount > 0 || pinDiagNav) {
       const label = activeIssueCount > 0 ? `Diagnostics: ${activeIssueCount} active issue(s)` : "Diagnostics";

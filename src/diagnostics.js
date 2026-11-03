@@ -7,6 +7,7 @@ const db = require("./db");
 const appLog = require("./appLog");
 const stateDir = require("./stateDir");
 const agentClient = require("./agentClient");
+const settings = require("./settings");
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 // how many missed hourly update checks in a row count as "keeps
@@ -152,6 +153,11 @@ function isUpdateCheckStale(updateState, updateCheckIntervalMs, multiplier) {
   return age > updateCheckIntervalMs * multiplier;
 }
 
+// the configured stale-check multiplier, or this module's own default
+function getStaleMultiplier() {
+  return Number(settings.getSetting("update_check_stale_multiplier")) || DEFAULT_STALE_MULTIPLIER;
+}
+
 // every currently-active issue, most-severe concerns first, each
 // with the explanation and troubleshooting link the UI shows
 function getActiveIssues({ updateState, updateCheckIntervalMs, staleMultiplier }) {
@@ -233,4 +239,5 @@ module.exports = {
   startDiagnosticsCheck,
   isUpdateCheckStale,
   getActiveIssues,
+  getStaleMultiplier,
 };
