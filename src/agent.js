@@ -560,22 +560,42 @@ app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) 
 const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT } = require("./keyRotationConstants");
 const { verifyKeyState } = require("./keyRotationVerify");
 
-// pinned next to agent-token.txt, same stable-across-slots reasoning
-// as resolveAgentToken's own token file, above
+// pinned by install.ps1 next to agent-token.txt, same as
+// resolveAgentToken's own token file, above
 const AGENT_KEY_STATE_FILE = process.env.AGENT_KEY_STATE_FILE || path.join(path.dirname(process.execPath), "agent-key-state.json");
 
-// persist the trust state after a verified rotation
+// write the trust state via a tmp file plus rename, so a crash or a
+// concurrent read never sees a truncated file
 function saveKeyState(state) {
-  fsSync.writeFileSync(AGENT_KEY_STATE_FILE, JSON.stringify(state), "utf8");
+  const tmpPath = `${AGENT_KEY_STATE_FILE}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  fsSync.writeFileSync(tmpPath, JSON.stringify(state), "utf8");
+  fsSync.renameSync(tmpPath, AGENT_KEY_STATE_FILE);
+}
+
+// a pre-pin install migrating forward: copy a legacy slot-relative
+// state file into the newly pinned path, once, if one exists there
+// see docs/Why.md#why-does-the-agent-migrate-a-legacy-key-state-file
+function migrateLegacyKeyStateFile() {
+  if (!process.env.AGENT_KEY_STATE_FILE) return;
+  if (fsSync.existsSync(AGENT_KEY_STATE_FILE)) return;
+  const legacyPath = process.env.AGENT_KEY_STATE_FILE_LEGACY_PATH_OVERRIDE || path.join(path.dirname(process.execPath), "agent-key-state.json");
+  try {
+    fsSync.copyFileSync(legacyPath, AGENT_KEY_STATE_FILE);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
 }
 
 // read the persisted trust state, seeding it from the built-in keys
-// on first run
+// on first run or if the file is missing/corrupt
 function loadOrSeedKeyState() {
+  migrateLegacyKeyStateFile();
   try {
     return JSON.parse(fsSync.readFileSync(AGENT_KEY_STATE_FILE, "utf8"));
   } catch (err) {
-    if (err.code !== "ENOENT") throw err;
+    if (err.code !== "ENOENT") {
+      console.warn(`Could not read ${AGENT_KEY_STATE_FILE} (${err.message}), reseeding from the built-in keys.`);
+    }
   }
   const seeded = {
     primary_public_key_pem: PRIMARY_PUBLIC_KEY_PEM,

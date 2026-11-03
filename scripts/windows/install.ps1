@@ -180,14 +180,15 @@ Write-Host "==> Registering service $ServiceName"
 
 # nssm's AppEnvironmentExtra takes one key=value pair per line, as a
 # single parameter value, not separate command-line arguments
-# MISSION_AGENT_TOKEN_FILE/AGENT_LOG_FILE are pinned to the stable
-# InstallDir, not agent.js's own slot-relative default, see
-# docs/Why.md#why-are-token-and-log-paths-pinned-to-installdir
+# MISSION_AGENT_TOKEN_FILE/AGENT_LOG_FILE/AGENT_KEY_STATE_FILE are
+# pinned to the stable InstallDir, not agent.js's own slot-relative
+# default, see docs/Why.md#why-are-token-and-log-paths-pinned-to-installdir
 $envLines = @(
     "DCS_SAVED_GAMES_ROOT=$DcsSavedGamesRoot",
     "AGENT_PORT=$AgentPort",
     "MISSION_AGENT_TOKEN_FILE=$InstallDir\agent-token.txt",
-    "AGENT_LOG_FILE=$InstallDir\agent.log"
+    "AGENT_LOG_FILE=$InstallDir\agent.log",
+    "AGENT_KEY_STATE_FILE=$InstallDir\agent-key-state.json"
 )
 if ($MissionAgentToken) {
     $envLines += "MISSION_AGENT_TOKEN=$MissionAgentToken"
