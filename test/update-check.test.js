@@ -597,6 +597,43 @@ test(
   }
 );
 
+test(
+  "applyUpdate clears isUpdateInFlight after a stalled download times out, instead of hanging forever",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: "9.9.9-stall",
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      // the download url is the dummy server itself, which never
+      // answers it, instead of an external host
+      downloads: [{ artifact: "auth-gate", url: `${dummyGithubBase}/auth-gate.tar.gz`, sha256: "a".repeat(64) }],
+    });
+    dummyGithubRespond = (req, res) => {
+      if (req.url.includes("/releases/latest")) {
+        sendJson(res, 200, { assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] });
+      } else if (req.url.includes("/signed_updates.json")) {
+        sendJson(res, 200, manifest);
+      }
+      // else: the download request, deliberately left hanging
+    };
+
+    // scoped to just this test, so no other test in this file waits
+    // on an artificially short download deadline
+    process.env.UPDATE_DOWNLOAD_TIMEOUT_MS = "50";
+    try {
+      assert.equal(updateCheck.isUpdateInFlight(), false);
+      const promise = updateCheck.applyUpdate();
+      assert.equal(updateCheck.isUpdateInFlight(), true);
+      await assert.rejects(() => promise);
+      assert.equal(updateCheck.isUpdateInFlight(), false, "must be cleared once the stalled download times out");
+    } finally {
+      delete process.env.UPDATE_DOWNLOAD_TIMEOUT_MS;
+    }
+  }
+);
+
 test("checkForUpdate rejects and still records the attempt when the check fails", async () => {
   // no real key needed, a throwaway key the hardcoded public key will
   // never accept, so this runs unconditionally unlike the two tests above

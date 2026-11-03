@@ -79,9 +79,18 @@ function findDownload(manifest, artifact) {
   return entry;
 }
 
+// total deadline for the whole download, covering the whole body
+// stream for a release artifact of tens of mb over a modest connection;
+// read fresh on every call, not cached at module load, so a test can
+// exercise a stall without waiting 10 minutes without affecting any
+// other test in the same file
+function getDownloadTimeoutMs() {
+  return Number(process.env.UPDATE_DOWNLOAD_TIMEOUT_MS) || 10 * 60 * 1000;
+}
+
 // download a file and confirm its sha256 matches before trusting it
 async function downloadAndVerify(url, sha256, destPath) {
-  const res = await fetch(url);
+  const res = await fetchGithub(url, "dcs-webgui-auth-gate-update-check", { timeoutMs: getDownloadTimeoutMs() });
   if (!res.ok) throw new Error(`${url} returned ${res.status}`);
   // hash each chunk as it flows through, instead of re-reading the
   // whole file back off disk once the write finishes
