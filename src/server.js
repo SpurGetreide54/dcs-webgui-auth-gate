@@ -627,16 +627,22 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
     await pipeline(Readable.fromWeb(bundleRes.body), tar.x({ cwd: tmpDir }));
     await fs.access(path.join(tmpDir, "index.html"));
     await updateCheck.swapDirectoryInto(webguiRoot, tmpDir);
-
-    webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
-
-    flash.setFlash(res, { notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).` });
-    res.redirect("/admin/servers/webgui-sync");
   } catch (err) {
     await fs.rm(tmpDir, { recursive: true, force: true });
     flash.setFlash(res, { error: `Sync failed: ${err.message}` });
-    res.redirect("/admin/servers/webgui-sync");
+    return res.redirect("/admin/servers/webgui-sync");
   }
+
+  // the swap already succeeded; webgui-static/ on disk is correct
+  // regardless of whether this reload itself works
+  // see docs/Why.md#why-does-webgui-sync-keep-serving-the-old-template-after-a-failed-reload
+  try {
+    webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
+    flash.setFlash(res, { notice: `Synced webgui-static/ from "${server.name}"'s DCS install (${server.dcs_install_path}).` });
+  } catch (err) {
+    flash.setFlash(res, { error: `Synced, but could not reload index.html: ${err.message}` });
+  }
+  res.redirect("/admin/servers/webgui-sync");
 }));
 
 app.use("/admin/servers", serversRouter);

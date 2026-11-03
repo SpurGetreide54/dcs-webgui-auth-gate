@@ -204,6 +204,56 @@ test("webgui-sync: a backup cleanup failure after a successful swap still report
   }
 });
 
+test("webgui-sync: an unreadable index.html after a successful swap still reports success, with the reload failure surfaced separately", async (t) => {
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  bundleRequests = [];
+
+  fs.writeFileSync(path.join(webguiStaticPath, "index.html"), "<html>bundle before this reload-failure sync</html>");
+
+  const indexHtmlPath = path.join(webguiStaticPath, "index.html");
+  const realReadFileSync = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (target, ...rest) => {
+    if (target === indexHtmlPath) {
+      const err = new Error("permission denied");
+      err.code = "EACCES";
+      throw err;
+    }
+    return realReadFileSync(target, ...rest);
+  });
+
+  try {
+    const loginRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=siteadmin&password=correct-horse-battery-staple",
+      redirect: "manual",
+    });
+    const siteAdminCookie = extractCookie(loginRes);
+
+    const insert = db
+      .prepare("INSERT INTO servers (slug, name, instance_name, dcs_install_path) VALUES (?, ?, ?, ?)")
+      .run("reload-fail", "Reload Fail Server", "Example_ReloadFail", GOOD_INSTALL_PATH);
+    const serverId = insert.lastInsertRowid;
+
+    const syncRes = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `server_id=${serverId}`,
+    });
+    const syncHtml = await syncRes.text();
+    assert.match(syncHtml, /Synced, but could not reload/, "an unreadable index.html after the swap must not read as a failed sync");
+    assert.doesNotMatch(syncHtml, /Sync failed/);
+
+    // the live files on disk are already the new bundle, the swap
+    // itself never failed, only this process's in-memory reload did
+    assert.equal(fs.readFileSync(path.join(webguiStaticPath, "js", "app.js"), "utf8"), "console.log('synced');");
+  } finally {
+    server.close();
+  }
+});
+
 test("webgui-sync: a failed bundle fetch leaves the existing webgui-static/ untouched", async () => {
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.on("listening", resolve));
