@@ -9,10 +9,9 @@ function parseVersion(version) {
   return { triple: [Number(match[1]), Number(match[2]), Number(match[3])], prerelease: match[4] || null };
 }
 
-// SemVer precedence for the prerelease field: no prerelease always
-// outranks having one on the same X.Y.Z triple; otherwise compare
-// dot-separated identifiers left to right, numeric ones numerically,
-// everything else as plain strings
+// SemVer precedence for the prerelease field: no prerelease outranks
+// having one on the same X.Y.Z triple; otherwise compare dot-separated
+// identifiers left to right, numeric values numerically, else as strings
 function comparePrerelease(a, b) {
   if (a === b) return 0;
   if (a === null) return 1;
