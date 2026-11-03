@@ -1494,3 +1494,17 @@ hand.<br>No individual deployment ever rotates its own keys, so
 there is nothing for an admin UI to expose. Checking `key_state`
 directly in the database, the same way `update_state` is checked, is
 enough for the one person who ever needs to.
+
+## Why does archive-old-release.sh skip key_state.draft.json?
+
+`rotate-key.js` keeps an in-progress rotation's draft
+(`key_state.draft.json`) in `local-only/release/`, the same directory
+`archive-old-release.sh` sweeps into the version archive before every
+release build.<br>A release cut between the draft and finalize steps
+would archive the draft along with everything else, and finalize
+would then fail to find it, stranding the rotation until someone
+moves the draft back by hand.<br>The two key PEM files live under
+`local-only/keys/`, never in `RELEASE_DIR`, so they're never at risk;
+`key_state.json` does live here too, but every rotation step rewrites
+it unconditionally from `local-only/keys/`'s own history, so archiving
+a stale copy costs nothing.

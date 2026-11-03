@@ -10,7 +10,9 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 RELEASE_DIR="$ROOT_DIR/local-only/release"
+RELEASE_DIR="${ARCHIVE_OLD_RELEASE_RELEASE_DIR:-$RELEASE_DIR}"
 ARCHIVE_DIR="$ROOT_DIR/local-only/release-archive"
+ARCHIVE_DIR="${ARCHIVE_OLD_RELEASE_ARCHIVE_DIR:-$ARCHIVE_DIR}"
 MANIFEST="$RELEASE_DIR/signed_updates.json"
 
 if [ ! -f "$MANIFEST" ]; then
@@ -30,6 +32,11 @@ echo "==> Archiving local-only/release/ (version $OLD_VERSION) to $DEST"
 mkdir -p "$DEST"
 for entry in "$RELEASE_DIR"/*; do
   [ -e "$entry" ] || continue
+  # a pending rotate-key.js draft must survive a release cut, or
+  # finalize can't find it, see docs/Why.md#why-does-archive-old-releasesh-skip-key_statedraftjson
+  case "$(basename "$entry")" in
+    key_state.draft.json) continue ;;
+  esac
   mv "$entry" "$DEST/"
 done
 
