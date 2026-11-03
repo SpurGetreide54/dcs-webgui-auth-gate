@@ -3,7 +3,7 @@
 const crypto = require("node:crypto");
 const db = require("./db");
 const auth = require("./auth");
-const { PERMISSION_COLUMNS } = require("./servers");
+const { revokeAccessRowOn, ensureAccessRowOn, setPermissionOn } = require("./servers");
 
 const INVITE_TTL_SECONDS = 30 * 60;
 
@@ -28,29 +28,18 @@ function createInvite({ canManageAccounts }) {
 
 // remove an invite's access row for one server entirely
 function revokeInviteAccess(inviteId, serverId) {
-  db.prepare("DELETE FROM invite_server_access WHERE invite_id = ? AND server_id = ?").run(inviteId, serverId);
+  revokeAccessRowOn("invite_server_access", "invite_id", inviteId, serverId);
 }
 
 // make sure an access row exists for this invite and server, all flags off
 function ensureInviteAccessRow(inviteId, serverId) {
-  db.prepare(
-    `INSERT INTO invite_server_access (invite_id, server_id) VALUES (?, ?)
-     ON CONFLICT (invite_id, server_id) DO NOTHING`
-  ).run(inviteId, serverId);
+  ensureAccessRowOn("invite_server_access", "invite_id", inviteId, serverId);
 }
 
 // toggle one permission cell for a pending invite
-// mirrors servers.js's setPermission for the same matrix popup
+// mirrors servers.js's own setPermission, through the same shared helper
 function setInvitePermission(inviteId, serverId, permission, granted) {
-  // "access" itself has no column, it's the row's own existence
-  if (permission === "access") {
-    if (granted) return ensureInviteAccessRow(inviteId, serverId);
-    return revokeInviteAccess(inviteId, serverId);
-  }
-  const column = PERMISSION_COLUMNS[permission];
-  if (!column) throw new Error(`Unknown permission: ${permission}`);
-  ensureInviteAccessRow(inviteId, serverId);
-  db.prepare(`UPDATE invite_server_access SET ${column} = ? WHERE invite_id = ? AND server_id = ?`).run(granted ? 1 : 0, inviteId, serverId);
+  return setPermissionOn("invite_server_access", "invite_id", inviteId, serverId, permission, granted);
 }
 
 // list every server an invite has an access row for

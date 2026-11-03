@@ -83,31 +83,50 @@ function setAccess(adminId, serverId, grants = {}) {
   ).run(adminId, serverId, canUploadMissions ? 1 : 0, canViewMissions ? 1 : 0, canDownloadMissions ? 1 : 0, canDeleteMissions ? 1 : 0);
 }
 
+// shared by every table/owner pair below (admin and invite access);
+// table and ownerColumn only ever come from this file's own fixed
+// call sites, never from request input
+function revokeAccessRowOn(table, ownerColumn, ownerId, serverId) {
+  db.prepare(`DELETE FROM ${table} WHERE ${ownerColumn} = ? AND server_id = ?`).run(ownerId, serverId);
+}
+
+// make sure an access row exists, all flags off; same table/owner
+// restriction as revokeAccessRowOn above
+function ensureAccessRowOn(table, ownerColumn, ownerId, serverId) {
+  db.prepare(`INSERT INTO ${table} (${ownerColumn}, server_id) VALUES (?, ?) ON CONFLICT (${ownerColumn}, server_id) DO NOTHING`).run(
+    ownerId,
+    serverId
+  );
+}
+
+// toggle exactly one permission cell, leaving every other column alone;
+// shared by setPermission/setInvitePermission below
+// see docs/Why.md#why-are-there-two-ways-to-set-an-admins-permissions
+function setPermissionOn(table, ownerColumn, ownerId, serverId, permission, granted) {
+  // "access" itself has no column, it's the row's own existence
+  if (permission === "access") {
+    if (granted) return ensureAccessRowOn(table, ownerColumn, ownerId, serverId);
+    return revokeAccessRowOn(table, ownerColumn, ownerId, serverId);
+  }
+  const column = PERMISSION_COLUMNS[permission];
+  if (!column) throw new Error(`Unknown permission: ${permission}`);
+  ensureAccessRowOn(table, ownerColumn, ownerId, serverId);
+  db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${ownerColumn} = ? AND server_id = ?`).run(granted ? 1 : 0, ownerId, serverId);
+}
+
 // remove an admin's access row for one server entirely
 function revokeAccess(adminId, serverId) {
-  db.prepare("DELETE FROM admin_server_access WHERE admin_id = ? AND server_id = ?").run(adminId, serverId);
+  revokeAccessRowOn("admin_server_access", "admin_id", adminId, serverId);
 }
 
 // make sure an access row exists for this admin and server, all flags off
 function ensureAccessRow(adminId, serverId) {
-  db.prepare(
-    `INSERT INTO admin_server_access (admin_id, server_id) VALUES (?, ?)
-     ON CONFLICT (admin_id, server_id) DO NOTHING`
-  ).run(adminId, serverId);
+  ensureAccessRowOn("admin_server_access", "admin_id", adminId, serverId);
 }
 
 // toggle exactly one permission cell, leaving every other column alone
-// see docs/Why.md#why-are-there-two-ways-to-set-an-admins-permissions
 function setPermission(adminId, serverId, permission, granted) {
-  // "access" itself has no column, it's the row's own existence
-  if (permission === "access") {
-    if (granted) return ensureAccessRow(adminId, serverId);
-    return revokeAccess(adminId, serverId);
-  }
-  const column = PERMISSION_COLUMNS[permission];
-  if (!column) throw new Error(`Unknown permission: ${permission}`);
-  ensureAccessRow(adminId, serverId);
-  db.prepare(`UPDATE admin_server_access SET ${column} = ? WHERE admin_id = ? AND server_id = ?`).run(granted ? 1 : 0, adminId, serverId);
+  return setPermissionOn("admin_server_access", "admin_id", adminId, serverId, permission, granted);
 }
 
 // grant the same permission set to this admin on every server at once
@@ -117,7 +136,9 @@ function grantAllServers(adminId, grants) {
   }
 }
 
-// expose the lookup table and every function above to callers
+// expose the lookup table and every function above to callers;
+// revokeAccessRowOn/ensureAccessRowOn/setPermissionOn are exposed for
+// invites.js's own admin_server_access-shaped table, invite_server_access
 module.exports = {
   PERMISSION_COLUMNS,
   getServerBySlug,
@@ -131,4 +152,7 @@ module.exports = {
   setPermission,
   revokeAccess,
   grantAllServers,
+  revokeAccessRowOn,
+  ensureAccessRowOn,
+  setPermissionOn,
 };
