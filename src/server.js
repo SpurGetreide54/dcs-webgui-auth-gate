@@ -373,18 +373,23 @@ accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extend
   res.redirect("/admin/accounts");
 });
 
+// true if targetId is currently the only can_manage_accounts admin,
+// shared by the demote and delete handlers below
+function wouldRemoveLastManager(targetId) {
+  const remainingManagers = db
+    .prepare("SELECT COUNT(*) AS n FROM admins WHERE can_manage_accounts = 1 AND id != ?")
+    .get(targetId).n;
+  return remainingManagers === 0;
+}
+
 accountsRouter.post("/:id", auth.requireAccountManager, express.urlencoded({ extended: false }), (req, res) => {
   const targetId = Number(req.params.id);
   const canManage = Boolean(req.body.can_manage_accounts);
+  const target = db.prepare("SELECT can_manage_accounts FROM admins WHERE id = ?").get(targetId);
 
-  if (!canManage) {
-    const remainingManagers = db
-      .prepare("SELECT COUNT(*) AS n FROM admins WHERE can_manage_accounts = 1 AND id != ?")
-      .get(targetId).n;
-    if (remainingManagers === 0) {
-      flash.setFlash(res, { error: "Can't remove the last site admin's account-management access." });
-      return res.redirect("/admin/accounts");
-    }
+  if (!canManage && target?.can_manage_accounts && wouldRemoveLastManager(targetId)) {
+    flash.setFlash(res, { error: "Can't remove the last site admin's account-management access." });
+    return res.redirect("/admin/accounts");
   }
   db.prepare("UPDATE admins SET can_manage_accounts = ? WHERE id = ?").run(canManage ? 1 : 0, targetId);
   res.redirect("/admin/accounts");
@@ -398,14 +403,9 @@ accountsRouter.post("/:id/delete", auth.requireAccountManager, (req, res) => {
     return res.redirect("/admin/accounts");
   }
 
-  if (target.can_manage_accounts) {
-    const remainingManagers = db
-      .prepare("SELECT COUNT(*) AS n FROM admins WHERE can_manage_accounts = 1 AND id != ?")
-      .get(targetId).n;
-    if (remainingManagers === 0) {
-      flash.setFlash(res, { error: "Can't delete the last site admin's account." });
-      return res.redirect("/admin/accounts");
-    }
+  if (target.can_manage_accounts && wouldRemoveLastManager(targetId)) {
+    flash.setFlash(res, { error: "Can't delete the last site admin's account." });
+    return res.redirect("/admin/accounts");
   }
   db.prepare("DELETE FROM admins WHERE id = ?").run(targetId);
   res.redirect("/admin/accounts");
