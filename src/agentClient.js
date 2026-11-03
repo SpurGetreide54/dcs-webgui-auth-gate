@@ -20,4 +20,10 @@ async function agentFetch(path, init = {}) {
   return fetch(url, { ...init, headers, signal: init.signal || AbortSignal.timeout(init.timeoutMs || DEFAULT_TIMEOUT_MS) });
 }
 
-module.exports = { isConfigured, agentFetch, getUrl: () => process.env.MISSION_AGENT_URL, getToken: () => process.env.MISSION_AGENT_TOKEN };
+module.exports = {
+  isConfigured,
+  agentFetch,
+  getUrl: () => process.env.MISSION_AGENT_URL,
+  getToken: () => process.env.MISSION_AGENT_TOKEN,
+  getDefaultTimeoutMs: () => DEFAULT_TIMEOUT_MS,
+};

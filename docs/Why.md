@@ -973,6 +973,20 @@ html but still carry the zip's `Content-Type` and `Content-Disposition`,
 so the browser would try to save and open it as a corrupt zip file
 instead of showing the error.
 
+## Why doesn't the mission download have a body-stream timeout?
+
+The download handler only bounds the wait for the agent's response
+headers, with its own `AbortController` and the same default timeout
+`agentClient` would otherwise apply.<br>Once the agent answers and the
+body starts streaming to the browser, no further deadline applies --
+a large mission file on a slow but healthy connection should not be
+cut off just because it takes a while, and there is no reliable
+"stalled" signal to distinguish from "still transferring" once bytes
+are flowing.<br>The safety net instead lives in the `catch`: a
+mid-stream failure calls `res.destroy(err)` rather than `res.end()`,
+so the browser's connection resets instead of looking like a
+successfully completed, merely truncated, download.
+
 ## Why does the index injection use a function replacer instead of a string one?
 
 A string second argument to `String.prototype.replace` treats `$&`,

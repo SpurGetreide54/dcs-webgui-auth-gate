@@ -89,6 +89,11 @@ let dummyAgentMissionsDelayMs = 0;
 // generic { ok: true } default
 let dummyAgentDownloadShouldStall = false;
 
+// set per test: when true, a POST .../download writes the zip headers
+// and some body bytes, then destroys the socket mid-stream, instead
+// of ending the body cleanly
+let dummyAgentDownloadShouldStallMidBody = false;
+
 // stands in for the real github api updateCheck.js's checkForUpdate()
 // reaches, set per test via dummyGithubRespond
 let dummyGithub, dummyGithubBase;
@@ -123,6 +128,14 @@ test.before(async () => {
       if (req.method === "POST" && req.url.endsWith("/download")) {
         res.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": 'attachment; filename="missions.zip"' });
         if (dummyAgentDownloadShouldStall) return req.socket.destroy();
+        if (dummyAgentDownloadShouldStallMidBody) {
+          res.write(Buffer.from("partial zip bytes"));
+          // gives the chunk above time to actually reach the
+          // auth-gate's own response before the socket dies, so the
+          // test exercises the headersSent === true branch, not the
+          // before-any-bytes one covered above
+          return setTimeout(() => req.socket.destroy(), 50);
+        }
         return res.end(Buffer.from("fake zip bytes"));
       }
       // a trash list get needs its own { trash: [...] } shape, distinct
@@ -513,6 +526,23 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     assert.match(stalledDownloadRes.headers.get("content-type") || "", /text\/html/, "the error page must be served as html, not the zip attachment headers it inherited");
     assert.equal(stalledDownloadRes.headers.get("content-disposition"), null, "no attachment header must survive onto the error page");
     assert.match(await stalledDownloadRes.text(), /Could not reach the mission agent/);
+
+    // a failure after some body bytes already streamed (headers sent,
+    // not just the zip-attachment headers staged) must reset the
+    // connection, not end it as if the file were complete
+    // see docs/Why.md#why-doesnt-the-mission-download-have-a-body-stream-timeout
+    dummyAgentDownloadShouldStallMidBody = true;
+    const midBodyFailureRes = await fetch(`${base}/s/training/missions/download`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: downloadOnlyCookie },
+      body: "mission=some-mission.miz",
+    });
+    dummyAgentDownloadShouldStallMidBody = false;
+    assert.equal(midBodyFailureRes.status, 200, "headers were already sent to the browser before the mid-body failure");
+    await assert.rejects(
+      () => midBodyFailureRes.text(),
+      "a mid-body failure must reset the connection instead of a clean end that looks like a complete, merely small, file"
+    );
 
     // delete rights gate both the trash section's visibility and the
     // restore route itself, same permission as trashing

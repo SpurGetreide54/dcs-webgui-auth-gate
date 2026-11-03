@@ -981,12 +981,18 @@ app.post(
     const names = [].concat(req.body?.mission || []);
     if (names.length === 0) return renderMissionsPage(req, res, { status: 400, error: "No missions selected." });
     if (!agentClient.isConfigured()) return renderMissionsPage(req, res, { status: 500, error: "Mission agent is not configured." });
+    // bounds only the wait for response headers, see
+    // docs/Why.md#why-doesnt-the-mission-download-have-a-body-stream-timeout
+    const headersController = new AbortController();
+    const headersTimeout = setTimeout(() => headersController.abort(), agentClient.getDefaultTimeoutMs());
     try {
       const agentRes = await agentClient.agentFetch(`/missions/${encodeURIComponent(req.dcsServer.instance_name)}/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ missions: names }),
+        signal: headersController.signal,
       });
+      clearTimeout(headersTimeout);
       if (!agentRes.ok) {
         const detail = await agentRes.text().catch(() => "");
         return renderMissionsPage(req, res, { status: 502, error: `Mission agent rejected the download: ${detail || agentRes.status}` });
@@ -996,6 +1002,7 @@ app.post(
       if (disposition) res.set("Content-Disposition", disposition);
       await pipeline(Readable.fromWeb(agentRes.body), res);
     } catch (err) {
+      clearTimeout(headersTimeout);
       if (!res.headersSent) {
         // undo the zip-attachment headers set above before the stream
         // failed, so the error page renders as html, not a corrupt
@@ -1004,7 +1011,10 @@ app.post(
         res.removeHeader("Content-Disposition");
         return renderMissionsPage(req, res, { status: 502, error: `Could not reach the mission agent: ${err.message}` });
       }
-      res.end();
+      // a mid-body failure must reset the connection, not end it
+      // cleanly, so the browser can't mistake a truncated file for a
+      // complete one, see docs/Why.md#why-doesnt-the-mission-download-have-a-body-stream-timeout
+      res.destroy(err);
     }
   })
 );
