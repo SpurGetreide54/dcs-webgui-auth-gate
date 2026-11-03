@@ -54,12 +54,29 @@ function verifyManifest(manifest) {
   return crypto.verify(null, message, getTrustedPublicKey(), Buffer.from(signature, "hex"));
 }
 
+// finds the newest version release, skipping the separate key-state
+// release and any draft or pre-release, instead of trusting GitHub's
+// own /releases/latest to land on the right one
+// see docs/Why.md#why-does-fetchlatestversionrelease-list-releases-instead-of-calling-releaseslatest
+async function fetchLatestVersionRelease() {
+  // required here, not at module load, to avoid a circular require --
+  // keyRotation.js itself requires this module for CHECK_INTERVAL_MS
+  const { KEY_STATE_TAG } = require("./keyRotation");
+  const releases = await fetchGithubJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases`, "dcs-webgui-auth-gate-update-check");
+  const release = releases.find(
+    (r) => r.tag_name !== KEY_STATE_TAG && !r.draft && !r.prerelease && (r.assets || []).some((a) => a.name === "signed_updates.json")
+  );
+  if (!release) throw new Error("No GitHub release has a signed_updates.json asset.");
+  return release;
+}
+
 // fetch the latest release's manifest, refusing one that fails verification
 // see docs/Why.md#why-is-fetchverifiedmanifest-always-re-fetched-instead-of-cached
 async function fetchVerifiedManifest() {
-  const release = await fetchGithubJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/latest`, "dcs-webgui-auth-gate-update-check");
-  const asset = (release.assets || []).find((a) => a.name === "signed_updates.json");
-  if (!asset) throw new Error("Latest GitHub release has no signed_updates.json asset.");
+  const release = await fetchLatestVersionRelease();
+  // guaranteed to exist: fetchLatestVersionRelease only returns a
+  // release that has this asset
+  const asset = release.assets.find((a) => a.name === "signed_updates.json");
   const manifest = await fetchGithubJson(asset.browser_download_url, "dcs-webgui-auth-gate-update-check");
   if (!verifyManifest(manifest)) throw new Error("signed_updates.json failed signature verification.");
   return manifest;

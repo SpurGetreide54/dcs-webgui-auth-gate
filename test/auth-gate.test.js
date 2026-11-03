@@ -1112,8 +1112,12 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     function serveDummyManifest(signed, privateKey) {
       dummyGithubRespond = (req, res) => {
         res.writeHead(200, { "Content-Type": "application/json" });
-        if (req.url.includes("/releases/latest")) {
-          res.end(JSON.stringify({ assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] }));
+        if (req.url.endsWith("/releases")) {
+          res.end(
+            JSON.stringify([
+              { tag_name: `v${signed.version}`, draft: false, prerelease: false, assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] },
+            ])
+          );
         } else {
           const signature = crypto.sign(null, Buffer.from(JSON.stringify(signed)), privateKey).toString("hex");
           res.end(JSON.stringify({ ...signed, signature }));

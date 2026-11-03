@@ -373,6 +373,23 @@ re-fetched fresh every time `checkForUpdate` and `applyUpdate` both
 call it, never trusted from a cache.<br>The database's own cached
 fields exist for display only, never as something to act on.
 
+## Why does fetchLatestVersionRelease list releases instead of calling releases/latest?
+
+`GET /repos/<repo>/releases/latest` returns whichever non-draft,
+non-prerelease release was created most recently.<br>The key-state
+release (see "Why is key-state/rotation a separate signed record?"
+below) lives on the same repo under its own tag, reuploaded in place
+on every rotation, and nothing marks it as a pre-release.<br>If it's
+created after the newest version release, `releases/latest` resolves
+to it instead, and every update check fails with "no
+signed_updates.json asset" until the next version release.
+
+Listing `GET /repos/<repo>/releases` (newest-created-first) and
+filtering out the key-state tag, drafts and pre-releases finds the
+right release regardless of publish order, without depending on a
+maintainer remembering to mark the key-state release as a
+pre-release.
+
 ## Why does checkForUpdate re-throw its own errors?
 
 `checkForUpdate` only ever updates `update_state` for display, never

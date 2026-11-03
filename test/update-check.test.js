@@ -385,12 +385,14 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-// serves manifest as the dummy github api's "latest release" asset,
+// serves manifest as the dummy github api's version release asset,
 // answering fetchVerifiedManifest()'s two requests from one handler
 function serveManifest(manifest) {
   dummyGithubRespond = (req, res) => {
-    if (req.url.includes("/releases/latest")) {
-      sendJson(res, 200, { assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] });
+    if (req.url.endsWith("/releases")) {
+      sendJson(res, 200, [
+        { tag_name: "v9.9.9", draft: false, prerelease: false, assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] },
+      ]);
     } else {
       sendJson(res, 200, manifest);
     }
@@ -453,6 +455,38 @@ test(
     assert.equal(state.changelog_url, "https://example.test/changelog");
     assert.ok(state.last_checked_at);
     assert.ok(state.last_succeeded_at);
+  }
+);
+
+test(
+  "checkForUpdate skips a key-state release that's newer than the real version release, instead of mistaking it for the latest",
+  { skip: !fs.existsSync(REAL_PRIVATE_KEY_PATH) ? "local-only/keys/key-rotation-primary.pem not present on this machine" : false },
+  async () => {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(REAL_PRIVATE_KEY_PATH, "utf8"));
+    const manifest = signManifest(privateKey, {
+      version: "9.9.9-key-state-shadow",
+      changelog_url: "https://example.test/changelog",
+      needs_service_update: false,
+      downloads: [{ artifact: "auth-gate", url: "https://example.test/a.tar.gz", sha256: "d".repeat(64) }],
+    });
+    dummyGithubRespond = (req, res) => {
+      if (req.url.endsWith("/releases")) {
+        // newest-first, same order the real github api returns, with
+        // the key-state release (no signed_updates.json asset) ahead
+        // of the real version release
+        sendJson(res, 200, [
+          { tag_name: "key-state", draft: false, prerelease: false, assets: [{ name: "key_state.json", browser_download_url: `${dummyGithubBase}/key_state.json` }] },
+          { tag_name: "v9.9.9-key-state-shadow", draft: false, prerelease: false, assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] },
+        ]);
+      } else {
+        sendJson(res, 200, manifest);
+      }
+    };
+
+    const hasUpdate = await updateCheck.checkForUpdate();
+    assert.equal(hasUpdate, true);
+    const state = updateCheck.getUpdateState();
+    assert.equal(state.available_version, "9.9.9-key-state-shadow");
   }
 );
 
@@ -611,8 +645,10 @@ test(
       downloads: [{ artifact: "auth-gate", url: `${dummyGithubBase}/auth-gate.tar.gz`, sha256: "a".repeat(64) }],
     });
     dummyGithubRespond = (req, res) => {
-      if (req.url.includes("/releases/latest")) {
-        sendJson(res, 200, { assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] });
+      if (req.url.endsWith("/releases")) {
+        sendJson(res, 200, [
+          { tag_name: "v9.9.9-stall", draft: false, prerelease: false, assets: [{ name: "signed_updates.json", browser_download_url: `${dummyGithubBase}/signed_updates.json` }] },
+        ]);
       } else if (req.url.includes("/signed_updates.json")) {
         sendJson(res, 200, manifest);
       }
