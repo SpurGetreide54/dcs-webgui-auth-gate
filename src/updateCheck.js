@@ -59,8 +59,8 @@ function verifyManifest(manifest) {
 // own /releases/latest to land on the right one
 // see docs/Why.md#why-does-fetchlatestversionrelease-list-releases-instead-of-calling-releaseslatest
 async function fetchLatestVersionRelease() {
-  // required here, not at module load, to avoid a circular require --
-  // keyRotation.js itself requires this module for CHECK_INTERVAL_MS
+  // required here, not at module load, to avoid a circular require,
+  // since keyRotation.js itself requires this module for CHECK_INTERVAL_MS
   const { KEY_STATE_TAG } = require("./keyRotation");
   const releases = await fetchGithubJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases`, "dcs-webgui-auth-gate-update-check");
   const release = releases.find(
@@ -247,8 +247,8 @@ async function relayAgentUpdate(archivePath, manifest) {
   console.debug(`Update: uploading agent build to the mission agent (${fileBuffer.length} bytes)...`);
 
   const { signed, signature } = splitManifestSignature(manifest);
-  // required here, not at module load, to avoid a circular require --
-  // keyRotation.js itself requires this module for CHECK_INTERVAL_MS
+  // required here, not at module load, to avoid a circular require,
+  // since keyRotation.js itself requires this module for CHECK_INTERVAL_MS
   const keyRotation = require("./keyRotation");
   const history = await keyRotation.fetchKeyStateHistory().catch((err) => {
     console.warn(`Could not fetch key-state history to relay to the agent: ${err.message}`);

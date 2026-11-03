@@ -1476,7 +1476,7 @@ test("validateNewPassword rejects a password over 72 bytes, accepts one at exact
 
 test("validateNewPassword counts bytes, not characters, so multibyte input can fail well under 72 characters", () => {
   // "é" (U+00E9) is 2 bytes in utf-8, so 40 of them is 80 bytes while
-  // only 40 characters long -- well past minlength but still rejected
+  // only 40 characters long, past minlength but still rejected
   const multibyte = "é".repeat(40);
   const error = auth.validateNewPassword(multibyte);
   assert.match(error, /80 bytes given/);

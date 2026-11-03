@@ -15,8 +15,7 @@ const diagnostics = require("./diagnostics");
 const { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES } = require("./auth");
 
 // shown next to every new-password field instead of a maxlength
-// attribute -- html's maxlength counts utf-16 code units, not bytes,
-// so it can't express bcrypt's byte-based limit accurately, see
+// attribute, which can't express this byte-based limit accurately, see
 // docs/Why.md#why-does-validatenewpassword-reject-passwords-over-72-bytes
 const PASSWORD_LENGTH_HINT = `${MIN_PASSWORD_LENGTH}–${MAX_PASSWORD_BYTES} characters (fewer if you use non-ASCII characters)`;
 
