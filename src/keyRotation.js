@@ -8,7 +8,7 @@ const db = require("./db");
 const { GITHUB_REPO } = require("./updateConstants");
 const { CHECK_INTERVAL_MS } = require("./updateCheck");
 const { keyStateMessage } = require("./keyRotationConstants");
-const { GITHUB_API_BASE, fetchGithub } = require("./githubApi");
+const { GITHUB_API_BASE, fetchGithub, fetchGithubJson } = require("./githubApi");
 
 // section: constants
 
@@ -39,13 +39,6 @@ function setKeyStateLastCheckedAt(lastCheckedAt) {
 
 // section: fetching the rotation history
 
-// fetch a url and parse its response as json
-async function fetchJson(url) {
-  const res = await fetchGithub(url, USER_AGENT);
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return res.json();
-}
-
 // fetch the key-state release's own asset: every rotation record ever
 // issued, oldest first, or null if none published yet
 // see docs/Why.md#why-is-key_statejson-an-append-only-history-instead-of-a-single-record
@@ -59,7 +52,7 @@ async function fetchKeyStateHistory() {
   const asset = (release.assets || []).find((a) => a.name === "key_state.json");
   // branch: the tag exists but carries no usable asset
   if (!asset) return null;
-  return fetchJson(asset.browser_download_url);
+  return fetchGithubJson(asset.browser_download_url, USER_AGENT);
 }
 
 // section: verifying a rotation record

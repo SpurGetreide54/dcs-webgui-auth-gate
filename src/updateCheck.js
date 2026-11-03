@@ -15,7 +15,7 @@ const db = require("./db");
 const activeSlot = require("./activeSlot");
 const agentClient = require("./agentClient");
 const { GITHUB_REPO } = require("./updateConstants");
-const { GITHUB_API_BASE, fetchGithub } = require("./githubApi");
+const { GITHUB_API_BASE, fetchGithub, fetchGithubJson } = require("./githubApi");
 const { isVersionGreater } = require("./versionCompare");
 
 // section: constants
@@ -54,20 +54,13 @@ function verifyManifest(manifest) {
   return crypto.verify(null, message, getTrustedPublicKey(), Buffer.from(signature, "hex"));
 }
 
-// fetch a url and parse its response as json
-async function fetchJson(url) {
-  const res = await fetchGithub(url, "dcs-webgui-auth-gate-update-check");
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return res.json();
-}
-
 // fetch the latest release's manifest, refusing one that fails verification
 // see docs/Why.md#why-is-fetchverifiedmanifest-always-re-fetched-instead-of-cached
 async function fetchVerifiedManifest() {
-  const release = await fetchJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/latest`);
+  const release = await fetchGithubJson(`${GITHUB_API_BASE}/repos/${GITHUB_REPO}/releases/latest`, "dcs-webgui-auth-gate-update-check");
   const asset = (release.assets || []).find((a) => a.name === "signed_updates.json");
   if (!asset) throw new Error("Latest GitHub release has no signed_updates.json asset.");
-  const manifest = await fetchJson(asset.browser_download_url);
+  const manifest = await fetchGithubJson(asset.browser_download_url, "dcs-webgui-auth-gate-update-check");
   if (!verifyManifest(manifest)) throw new Error("signed_updates.json failed signature verification.");
   return manifest;
 }

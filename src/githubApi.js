@@ -19,4 +19,12 @@ async function fetchGithub(url, userAgent, { timeoutMs } = {}) {
   });
 }
 
-module.exports = { GITHUB_API_BASE, fetchGithub };
+// fetches a url and parses its response as json, rejecting a non-ok
+// status instead of parsing it as if it were the expected body
+async function fetchGithubJson(url, userAgent, opts) {
+  const res = await fetchGithub(url, userAgent, opts);
+  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
+  return res.json();
+}
+
+module.exports = { GITHUB_API_BASE, fetchGithub, fetchGithubJson };
