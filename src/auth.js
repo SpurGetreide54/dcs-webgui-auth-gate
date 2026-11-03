@@ -67,21 +67,31 @@ function rateLimitKey(req, username, purpose = "login") {
   return `${purpose}:${req.ip}:${username.toLowerCase()}`;
 }
 
-// true once this ip/username pair has hit too many attempts recently
-function isRateLimited(req, username, purpose = "login") {
-  const key = rateLimitKey(req, username, purpose);
+// count attempts recorded against one bucket key inside the window;
+// shared by both throttles below
+function countRecentAttempts(key) {
   const row = db
     .prepare(
       `SELECT COUNT(*) AS n FROM login_attempts
        WHERE key = ? AND attempted_at > datetime('now', '-' || ? || ' seconds')`
     )
     .get(key, RATE_LIMIT_WINDOW_SECONDS);
-  return row.n >= RATE_LIMIT_MAX_ATTEMPTS;
+  return row.n;
+}
+
+// record one attempt against one bucket key; shared by both throttles
+function insertAttempt(key) {
+  db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(key);
+}
+
+// true once this ip/username pair has hit too many attempts recently
+function isRateLimited(req, username, purpose = "login") {
+  return countRecentAttempts(rateLimitKey(req, username, purpose)) >= RATE_LIMIT_MAX_ATTEMPTS;
 }
 
 // record one login attempt against this ip and username pair
 function recordLoginAttempt(req, username, purpose = "login") {
-  db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(rateLimitKey(req, username, purpose));
+  insertAttempt(rateLimitKey(req, username, purpose));
 }
 
 // build the rate-limit bucket key for one ip alone, no username, so
@@ -94,20 +104,14 @@ function ipRateLimitKey(req) {
 // true once this ip alone has hit too many attempts recently,
 // across any number of usernames
 function isIpRateLimited(req) {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM login_attempts
-       WHERE key = ? AND attempted_at > datetime('now', '-' || ? || ' seconds')`
-    )
-    .get(ipRateLimitKey(req), RATE_LIMIT_WINDOW_SECONDS);
-  return row.n >= RATE_LIMIT_IP_MAX_ATTEMPTS;
+  return countRecentAttempts(ipRateLimitKey(req)) >= RATE_LIMIT_IP_MAX_ATTEMPTS;
 }
 
 // record one login attempt against this ip alone; never cleared on a
 // success, unlike the per-username bucket, since this bucket exists
 // specifically to bound a spray across many usernames
 function recordIpLoginAttempt(req) {
-  db.prepare("INSERT INTO login_attempts (key) VALUES (?)").run(ipRateLimitKey(req));
+  insertAttempt(ipRateLimitKey(req));
 }
 
 // delete attempts outside the window, called opportunistically on login
