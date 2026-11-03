@@ -74,7 +74,7 @@ function setSessionCookie(res, token) {
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: "lax",
-    maxAge: 12 * 60 * 60 * 1000,
+    maxAge: auth.SESSION_TTL_SECONDS * 1000,
   });
 }
 

@@ -1,14 +1,16 @@
 // node's own crypto module, for random token bytes
 const crypto = require("node:crypto");
+const { SESSION_TTL_SECONDS } = require("./auth");
 
 // short-lived token standing in for the session cookie on control-port
 // requests, minted on page load, checked by serverProxy.js
 // see docs/Why.md#why-do-control-port-requests-use-a-separate-token-instead-of-the-session-cookie
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 // the sliding window's own hard ceiling, even if something keeps
-// polling with this token forever
+// polling with this token forever, tied to the session's own lifetime
+// since both bound how long a leaked credential can stay useful
 // see docs/Why.md#why-does-a-control-tokens-expiry-slide-forward-instead-of-using-a-fixed-ttl
-const MAX_TOKEN_LIFETIME_MS = 12 * 60 * 60 * 1000;
+const MAX_TOKEN_LIFETIME_MS = SESSION_TTL_SECONDS * 1000;
 // all live tokens, keyed by the token string itself
 const tokens = new Map();
 

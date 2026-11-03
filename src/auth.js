@@ -206,6 +206,7 @@ function requireAccountManager(req, res, next) {
 // expose every public function and the session cookie's own name
 module.exports = {
   SESSION_COOKIE,
+  SESSION_TTL_SECONDS,
   DUMMY_PASSWORD_HASH,
   MIN_PASSWORD_LENGTH,
   hashPassword,
