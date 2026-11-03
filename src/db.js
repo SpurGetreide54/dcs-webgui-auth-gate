@@ -150,6 +150,16 @@ db.prepare(
    VALUES (1, ?, ?, ?, ?)`
 ).run(PRIMARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT);
 
+// adds a column to a table unless it's already there
+// returns whether it actually ran the ALTER TABLE, so a caller can
+// conditionally follow up (e.g. backfilling the new column)
+function addColumnIfMissing(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (columns.includes(column)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  return true;
+}
+
 // guarded migration from the old upstream_url/mission_folder_key
 // columns, see docs/FAQ.md#why-does-this-project-exist-at-all for why
 // a direct reverse proxy was dropped, a no-op once already migrated
@@ -158,49 +168,33 @@ db.prepare(
   if (columns.includes("mission_folder_key") && !columns.includes("instance_name")) {
     db.exec("ALTER TABLE servers RENAME COLUMN mission_folder_key TO instance_name");
   }
-  if (db.prepare("PRAGMA table_info(servers)").all().some((c) => c.name === "upstream_url")) {
+  if (columns.includes("upstream_url")) {
     db.exec("ALTER TABLE servers DROP COLUMN upstream_url");
   }
-  if (!db.prepare("PRAGMA table_info(servers)").all().some((c) => c.name === "dcs_install_path")) {
-    db.exec("ALTER TABLE servers ADD COLUMN dcs_install_path TEXT");
-  }
+  addColumnIfMissing("servers", "dcs_install_path", "TEXT");
 }
 
 // guarded migration adding view/download/delete as their own columns
 // see docs/Why.md#why-does-the-permission-migration-backfill-from-can_upload_missions
 for (const table of ["admin_server_access", "invite_server_access"]) {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-  if (!columns.includes("can_view_missions")) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN can_view_missions INTEGER NOT NULL DEFAULT 0`);
+  if (addColumnIfMissing(table, "can_view_missions", "INTEGER NOT NULL DEFAULT 0")) {
     db.exec(`UPDATE ${table} SET can_view_missions = 1 WHERE can_upload_missions = 1`);
   }
-  if (!columns.includes("can_download_missions")) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN can_download_missions INTEGER NOT NULL DEFAULT 0`);
-  }
-  if (!columns.includes("can_delete_missions")) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN can_delete_missions INTEGER NOT NULL DEFAULT 0`);
-  }
+  addColumnIfMissing(table, "can_download_missions", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(table, "can_delete_missions", "INTEGER NOT NULL DEFAULT 0");
 }
 
 // guarded migration adding update_triggered_at, the cooldown guard's
 // own timestamp column
 // see docs/Why.md#why-does-update_state-track-when-an-update-was-last-triggered
-{
-  const columns = db.prepare("PRAGMA table_info(update_state)").all().map((c) => c.name);
-  if (!columns.includes("update_triggered_at")) {
-    db.exec("ALTER TABLE update_state ADD COLUMN update_triggered_at TEXT");
-  }
-}
+addColumnIfMissing("update_state", "update_triggered_at", "TEXT");
 
 // guarded migration adding last_succeeded_at, split from
 // last_checked_at so a check that fails every time doesn't look fresh
 // see docs/Why.md#why-does-update_state-track-last_succeeded_at-separately-from-last_checked_at
-{
-  const columns = db.prepare("PRAGMA table_info(update_state)").all().map((c) => c.name);
-  if (!columns.includes("last_succeeded_at")) {
-    db.exec("ALTER TABLE update_state ADD COLUMN last_succeeded_at TEXT");
-  }
-}
+addColumnIfMissing("update_state", "last_succeeded_at", "TEXT");
 
 // expose the open, migrated database connection to every other module
 module.exports = db;
+// exposed so a test can exercise it directly
+module.exports.addColumnIfMissing = addColumnIfMissing;

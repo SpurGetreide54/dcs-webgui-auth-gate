@@ -31,6 +31,7 @@ test("upgrading an existing DB auto-grants view wherever upload was already set,
 
     // loading db.js now runs its guarded migrations against this file
     process.env.SQLITE_PATH = sqlitePath;
+    delete require.cache[require.resolve("../src/db")];
     const db = require("../src/db");
 
     const uploaded = db.prepare("SELECT * FROM admin_server_access WHERE server_id = 1").get();
@@ -40,6 +41,25 @@ test("upgrading an existing DB auto-grants view wherever upload was already set,
 
     const notUploaded = db.prepare("SELECT * FROM admin_server_access WHERE server_id = 2").get();
     assert.equal(notUploaded.can_view_missions, 0, "view must stay 0 where upload was never granted");
+
+    db.close();
+  } finally {
+    for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(sqlitePath + suffix, { force: true });
+  }
+});
+
+test("addColumnIfMissing runs the ALTER TABLE once and is a no-op on a repeat call", () => {
+  const sqlitePath = tempSqlitePath();
+  try {
+    process.env.SQLITE_PATH = sqlitePath;
+    delete require.cache[require.resolve("../src/db")];
+    const db = require("../src/db");
+
+    const first = db.addColumnIfMissing("servers", "test_only_column", "TEXT");
+    assert.equal(first, true, "first call must run the ALTER TABLE and report that it did");
+
+    const second = db.addColumnIfMissing("servers", "test_only_column", "TEXT");
+    assert.equal(second, false, "second call must be a no-op and report that it didn't run");
 
     db.close();
   } finally {
