@@ -220,6 +220,16 @@ foreach ($rule in $FirewallRules) {
         } else {
             New-NetFirewallRule -Name $rule.Name -DisplayName $rule.Name -Direction Inbound -Action Allow -Program $rule.Program | Out-Null
         }
+        Write-Host "    Created: $($rule.Name)"
+    } elseif ($AuthGateAddress) {
+        # a bare re-run (no -AuthGateAddress passed) never touches an
+        # already-existing rule's scope, so a previously-restricted
+        # rule is never silently widened back to Any, see
+        # docs/Why.md#why-does-installps1-only-update-a-firewall-rules-scope-when-authgateaddress-is-passed
+        Set-NetFirewallRule -Name $rule.Name -Program $rule.Program -RemoteAddress $AuthGateAddress
+        Write-Host "    Updated: $($rule.Name)"
+    } else {
+        Write-Host "    Left as-is: $($rule.Name)"
     }
 }
 

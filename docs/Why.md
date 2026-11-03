@@ -1240,6 +1240,19 @@ install, matching this script's existing `-DcsSavedGamesRoot`
 precedent: an unattended re-install must not start failing just
 because these two optional flags weren't repeated.
 
+## Why does install.ps1 only update a firewall rule's scope when AuthGateAddress is passed?
+
+Re-running this script for an unrelated reason (a new NSSM version, a
+config change) must never silently change an already-scoped firewall
+rule's behavior.<br>Before, the firewall block only ever created a
+missing rule and never touched one that already existed, so a later
+re-run with a new `-AuthGateAddress` had no effect at all on it.<br>Now
+an existing rule's `-RemoteAddress` is updated only when
+`-AuthGateAddress` was actually passed on this run; an omitted
+parameter is treated as "no change requested," never as "requested
+Any," so a previously-restricted rule is never silently widened back
+to open just because a later re-run left the flag off.
+
 ## Why are both NSSM checksums pinned instead of fetched fresh?
 
 Both were verified once against the real nssm.cc download and pinned
