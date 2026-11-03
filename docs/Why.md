@@ -892,6 +892,19 @@ scratch directory placed elsewhere (e.g. under `local-only/`) would
 share a filesystem with it.<br>A sibling directory is guaranteed to,
 which is what makes the fast, atomic swap-via-rename actually safe.
 
+## Why does a failed backup cleanup not fail the swap?
+
+`swapDirectoryInto` (shared by server.js's webgui-sync and
+updateCheck.js's `stageAuthGateSlot`) renames the old contents aside,
+renames the new contents into place, then tries to remove the now-
+unused backup.<br>The rename pair is what actually matters: once both
+have succeeded, the swap is done and the caller's own success path
+(reloading the webgui index template, continuing the self-update) is
+correct to run.<br>A `backupDir` that can't be removed afterward (a
+locked file, a permission problem) is a leftover few kilobytes on
+disk, not a reason to report the whole sync or update as failed, so
+it's logged with `console.warn` instead of thrown.
+
 ## Why is webgui-static/ gitignored instead of shipped?
 
 The real DCS webgui is shared-source, not open source, so

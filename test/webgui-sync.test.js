@@ -4,6 +4,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
 const tar = require("tar");
 
@@ -145,6 +146,59 @@ test("webgui-sync: syncs webgui-static/ from the selected server's DCS install",
 
     assert.equal(fs.readFileSync(path.join(webguiStaticPath, "index.html"), "utf8"), "<html>synced dcs webgui</html>");
     assert.equal(fs.readFileSync(path.join(webguiStaticPath, "js", "app.js"), "utf8"), "console.log('synced');");
+  } finally {
+    server.close();
+  }
+});
+
+test("webgui-sync: a backup cleanup failure after a successful swap still reports success, with a warning logged", async (t) => {
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.on("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  bundleRequests = [];
+
+  // pre-existing bundle, so the swap has an old backup dir to clean up
+  fs.writeFileSync(path.join(webguiStaticPath, "index.html"), "<html>bundle before this sync</html>");
+
+  const warn = t.mock.method(console, "warn");
+  const realRm = fsp.rm;
+  t.mock.method(fsp, "rm", (target, options) => {
+    if (typeof target === "string" && target.includes(".swap-backup-")) {
+      return Promise.reject(new Error("simulated backup cleanup failure"));
+    }
+    return realRm(target, options);
+  });
+
+  try {
+    const loginRes = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=siteadmin&password=correct-horse-battery-staple",
+      redirect: "manual",
+    });
+    const siteAdminCookie = extractCookie(loginRes);
+
+    const insert = db
+      .prepare("INSERT INTO servers (slug, name, instance_name, dcs_install_path) VALUES (?, ?, ?, ?)")
+      .run("backup-cleanup-fail", "Backup Cleanup Fail Server", "Example_BackupCleanupFail", GOOD_INSTALL_PATH);
+    const serverId = insert.lastInsertRowid;
+
+    const syncRes = await postAndFollowFlash(`${base}/admin/servers/webgui-sync/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: `server_id=${serverId}`,
+    });
+    const syncHtml = await syncRes.text();
+    assert.match(syncHtml, /Synced webgui-static/, "a backup cleanup failure must not make an already-successful swap look like a failed sync");
+    assert.equal(
+      fs.readFileSync(path.join(webguiStaticPath, "index.html"), "utf8"),
+      "<html>synced dcs webgui</html>",
+      "the new bundle must still be in place, regardless of the backup cleanup outcome"
+    );
+    assert.ok(
+      warn.mock.calls.some((call) => String(call.arguments[0]).includes("Could not remove the old backup directory")),
+      "the cleanup failure must still be logged, just not surfaced as a failed sync"
+    );
   } finally {
     server.close();
   }

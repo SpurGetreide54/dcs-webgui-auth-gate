@@ -621,24 +621,13 @@ serversRouter.post("/webgui-sync/confirm", express.urlencoded({ extended: false 
   // webgui-static/ at all, then swap via two fast same-filesystem renames
   // see docs/Why.md#why-must-the-webgui-sync-scratch-directory-be-a-sibling-of-webguiroot
   const tmpDir = `${webguiRoot}.sync-tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const hadExisting = fsSync.existsSync(webguiRoot);
-  const backupDir = `${webguiRoot}.sync-backup-${Date.now()}`;
 
   try {
     const bundleRes = await fetchWebguiBundle(server.dcs_install_path);
     await fs.mkdir(tmpDir, { recursive: true });
     await pipeline(Readable.fromWeb(bundleRes.body), tar.x({ cwd: tmpDir }));
     await fs.access(path.join(tmpDir, "index.html"));
-
-    if (hadExisting) await fs.rename(webguiRoot, backupDir);
-    try {
-      await fs.rename(tmpDir, webguiRoot);
-    } catch (renameErr) {
-      // the rename into place failed, put the old bundle back
-      if (hadExisting) await fs.rename(backupDir, webguiRoot);
-      throw renameErr;
-    }
-    if (hadExisting) await fs.rm(backupDir, { recursive: true, force: true });
+    await updateCheck.swapDirectoryInto(webguiRoot, tmpDir);
 
     webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
 

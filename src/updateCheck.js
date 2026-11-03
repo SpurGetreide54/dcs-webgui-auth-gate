@@ -207,27 +207,42 @@ function startHourlyCheck() {
 
 // section: staging a downloaded release into the idle slot
 
+// atomic-swap tmpDir into targetDir's place via two same-filesystem
+// renames, restoring targetDir's prior contents if the swap fails;
+// shared by server.js's webgui-sync and stageAuthGateSlot below
+async function swapDirectoryInto(targetDir, tmpDir) {
+  const hadExisting = fs.existsSync(targetDir);
+  const backupDir = `${targetDir}.swap-backup-${Date.now()}`;
+  if (hadExisting) await fsp.rename(targetDir, backupDir);
+  try {
+    await fsp.rename(tmpDir, targetDir);
+  } catch (renameErr) {
+    // the rename into place failed, put the old contents back
+    if (hadExisting) await fsp.rename(backupDir, targetDir);
+    throw renameErr;
+  }
+  if (!hadExisting) return;
+  // the swap itself already succeeded; a failure removing the now-
+  // unused backup is a disk-space nitpick, not a reason to report the
+  // whole operation as failed
+  // see docs/Why.md#why-does-a-failed-backup-cleanup-not-fail-the-swap
+  try {
+    await fsp.rm(backupDir, { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`Could not remove the old backup directory ${backupDir}: ${err.message}`);
+  }
+}
+
 // extract into a scratch dir then atomic-rename into place, same
 // proven shape as server.js's webgui-sync, so a bad download or a
 // mid-extract failure never leaves the idle slot half-written
 async function stageAuthGateSlot(archivePath, slotDir) {
   const tmpDir = `${slotDir}.update-tmp-${Date.now()}`;
-  const hadExisting = fs.existsSync(slotDir);
-  const backupDir = `${slotDir}.update-backup-${Date.now()}`;
   try {
     await fsp.mkdir(tmpDir, { recursive: true });
     await tar.x({ file: archivePath, cwd: tmpDir });
     await fsp.access(path.join(tmpDir, "package.json"));
-
-    if (hadExisting) await fsp.rename(slotDir, backupDir);
-    try {
-      await fsp.rename(tmpDir, slotDir);
-    } catch (renameErr) {
-      // the rename into place failed, put the old slot back
-      if (hadExisting) await fsp.rename(backupDir, slotDir);
-      throw renameErr;
-    }
-    if (hadExisting) await fsp.rm(backupDir, { recursive: true, force: true });
+    await swapDirectoryInto(slotDir, tmpDir);
   } catch (err) {
     await fsp.rm(tmpDir, { recursive: true, force: true });
     throw err;
@@ -396,4 +411,5 @@ module.exports = {
   recordUpdateTriggered,
   getUpdateCooldownUntil,
   isUpdateInFlight,
+  swapDirectoryInto,
 };
