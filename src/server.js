@@ -9,7 +9,6 @@ const fsSync = require("node:fs");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const tar = require("tar");
-const util = require("node:util");
 const db = require("./db");
 const auth = require("./auth");
 const serversDb = require("./servers");
@@ -25,6 +24,8 @@ const settings = require("./settings");
 const appLog = require("./appLog");
 const flash = require("./flash");
 const stateDir = require("./stateDir");
+const { INSTANCE_NAME_RE, asyncHandler, errorHandler, logFatalAndExit } = require("./common");
+const { COOKIE_SECURE } = flash;
 
 appLog.installConsoleCapture();
 
@@ -39,8 +40,6 @@ if (stateDir.deprecatedVarsSet.length > 0) {
 
 const PORT = Number(process.env.PORT || 3000);
 const MAX_MISSION_BYTES = Number(process.env.MAX_MISSION_BYTES || 200 * 1024 * 1024);
-// default true, disable only for local http dev
-const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
 
 const app = express();
 // drop the x-powered-by header, no need to advertise the framework
@@ -55,13 +54,6 @@ app.use("/assets", express.static(path.join(__dirname, "..", "public"), { maxAge
 // answers the browser's own /favicon.ico fallback request, so a page
 // with no <link rel="icon"> of its own (the real dcs webgui) doesn't 404
 app.get("/favicon.ico", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "logo.png")));
-
-// express 4 can't catch a rejected promise on its own, so every async
-// handler below is wrapped in this to forward the rejection to next()
-// see docs/Why.md#why-does-every-async-handler-need-asynchandler
-function asyncHandler(fn) {
-  return (req, res, next) => fn(req, res, next).catch(next);
-}
 
 // how many admin accounts exist, used to gate /setup
 function adminCount() {
@@ -410,10 +402,6 @@ app.use("/admin/accounts", accountsRouter);
 // section: server management, site admins only
 
 const SLUG_RE = /^[a-z0-9-]+$/;
-// must match the real windows dcs instance folder name under saved
-// games, dots are normal, only a string of dots alone is rejected,
-// kept in sync with agent.js's own copy of this pattern
-const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
 const DEFAULT_INSTANCE_NAME = "DCS.dcs_serverrelease";
 const INSTANCE_NAME_HELP = "DCS instance name must be letters, numbers, underscores, dots, and hyphens only (not dots alone).";
 
@@ -1231,31 +1219,9 @@ app.use("/s/:slug", requireServerAccess(), express.static(webguiRoot, { index: f
 
 app.use((req, res) => res.status(404).send("Not found."));
 
-// catches whatever asyncHandler forwarded, or any other next(err) call;
 // must be registered last, after every route and the 404 above
 // see docs/Why.md#why-does-every-async-handler-need-asynchandler
-app.use((err, req, res, next) => {
-  console.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err.message}`);
-  if (res.headersSent) return res.end();
-  res.status(500).send("Internal server error.");
-});
-
-// logs a crash that reached neither asyncHandler nor the error
-// middleware above, then exits; no graceful close attempted
-// see docs/Why.md#why-does-the-crash-handler-exit-immediately-with-no-graceful-close
-function logFatalAndExit(kind, reasonOrError) {
-  const err = reasonOrError instanceof Error ? reasonOrError : null;
-  console.error(`Fatal ${kind}: ${err ? err.message : util.inspect(reasonOrError)}`);
-  console.debug(
-    `Fatal ${kind} detail: ${util.inspect({
-      stack: err ? err.stack : util.inspect(reasonOrError),
-      uptime: process.uptime(),
-      memoryUsage: process.memoryUsage(),
-      version: process.version,
-    })}`
-  );
-  process.exit(1);
-}
+app.use(errorHandler);
 
 // start every listener this app owns, and wire up a graceful shutdown
 function start() {

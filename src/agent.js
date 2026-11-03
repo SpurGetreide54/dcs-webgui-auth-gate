@@ -15,6 +15,7 @@ const { createProxyMiddleware } = require("http-proxy-middleware");
 const tar = require("tar");
 const archiver = require("archiver");
 const { isVersionGreater } = require("./versionCompare");
+const { INSTANCE_NAME_RE, asyncHandler, errorHandler, logFatalAndExit } = require("./common");
 
 // __AGENT_VERSION__ is baked in at build time by build-agent-exe.sh's
 // esbuild --define; unbundled (tests, local dev under node) falls
@@ -86,11 +87,6 @@ if (!SAVED_GAMES_ROOT) {
   process.exit(1);
 }
 
-// admin-typed dcs instance folder name under saved games, dots are
-// normal in real instance names, only a string of dots alone is
-// rejected, kept in sync with server.js's own copy of this pattern
-const INSTANCE_NAME_RE = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
-
 // turn an instance name into its real directory, or null if unsafe
 function resolveInstanceDir(instanceName) {
   // a non-string would coerce through the regex test below, then
@@ -129,13 +125,6 @@ async function readWebguiPort(instanceDir) {
 const app = express();
 // drop the x-powered-by header, no need to advertise the framework
 app.disable("x-powered-by");
-
-// express 4 can't catch a rejected promise on its own, so every async
-// handler below is wrapped in this to forward the rejection to next()
-// see docs/Why.md#why-does-every-async-handler-need-asynchandler
-function asyncHandler(fn) {
-  return (req, res, next) => fn(req, res, next).catch(next);
-}
 
 // express middleware: require a valid bearer token on every request
 function checkToken(req, res, next) {
@@ -764,31 +753,9 @@ app.get("/logs", checkToken, asyncHandler(async (req, res) => {
 // anything not matched above is a plain 404
 app.use((req, res) => res.status(404).send("Not found."));
 
-// catches whatever asyncHandler forwarded, or any other next(err) call;
 // must be registered last, after every route and the 404 above
 // see docs/Why.md#why-does-every-async-handler-need-asynchandler
-app.use((err, req, res, next) => {
-  console.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err.message}`);
-  if (res.headersSent) return res.end();
-  res.status(500).send("Internal server error.");
-});
-
-// logs a crash that reached neither asyncHandler nor the error
-// middleware above, then exits; no graceful close attempted
-// see docs/Why.md#why-does-the-crash-handler-exit-immediately-with-no-graceful-close
-function logFatalAndExit(kind, reasonOrError) {
-  const err = reasonOrError instanceof Error ? reasonOrError : null;
-  console.error(`Fatal ${kind}: ${err ? err.message : util.inspect(reasonOrError)}`);
-  console.debug(
-    `Fatal ${kind} detail: ${util.inspect({
-      stack: err ? err.stack : util.inspect(reasonOrError),
-      uptime: process.uptime(),
-      memoryUsage: process.memoryUsage(),
-      version: process.version,
-    })}`
-  );
-  process.exit(1);
-}
+app.use(errorHandler);
 
 // only listen when run directly, tests import the app instead
 // see docs/Why.md#why-doesnt-the-control-port-proxy-handle-websocket-upgrades

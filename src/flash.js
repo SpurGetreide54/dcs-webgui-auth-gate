@@ -2,8 +2,8 @@
 // redirect after writing and the following get still shows the result
 // see docs/Why.md#why-is-the-flash-cookie-a-plain-unsigned-cookie
 const FLASH_COOKIE = "dcs_flash";
-// default true, disable only for local http dev, mirrors the same
-// flag in server.js's own setSessionCookie
+// default true, disable only for local http dev; server.js reuses
+// this same export for its own session cookie
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== "false";
 // keeps the encoded cookie well under the browser's ~4KB cap even
 // with multibyte text, see docs/Why.md#why-does-the-flash-cookie-cap-error-and-notice-length
@@ -60,5 +60,5 @@ function readFlash(req, res) {
   return flash;
 }
 
-// expose both functions to callers
-module.exports = { setFlash, readFlash };
+// expose both functions, plus the cookie-security flag server.js reuses
+module.exports = { setFlash, readFlash, COOKIE_SECURE };
