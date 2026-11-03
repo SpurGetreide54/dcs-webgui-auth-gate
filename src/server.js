@@ -1096,7 +1096,10 @@ const webguiRoot = stateDir.WEBGUI_STATIC_PATH;
 // see docs/Why.md#why-does-the-bootstrap-injection-match-the-script-tag-with-a-regex
 const APP_JS_SCRIPT_RE = /<script\s+src=["']?js\/app\.js["']?\s*>\s*<\/script>/;
 
-// read index.html and warn (never throw) if it's missing or unexpected
+// read index.html, returning null (with a console.warn) only when
+// it's simply missing; any other read error (permissions, wrong
+// type) is thrown, left for each caller to handle on its own
+// see docs/Why.md#why-does-loadwebguiindextemplate-throw-on-anything-but-a-missing-file
 function loadWebguiIndexTemplate(root) {
   let template;
   try {
@@ -1122,7 +1125,16 @@ function loadWebguiIndexTemplate(root) {
   return template;
 }
 
-let webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
+// an unreadable (not just missing) index.html must not crash-loop the
+// whole service at startup, see docs/Why.md#why-does-loadwebguiindextemplate-throw-on-anything-but-a-missing-file
+let webguiIndexTemplate;
+let webguiIndexTemplateStartupError = null;
+try {
+  webguiIndexTemplate = loadWebguiIndexTemplate(webguiRoot);
+} catch (err) {
+  webguiIndexTemplateStartupError = err;
+  console.warn(`webgui-static/index.html could not be read at startup (${err.message}); /s/<slug>/ will return 503 until this is fixed.`);
+}
 
 app.get("/s/:slug/", requireServerAccess(), (req, res) => {
   // a bare /s/<slug> still matches this route, but the browser's
@@ -1132,7 +1144,11 @@ app.get("/s/:slug/", requireServerAccess(), (req, res) => {
     return res.redirect(302, `${req.path}/${req.url.slice(req.path.length)}`);
   }
   if (!webguiIndexTemplate) {
-    return res.status(503).send("The DCS webgui bundle is not installed on this server yet.");
+    return res.status(503).send(
+      webguiIndexTemplateStartupError
+        ? `The DCS webgui bundle could not be read (${webguiIndexTemplateStartupError.message}).`
+        : "The DCS webgui bundle is not installed on this server yet."
+    );
   }
   const token = controlTokens.mint(req.admin.id, req.dcsServer.id, auth.hashToken(req.cookies[auth.SESSION_COOKIE]));
   const bootstrap = `<script>

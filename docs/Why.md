@@ -1671,6 +1671,25 @@ row, updated on every successful toggle and restored wholesale (not
 cell-by-cell) on a failed one, keeps the popup's view consistent with
 the server across any number of opens within the same page load.
 
+## Why does loadWebguiIndexTemplate throw on anything but a missing file?
+
+Its own comment used to say it would "warn (never throw)", but the
+body already threw on any non-`ENOENT` read error (a permission
+problem, or `webgui-static/` itself being a file, not a
+directory).<br>It's called from two places with very different
+needs: once unguarded at module load, and once inside the webgui-sync
+reload path's own try/catch, which depends on the throw to show its
+distinct "Synced, but could not reload index.html" flash instead of a
+silent false success. Making the function itself never throw would
+have fixed the startup crash-loop at the cost of silently breaking
+that already-shipped reload-failure distinction. The real fix leaves
+the function's throw behavior exactly as it already was — only its
+comment was wrong — and wraps just the one caller that needed it: the
+startup call now catches the error, keeps `webguiIndexTemplate` null,
+and remembers the error so `/s/<slug>/`'s 503 can distinguish "not
+installed yet" from "couldn't be read" instead of always showing the
+former.
+
 ## Why does webgui-sync/confirm guard against a concurrent sync?
 
 `swapDirectoryInto` does an `existsSync`/`rename`/`rename` sequence
