@@ -75,9 +75,9 @@ for every field it can be pre-seeded with, and
    [FAQ](FAQ.md) for the active-slot pointer specifically.
 
    This value must also match the hardcoded `STATE_FILE`/`LOG_FILE`
-   paths in `scripts/systemd/dcs-webgui-auth-gate-rollback.service`
+   paths in `scripts/systemd/dcs-webgui-auth-gate-rollback.sh`
    exactly (`<AUTH_GATE_STATE_DIR>/active-slot` and
-   `<AUTH_GATE_STATE_DIR>/auth-gate.log`). That unit runs as root,
+   `<AUTH_GATE_STATE_DIR>/auth-gate.log`). That script runs as root,
    separately from the main service, and cannot read `.env`.
 
    (The older `WEBGUI_STATIC_PATH`/`ACTIVE_SLOT_PATH`/
@@ -100,8 +100,13 @@ for every field it can be pre-seeded with, and
    you skip it.
 
 3. Copy `launcher.js` to the top level. It is not part of either
-   slot. Install both unit files:
+   slot. The rollback unit's own logic lives in a sibling
+   `scripts/systemd/dcs-webgui-auth-gate-rollback.sh`, also not part
+   of either slot, which its `ExecStart=` just invokes, so copy that
+   there too before installing the unit files:
    ```
+   sudo mkdir -p scripts/systemd
+   sudo cp releases/a/scripts/systemd/dcs-webgui-auth-gate-rollback.sh scripts/systemd/
    sudo cp scripts/systemd/dcs-webgui-auth-gate.service scripts/systemd/dcs-webgui-auth-gate-rollback.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now dcs-webgui-auth-gate

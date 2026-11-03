@@ -41,6 +41,7 @@ ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 SERVICE_UNIT_NAME="dcs-webgui-auth-gate"
 SERVICE_UNIT_PATH="/etc/systemd/system/$SERVICE_UNIT_NAME.service"
 ROLLBACK_UNIT_PATH="/etc/systemd/system/$SERVICE_UNIT_NAME-rollback.service"
+ROLLBACK_SCRIPT_NAME="$SERVICE_UNIT_NAME-rollback.sh"
 
 # section: hardcoded defaults, overridden below by a flag, an existing
 # deployed unit (install dir, service account), or an existing .env
@@ -333,9 +334,15 @@ sed \
   -e "s#^StandardOutput=append:.*#StandardOutput=append:$NATIVE_CRASH_LOG_PATH#" \
   -e "s#^StandardError=append:.*#StandardError=append:$NATIVE_CRASH_LOG_PATH#" \
   "$SCRIPT_DIR/../systemd/$SERVICE_UNIT_NAME.service" > "$SERVICE_UNIT_PATH"
+ROLLBACK_SCRIPT_PATH="$INSTALL_DIR/scripts/systemd/$ROLLBACK_SCRIPT_NAME"
+mkdir -p "$(dirname "$ROLLBACK_SCRIPT_PATH")"
 sed \
   -e "s#STATE_FILE=$INSTALL_DIR_DEFAULT/active-slot#STATE_FILE=$ACTIVE_SLOT_PATH#" \
   -e "s#LOG_FILE=$INSTALL_DIR_DEFAULT/auth-gate.log#LOG_FILE=$AUTH_GATE_LOG_PATH#" \
+  "$SCRIPT_DIR/../systemd/$ROLLBACK_SCRIPT_NAME" > "$ROLLBACK_SCRIPT_PATH"
+chmod 755 "$ROLLBACK_SCRIPT_PATH"
+sed \
+  -e "s#^ExecStart=.*#ExecStart=/bin/sh $ROLLBACK_SCRIPT_PATH#" \
   "$SCRIPT_DIR/../systemd/$SERVICE_UNIT_NAME-rollback.service" > "$ROLLBACK_UNIT_PATH"
 systemctl daemon-reload
 systemctl enable "$SERVICE_UNIT_NAME"

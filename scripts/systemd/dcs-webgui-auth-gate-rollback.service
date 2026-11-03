@@ -11,21 +11,6 @@ Description=Roll dcs-webgui-auth-gate back to its other A/B slot after repeated 
 
 [Service]
 Type=oneshot
-# log_file/state_file are hardcoded, not read from .env
-# see docs/Why.md#why-does-the-rollback-unit-hardcode-its-own-paths
-# every %s is doubled to %%s
-# see docs/Why.md#why-is-every-percent-s-doubled-in-this-execstart
-# reset-failed clears the start-limit hit that triggered this rollback,
-# or the start below is refused too
-# see docs/Why.md#why-does-the-rollback-unit-call-reset-failed-before-start
-ExecStart=/bin/sh -c '\
-  STATE_FILE=/var/www/dcs-webgui-auth-gate/active-slot; \
-  LOG_FILE=/var/www/dcs-webgui-auth-gate/auth-gate.log; \
-  CURRENT=$(cat "$STATE_FILE" 2>/dev/null || echo a); \
-  if [ "$CURRENT" = "a" ]; then NEW=b; else NEW=a; fi; \
-  printf %%s "$NEW" > "$STATE_FILE"; \
-  echo "Rolled back: active-slot $CURRENT -> $NEW"; \
-  printf "{\"t\":\"%%s\",\"level\":\"warn\",\"msg\":\"Rolled back: active-slot %%s -> %%s\"}\n" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000Z)" "$CURRENT" "$NEW" >> "$LOG_FILE"; \
-  systemctl reset-failed dcs-webgui-auth-gate; \
-  systemctl start dcs-webgui-auth-gate \
-'
+# the actual logic lives in the sibling .sh file, not inline here
+# see docs/Why.md#why-is-the-rollback-logic-a-separate-sh-file-not-inline-in-execstart
+ExecStart=/bin/sh /var/www/dcs-webgui-auth-gate/scripts/systemd/dcs-webgui-auth-gate-rollback.sh

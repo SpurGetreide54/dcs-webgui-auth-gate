@@ -1173,18 +1173,25 @@ leave the service down right when the rollback is supposed to bring it
 back.<br>Confirmed with a throwaway `systemd --user` unit: the refusal
 and the `reset-failed` fix both reproduce exactly as described.
 
-## Why is every %s doubled in this ExecStart?
+## Why is the rollback logic a separate .sh file, not inline in ExecStart?
 
-Systemd expands a bare `%` as its own unit-file specifier syntax
-*before* the shell ever sees the line (a bare `%s` alone means "the
-invoking user's default shell"), not just inside the shell's own
-`printf`.<br>Confirmed the hard way in production: a bare `%s` here
-silently turned `printf %s "$NEW"` into `printf /usr/bin/bash
-"$NEW"`, writing the literal text `/usr/bin/bash` into `active-slot`
-instead of `"a"`/`"b"`, corrupting the one thing this unit exists to
-fix, the first time it ever actually fired.<br>`%%` is the escape for
-a literal `%` in any `ExecStart=` line, same as it would be for `%i`,
-`%n`, or any other specifier.
+An inline `ExecStart=/bin/sh -c '...'` line is parsed twice over:
+systemd's own unit-file specifier syntax expands a bare `%` *before*
+the shell ever sees the line, and systemd's own `ExecStart=` value
+escaping consumes backslash sequences like `\"` meant for the inner
+shell's `printf`, before the shell gets to interpret them
+itself.<br>Both bit in production: the specifier expansion once
+silently turned `printf %s "$NEW"` into `printf /usr/bin/bash "$NEW"`,
+writing the literal text `/usr/bin/bash` into `active-slot` instead of
+`"a"`/`"b"`; separately, the `\"` consumption broke the JSON log
+line's own quoting, which (reproduced on a throwaway, non-root unit)
+made POSIX `printf` recycle its now-truncated format string once per
+leftover word, producing repeated garbled output instead of one
+well-formed line.<br>Moving the logic into its own `.sh` file that
+`ExecStart=` merely invokes removes both parsers from the picture at
+once: systemd treats the `ExecStart=` value as a plain command line,
+not a string it escapes or expands, so the script's own `%s` and `\"`
+are exactly what the shell sees.
 
 ## Why does DcsSavedGamesRoot default to the installing user?
 
