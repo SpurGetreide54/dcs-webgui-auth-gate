@@ -182,24 +182,35 @@ app.post("/invite/:token", express.urlencoded({ extended: false }), (req, res) =
     return res.redirect(`/invite/${req.params.token}`);
   }
 
+  // the insert, the grant copy, and the invite deletion all succeed or
+  // all roll back together, so a failure partway through never leaves
+  // a half-created account behind
   let info;
   try {
-    info = db
-      .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
-      .run(username, auth.hashPassword(password), invite.can_manage_accounts);
+    info = db.transaction(() => {
+      const inserted = db
+        .prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
+        .run(username, auth.hashPassword(password), invite.can_manage_accounts);
+      for (const grant of invitesDb.getInviteAccess(invite.id)) {
+        serversDb.setAccess(inserted.lastInsertRowid, grant.server_id, {
+          canUploadMissions: grant.can_upload_missions,
+          canViewMissions: grant.can_view_missions,
+          canDownloadMissions: grant.can_download_missions,
+          canDeleteMissions: grant.can_delete_missions,
+        });
+      }
+      invitesDb.deleteInvite(invite.id);
+      return inserted;
+    })();
   } catch (err) {
-    flash.setFlash(res, { error: "That username is already taken." });
+    if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      flash.setFlash(res, { error: "That username is already taken." });
+    } else {
+      console.error(err);
+      flash.setFlash(res, { error: "Could not create the account. Try again." });
+    }
     return res.redirect(`/invite/${req.params.token}`);
   }
-  for (const grant of invitesDb.getInviteAccess(invite.id)) {
-    serversDb.setAccess(info.lastInsertRowid, grant.server_id, {
-      canUploadMissions: grant.can_upload_missions,
-      canViewMissions: grant.can_view_missions,
-      canDownloadMissions: grant.can_download_missions,
-      canDeleteMissions: grant.can_delete_missions,
-    });
-  }
-  invitesDb.deleteInvite(invite.id);
 
   const token = auth.createSession(info.lastInsertRowid);
   setSessionCookie(res, token);
@@ -351,7 +362,12 @@ accountsRouter.post("/", auth.requireAccountManager, express.urlencoded({ extend
     db.prepare("INSERT INTO admins (username, password_hash, can_manage_accounts) VALUES (?, ?, ?)")
       .run(username, auth.hashPassword(password), can_manage_accounts ? 1 : 0);
   } catch (err) {
-    flash.setFlash(res, { error: "That username is already taken." });
+    if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      flash.setFlash(res, { error: "That username is already taken." });
+    } else {
+      console.error(err);
+      flash.setFlash(res, { error: "Could not create the account. Try again." });
+    }
     return res.redirect("/admin/accounts");
   }
   // starts with no server permissions, granted afterward from the

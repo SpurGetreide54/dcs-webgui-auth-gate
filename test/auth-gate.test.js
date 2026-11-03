@@ -1138,6 +1138,43 @@ test("full flow: setup, login, dashboard filtering, accounts, proxy, missions, l
     const reuseTokenRes = await fetch(`${base}/invite/${redeemToken}`);
     assert.equal(reuseTokenRes.status, 404, "a consumed invite token must not be redeemable again");
 
+    // invite redemption is one transaction: a failure copying the
+    // invite's own grants must roll back the admin row it just inserted
+    const rollbackInviteRes = await postAndFollowFlash(`${base}/admin/accounts/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: siteAdminCookie },
+      body: "",
+    });
+    const rollbackToken = (await rollbackInviteRes.text()).match(/\/invite\/([0-9a-f]{64})/)[1];
+    const rollbackInviteId = db.prepare("SELECT id FROM invites WHERE token_prefix = ?").get(rollbackToken.slice(0, 6)).id;
+    const grantForRollbackRes = await fetch(`${base}/admin/accounts/invites/${rollbackInviteId}/permissions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: siteAdminCookie },
+      body: JSON.stringify({ server_id: trainingServerId, permission: "access", granted: true }),
+    });
+    assert.equal(grantForRollbackRes.status, 200);
+
+    const setAccessMock = t.mock.method(serversDb, "setAccess", () => {
+      throw new Error("simulated failure copying an invite's grants");
+    });
+    const rollbackRedeemRes = await fetch(`${base}/invite/${rollbackToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=rollback-invitee&password=rollback-long-password&confirm_password=rollback-long-password",
+      redirect: "manual",
+    });
+    setAccessMock.mock.restore();
+    assert.equal(rollbackRedeemRes.status, 302, "a failed redemption still redirects back to the invite page");
+    assert.equal(
+      db.prepare("SELECT * FROM admins WHERE username = 'rollback-invitee'").get(),
+      undefined,
+      "a failure copying grants must roll back the admin row the same transaction inserted"
+    );
+    assert.ok(
+      db.prepare("SELECT * FROM invites WHERE id = ?").get(rollbackInviteId),
+      "a failed redemption must not consume the invite"
+    );
+
     // an unknown/expired token also 404s with the expired-invite page
     const bogusTokenRes = await fetch(`${base}/invite/${"0".repeat(64)}`);
     assert.equal(bogusTokenRes.status, 404);
