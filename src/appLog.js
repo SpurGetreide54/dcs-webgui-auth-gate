@@ -92,5 +92,29 @@ function readRecentEntries(maxLines) {
   return lines.map(parseLogLine);
 }
 
+// read back only the last maxBytes of the log file, parsed; used by a
+// poller that just needs to scan for a marker, not the whole file
+// see docs/Why.md#why-does-checkrollback-read-a-byte-tail-instead-of-readrecententries
+function readTailEntries(maxBytes) {
+  let fd;
+  try {
+    fd = fs.openSync(LOG_PATH, "r");
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const start = Math.max(0, size - maxBytes);
+    const buf = Buffer.alloc(size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
+    const lines = buf.toString("utf8").split("\n").filter(Boolean);
+    // a read starting mid-file may begin inside a line; drop it
+    return (start > 0 ? lines.slice(1) : lines).map(parseLogLine);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 // expose the path and all public functions to callers
-module.exports = { LOG_PATH, installConsoleCapture, readRecentEntries, parseLogLine };
+module.exports = { LOG_PATH, installConsoleCapture, readRecentEntries, readTailEntries, parseLogLine };

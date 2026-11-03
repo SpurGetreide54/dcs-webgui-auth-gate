@@ -14,7 +14,7 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 // failing", overridable from /admin/settings
 const DEFAULT_STALE_MULTIPLIER = 3;
 const PING_TIMEOUT_MS = 5 * 1000;
-const ROLLBACK_LOG_SCAN_LINES = 1000;
+const ROLLBACK_LOG_SCAN_BYTES = 256 * 1024;
 
 // the rollback unit's own exact log line, see
 // scripts/systemd/dcs-webgui-auth-gate-rollback.service
@@ -61,7 +61,7 @@ async function checkMissionAgent() {
 // any seen/dismissed flags already set on it) untouched
 function checkRollback() {
   const matches = appLog
-    .readRecentEntries(ROLLBACK_LOG_SCAN_LINES)
+    .readTailEntries(ROLLBACK_LOG_SCAN_BYTES)
     .filter((e) => typeof e.msg === "string" && e.msg.includes(ROLLBACK_LOG_MARKER));
   if (matches.length === 0) return;
   const latestTimestamp = matches[matches.length - 1].t;

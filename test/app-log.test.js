@@ -101,6 +101,42 @@ test("readRecentEntries returns an empty list when the log file doesn't exist ye
   assert.deepEqual(freshAppLog.readRecentEntries(10), []);
 });
 
+test("readTailEntries returns only the lines inside the byte budget, most recent last, with no broken partial line at the front", () => {
+  fs.rmSync(logPath, { force: true });
+  const lines = [];
+  for (let i = 0; i < 20; i++) {
+    // zero-padded so every line is the same byte length, making the
+    // byte budget below land predictably
+    lines.push(JSON.stringify({ t: "2026-01-01T00:00:00.000Z", level: "log", msg: `line ${String(i).padStart(2, "0")}` }));
+  }
+  fs.writeFileSync(logPath, lines.join("\n") + "\n");
+
+  // a budget that covers a handful of lines but starts the read
+  // partway through an earlier one, not on a line boundary
+  const lineBytes = Buffer.byteLength(lines[0] + "\n");
+  const entries = appLog.readTailEntries(lineBytes * 3 + Math.floor(lineBytes / 2));
+
+  assert.deepEqual(
+    entries.map((e) => e.msg),
+    ["line 17", "line 18", "line 19"]
+  );
+  for (const entry of entries) assert.equal(entry.level, "log", "no broken partial-line entry should survive the tail read");
+});
+
+test("readTailEntries returns an empty list when the log file doesn't exist yet", () => {
+  const missingPath = tempLogPath("missing-tail");
+  const previous = process.env.AUTH_GATE_LOG_PATH;
+  process.env.AUTH_GATE_LOG_PATH = missingPath;
+  delete require.cache[require.resolve("../src/appLog")];
+  delete require.cache[require.resolve("../src/stateDir")];
+  const freshAppLog = require("../src/appLog");
+  process.env.AUTH_GATE_LOG_PATH = previous;
+  delete require.cache[require.resolve("../src/appLog")];
+  delete require.cache[require.resolve("../src/stateDir")];
+
+  assert.deepEqual(freshAppLog.readTailEntries(1024), []);
+});
+
 test("exceeding the size cap rotates the current file to .1 and starts fresh", () => {
   fs.rmSync(logPath, { force: true });
   fs.rmSync(`${logPath}.1`, { force: true });

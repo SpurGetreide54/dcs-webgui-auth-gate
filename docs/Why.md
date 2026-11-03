@@ -1670,3 +1670,16 @@ mismatched from the server. Keeping one persistent `state` object per
 row, updated on every successful toggle and restored wholesale (not
 cell-by-cell) on a failed one, keeps the popup's view consistent with
 the server across any number of opens within the same page load.
+
+## Why does checkRollback read a byte tail instead of readRecentEntries?
+
+`readRecentEntries` reads the whole log file (up to the 5 MB rotation
+cap) just to return its last N lines, which is fine for `/admin/logs`
+loaded on admin demand.<br>`checkRollback` instead polls every 5
+minutes looking for one fixed marker, so the same whole-file read
+turned into a recurring cost with no benefit: `readTailEntries` seeks
+to the last 256 KB of the file and reads only that, comfortably
+covering well over 1000 typical log lines without ever reading the
+full file. `/admin/logs` keeps `readRecentEntries` as-is — a byte
+budget would blur its "exact last N lines" guarantee for a page that
+was never the cost problem in the first place.
