@@ -495,11 +495,12 @@ persisted trust file (`agent-key-state.json`, seeded from the same
 `keyRotationConstants.js` placeholder keys db.js seeds `key_state`
 from) and replays whatever rotation history the gate posts to
 `/self-update/key-state` (see "Why does relayAgentUpdate post the
-key-state history instead of heading it?" below) through the same
-`verifyKeyState` logic `keyRotation.js` uses -- the agent can't require
-that module directly, since it pulls in `db.js`'s native sqlite, wrong
-for a standalone Windows exe.<br>Once the trust file reflects any
-relayed rotations,
+key-state history instead of heading it?" below) through
+`keyRotationVerify.js`'s `verifyKeyState`, the same side-effect-free
+module `keyRotation.js` itself requires -- the agent can't require
+`keyRotation.js` directly, since it pulls in `db.js`'s native sqlite,
+wrong for a standalone Windows exe.<br>Once the trust file reflects
+any relayed rotations,
 `/self-update/stage` verifies `X-Manifest-Signed`/`X-Manifest-Signature`
 against the (possibly just-updated) trusted primary key, then checks
 the uploaded bytes' own hash against that signed manifest's `"agent"`

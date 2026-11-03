@@ -564,10 +564,12 @@ app.get("/dcs-install/webgui-bundle", checkToken, asyncHandler(async (req, res) 
 // relayed through the auth-gate since this host has no internet access
 // see docs/Why.md#why-does-the-auth-gate-relay-the-agents-update
 
-// ported, not required, from keyRotation.js/keyRotationConstants.js --
-// keyRotation.js pulls in db.js's native sqlite, wrong for this
-// standalone exe, see docs/Why.md#why-does-the-agent-verify-the-staged-builds-signature-itself
-const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT, keyStateMessage } = require("./keyRotationConstants");
+// keyRotationConstants.js and keyRotationVerify.js are both
+// side-effect-free, unlike keyRotation.js itself, which pulls in
+// db.js's native sqlite, wrong for this standalone exe, see
+// docs/Why.md#why-does-the-agent-verify-the-staged-builds-signature-itself
+const { PRIMARY_PUBLIC_KEY_PEM, SECONDARY_PUBLIC_KEY_PEM, INITIAL_KEY_ROTATED_AT } = require("./keyRotationConstants");
+const { verifyKeyState } = require("./keyRotationVerify");
 
 // pinned next to agent-token.txt, same stable-across-slots reasoning
 // as resolveAgentToken's own token file, above
@@ -599,36 +601,6 @@ function loadOrSeedKeyState() {
 // loaded once at startup, same pattern as AGENT_TOKEN above, mutated
 // in place and persisted whenever a relayed rotation record verifies
 let agentKeyState = loadOrSeedKeyState();
-
-// true only if every one of a rotation record's checks pass -- ported
-// verbatim from keyRotation.js's own verifyKeyState
-function verifyKeyState(record, currentState) {
-  try {
-    // branch: an unrecognized slot name
-    if (record.rotated_slot !== "primary" && record.rotated_slot !== "secondary") return false;
-    if (!Array.isArray(record.signatures) || record.signatures.length !== 2) return false;
-
-    const message = keyStateMessage(record);
-
-    // the new key proving it holds the private half it claims to
-    const newPublicKey = crypto.createPublicKey(record.new_public_key_pem);
-    const selfSignatureOk = crypto.verify(null, message, newPublicKey, Buffer.from(record.signatures[0], "hex"));
-
-    // the slot NOT being rotated is the one that actually authorizes this
-    const survivingSlot = record.rotated_slot === "primary" ? "secondary" : "primary";
-    const survivingPublicKey = crypto.createPublicKey(currentState[`${survivingSlot}_public_key_pem`]);
-    const vouchSignatureOk = crypto.verify(null, message, survivingPublicKey, Buffer.from(record.signatures[1], "hex"));
-
-    // rejects an attacker replaying an old, previously-valid record
-    const currentRotatedAt = currentState[`${record.rotated_slot}_rotated_at`];
-    const isNewer = new Date(record.rotated_at).getTime() > new Date(currentRotatedAt).getTime();
-
-    return selfSignatureOk && vouchSignatureOk && isNewer;
-  } catch {
-    // any malformed field (bad pem, bad hex, bad date) is a rejection
-    return false;
-  }
-}
 
 // replay the gate-relayed rotation history into the trust state,
 // same skip-older-than-trusted logic keyRotation.js's own checkKeyState
