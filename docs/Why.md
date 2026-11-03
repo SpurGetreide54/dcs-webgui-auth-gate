@@ -1671,6 +1671,25 @@ row, updated on every successful toggle and restored wholesale (not
 cell-by-cell) on a failed one, keeps the popup's view consistent with
 the server across any number of opens within the same page load.
 
+## Why does the rollback script validate active-slot and refuse a symlinked log?
+
+The rollback unit runs as root against two files the service account
+owns.<br>Before this fix it read `active-slot` with no validation and
+wrote both files with `>`/`>>`, which follow a symlink straight
+through to its target. A compromised service account could point
+`auth-gate.log` at a root-owned path and inject arbitrary text into
+`active-slot` to have it appended as root on the next automatic
+rollback. The fix narrows `active-slot`'s value to `a`/`b` (anything
+else maps to `a`, the same tolerant default `readActiveSlot` already
+used), writes it through a tmp-file-plus-rename (`rename(2)` replaces
+a symlink's own directory entry instead of following it, unlike `>`),
+and refuses the log append outright when the log path is a symlink.
+The log-append check is still a check-then-write race in POSIX `sh` —
+no atomic "append if not a symlink" exists — so it narrows the window
+rather than closing it; closing it fully would mean moving off a
+plain log file, which `checkRollback`'s own marker scan still depends
+on, a larger redesign kept out of this fix's scope.
+
 ## Why does checkRollback read a byte tail instead of readRecentEntries?
 
 `readRecentEntries` reads the whole log file (up to the 5 MB rotation

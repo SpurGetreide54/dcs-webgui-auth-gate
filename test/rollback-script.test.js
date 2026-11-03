@@ -50,3 +50,58 @@ test("the extracted rollback script defaults to slot a when no state file exists
     fs.rmSync(scratchDir, { recursive: true, force: true });
   }
 });
+
+test("garbage state-file content is treated as slot a and never reaches the new state file or the log line", () => {
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "rollback-script-test-"));
+  try {
+    const stateFile = path.join(scratchDir, "active-slot");
+    const logFile = path.join(scratchDir, "auth-gate.log");
+    fs.writeFileSync(stateFile, "x\n* * * * * root /tmp/evil.sh #");
+
+    runRollbackScript({ ROLLBACK_STATE_FILE_OVERRIDE: stateFile, ROLLBACK_LOG_FILE_OVERRIDE: logFile });
+
+    assert.equal(fs.readFileSync(stateFile, "utf8"), "b", "garbage must map to slot a, which then flips to b");
+    const logContents = fs.readFileSync(logFile, "utf8");
+    assert.doesNotMatch(logContents, /evil\.sh|cron/, "the garbage content must never reach the log line");
+    assert.match(JSON.parse(logContents.trim()).msg, /active-slot a -> b/);
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  }
+});
+
+test("a state file that is a symlink is replaced by a plain file, leaving the symlink's original target untouched", () => {
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "rollback-script-test-"));
+  try {
+    const stateFile = path.join(scratchDir, "active-slot");
+    const logFile = path.join(scratchDir, "auth-gate.log");
+    const symlinkTarget = path.join(scratchDir, "some-other-root-file");
+    fs.writeFileSync(symlinkTarget, "untouched");
+    fs.symlinkSync(symlinkTarget, stateFile);
+
+    runRollbackScript({ ROLLBACK_STATE_FILE_OVERRIDE: stateFile, ROLLBACK_LOG_FILE_OVERRIDE: logFile });
+
+    assert.equal(fs.lstatSync(stateFile).isSymbolicLink(), false, "the state path must be a plain file afterward, not still a symlink");
+    assert.equal(fs.readFileSync(stateFile, "utf8"), "b");
+    assert.equal(fs.readFileSync(symlinkTarget, "utf8"), "untouched", "the original symlink target must be untouched");
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  }
+});
+
+test("a log file that is a symlink is left alone: the append is refused and the symlink's target is untouched", () => {
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "rollback-script-test-"));
+  try {
+    const stateFile = path.join(scratchDir, "active-slot");
+    const logFile = path.join(scratchDir, "auth-gate.log");
+    const symlinkTarget = path.join(scratchDir, "some-other-root-file");
+    fs.writeFileSync(symlinkTarget, "untouched");
+    fs.symlinkSync(symlinkTarget, logFile);
+    fs.writeFileSync(stateFile, "a");
+
+    runRollbackScript({ ROLLBACK_STATE_FILE_OVERRIDE: stateFile, ROLLBACK_LOG_FILE_OVERRIDE: logFile });
+
+    assert.equal(fs.readFileSync(symlinkTarget, "utf8"), "untouched", "a symlinked log file must never be appended through");
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  }
+});
