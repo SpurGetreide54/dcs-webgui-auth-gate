@@ -751,3 +751,33 @@ test("relayAgentUpdate forwards the key-state rotation history when one has been
   assert.ok(captured.request, "the dummy agent must have received a /self-update/stage request");
   assert.deepEqual(captured.keyState, { history: records });
 });
+
+test("relayAgentUpdate treats a 409 from /self-update/stage as the agent already having this build, and returns without retrying commit", async () => {
+  serveNoKeyStateHistory();
+  let commitCalled = false;
+  dummyAgentRespond = (req, res) => {
+    if (req.url === "/self-update/stage") {
+      req.on("data", () => {});
+      return req.on("end", () => sendJson(res, 409, "Offered version 1.2.3 is not newer than the current 1.2.3, refusing to stage."));
+    }
+    if (req.url === "/self-update/commit") {
+      commitCalled = true;
+      return sendJson(res, 200, { ok: true, activeSlot: "b" });
+    }
+    res.writeHead(404).end();
+  };
+
+  const archivePath = path.join(os.tmpdir(), `relay-test-${crypto.randomBytes(6).toString("hex")}.bin`);
+  fs.writeFileSync(archivePath, Buffer.from("already-applied agent exe bytes"));
+  const manifest = {
+    version: "1.2.3",
+    downloads: [{ artifact: "agent", url: "https://example.test/agent.exe", sha256: "f".repeat(64) }],
+    signature: "ef".repeat(32),
+  };
+  try {
+    await assert.doesNotReject(() => updateCheck.relayAgentUpdate(archivePath, manifest));
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+  }
+  assert.equal(commitCalled, false, "a 409 from stage must skip commit, not retry it against a slot the already-committed agent has nothing staged in");
+});

@@ -464,7 +464,25 @@ the same shape `src/keyRotationVerify.js` later followed for the
 key-rotation trust check.<br>No rollback flag exists to bypass this
 either: the A/B slot
 flip is the sole sanctioned way back to an older build, matching the
-gate's own downgrade guard, which has no override either.
+gate's own downgrade guard, which has no override either.<br>The
+rejection itself answers with 409, not 400; see "Why does staging an
+already-current version return 409 instead of 400?" below for why.
+
+## Why does staging an already-current version return 409 instead of 400?
+
+`applyUpdate()` commits the agent's new build (via `relayAgentUpdate`)
+before flipping the gate's own active-slot file.<br>If anything
+between those two steps throws, the agent is already on the new
+version but the gate hasn't flipped yet, so a retry re-stages the same
+manifest and hits the version check above -- which, from the agent's
+own already-current perspective, isn't a caller mistake the way a bad
+signature or a wrong sha256 is.<br>409 (Conflict) lets
+`relayAgentUpdate` tell the two cases apart: on 409 it logs and
+returns early, skipping `/self-update/commit` too (the already-
+committed agent has nothing staged in the slot a retried commit would
+look at), so `applyUpdate` reaches the gate's own slot flip instead of
+aborting again on an update that, as far as the agent is concerned,
+already happened.
 
 ## Why is the agent relay timeout only 60 seconds?
 

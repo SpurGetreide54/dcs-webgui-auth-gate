@@ -681,9 +681,10 @@ app.post("/self-update/stage", checkToken, selfUpdateUpload, asyncHandler(async 
 
   // the gate's own downgrade guard protects only callers that go
   // through it; a validly signed old manifest must still be rejected
-  // here, see docs/Why.md#why-does-the-agent-also-check-the-offered-version-at-self-updatestage
+  // here, with 409 (not 400) marking it a stale conflict, not a mistake
+  // see docs/Why.md#why-does-the-agent-also-check-the-offered-version-at-self-updatestage
   if (!isVersionGreater(signed.version, AGENT_VERSION)) {
-    return res.status(400).send(`Offered version ${signed.version} is not newer than the current ${AGENT_VERSION}, refusing to stage.`);
+    return res.status(409).send(`Offered version ${signed.version} is not newer than the current ${AGENT_VERSION}, refusing to stage.`);
   }
 
   const idleSlot = otherAgentSlot(readActiveAgentSlot());

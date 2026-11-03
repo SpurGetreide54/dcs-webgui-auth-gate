@@ -116,7 +116,7 @@ test("stage rejects a manifest signed with a key other than the trusted primary"
   assert.equal(res.status, 400);
 });
 
-test("stage rejects a manifest whose version is not strictly newer than the agent's own, even with a valid signature and sha256", async () => {
+test("stage rejects a manifest whose version is not strictly newer than the agent's own with 409, not 400, even with a valid signature and sha256", async () => {
   const currentVersion = require("../package.json").version;
   const body = Buffer.from("fake exe bytes");
   const equalRes = await fetch(`${base}/self-update/stage`, {
@@ -124,14 +124,14 @@ test("stage rejects a manifest whose version is not strictly newer than the agen
     headers: authHeaders({ "Content-Type": "application/octet-stream", ...manifestHeadersFor(body, currentVersion) }),
     body,
   });
-  assert.equal(equalRes.status, 400);
+  assert.equal(equalRes.status, 409, "a not-newer version is a conflict (already applied), not a caller mistake");
 
   const lowerRes = await fetch(`${base}/self-update/stage`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/octet-stream", ...manifestHeadersFor(body, "0.0.1") }),
     body,
   });
-  assert.equal(lowerRes.status, 400);
+  assert.equal(lowerRes.status, 409);
 });
 
 // order matters, AGENT_SELF_UPDATE_ROOT is read once at module load and

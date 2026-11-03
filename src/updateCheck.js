@@ -297,6 +297,14 @@ async function relayAgentUpdate(archivePath, manifest) {
     headers,
     body: fileBuffer,
   });
+  // a retry after a half-done update (agent committed, gate's own
+  // slot flip never ran): the agent already has this build, so skip
+  // straight to the gate's own slot flip instead of failing again
+  // see docs/Why.md#why-does-staging-an-already-current-version-return-409-instead-of-400
+  if (stageRes.status === 409) {
+    console.debug("Update: agent already has this build, skipping stage/commit.");
+    return;
+  }
   if (!stageRes.ok) throw new Error(`Agent rejected the staged update: ${await stageRes.text().catch(() => stageRes.status)}`);
   console.debug("Update: agent build staged, committing...");
 
