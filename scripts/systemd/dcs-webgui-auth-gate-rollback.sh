@@ -30,7 +30,8 @@ mv "$TMP_STATE_FILE" "$STATE_FILE"
 echo "Rolled back: active-slot $CURRENT -> $NEW"
 
 # `>>` would follow a symlink and write through it as root; refusing
-# narrows that window but can't close it outright, see docs/Why.md above
+# narrows that window but can't close it outright
+# see docs/Why.md#why-does-the-rollback-script-validate-active-slot-and-refuse-a-symlinked-log
 if [ -L "$LOG_FILE" ]; then
   echo "Refusing to append to $LOG_FILE: it is a symlink" >&2
 else
