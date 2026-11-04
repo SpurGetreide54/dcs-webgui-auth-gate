@@ -107,9 +107,7 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 # Program Files otherwise inherits Users:read-execute, letting any
 # local account read agent-token.txt; NSSM runs this service as
-# LocalSystem (never set via ObjectName below), so SYSTEM plus
-# Administrators is enough. Well-known SIDs (not the English names),
-# so this works on any locale.
+# LocalSystem, so SYSTEM plus Administrators (locale-proof SIDs) is enough
 icacls $InstallDir /inheritance:r | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls /inheritance:r failed on $InstallDir (exit $LASTEXITCODE)." }
 icacls $InstallDir /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null
