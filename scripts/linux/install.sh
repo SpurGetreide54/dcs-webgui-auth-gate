@@ -334,10 +334,9 @@ sed \
   -e "s#^StandardOutput=append:.*#StandardOutput=append:$NATIVE_CRASH_LOG_PATH#" \
   -e "s#^StandardError=append:.*#StandardError=append:$NATIVE_CRASH_LOG_PATH#" \
   "$SCRIPT_DIR/../systemd/$SERVICE_UNIT_NAME.service" > "$SERVICE_UNIT_PATH"
-# root-owned, outside $INSTALL_DIR entirely: $AUTH_GATE_STATE_DIR
-# (and $INSTALL_DIR by default) is chowned to the service account
-# below, so a copy installed inside it could be replaced by that
-# account to hijack the root-run OnFailure= rollback
+# root-owned, outside $INSTALL_DIR entirely: a copy inside the
+# service-chowned install dir could be swapped by that account to
+# hijack the root-run OnFailure= rollback
 # see docs/Why.md#why-does-the-rollback-script-install-outside-install_dir
 ROLLBACK_SCRIPT_DIR="/usr/local/lib/$SERVICE_UNIT_NAME"
 ROLLBACK_SCRIPT_PATH="$ROLLBACK_SCRIPT_DIR/$ROLLBACK_SCRIPT_NAME"
