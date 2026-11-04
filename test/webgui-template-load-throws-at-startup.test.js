@@ -19,10 +19,9 @@ function extractCookie(res) {
 }
 
 test("a webgui-static that is a plain file (ENOTDIR), not a missing directory, doesn't crash startup, and /s/<slug>/ 503s with the read-error message", async () => {
-  // webgui-static itself being a plain file is a portable stand-in for
-  // an unreadable index.html: readFileSync(path.join(root, "index.html"))
-  // throws ENOTDIR either way, with no dependence on running as root
-  // (which would otherwise bypass a plain chmod-000 permission test)
+  // a plain file is a portable stand-in for an unreadable index.html:
+  // readFileSync throws ENOTDIR either way, with no dependence on
+  // running as root, unlike a chmod-000 permission test
   const webguiStaticPath = path.join(os.tmpdir(), `webgui-template-enotdir-${crypto.randomBytes(6).toString("hex")}`);
   fs.writeFileSync(webguiStaticPath, "not a directory");
 
