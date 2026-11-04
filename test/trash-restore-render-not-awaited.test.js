@@ -59,12 +59,10 @@ test.after(async () => {
   for (const suffix of ["", ".1"]) fs.rmSync(authGateLogPath + suffix, { force: true });
 });
 
-// requireServerAccess's own permission check goes through hasPermission,
-// which calls servers.js's local getAccess directly, not through this
-// exported reference, so mocking serversDb.getAccess only ever intercepts
-// the one call that matters here: loadMissionAccess's, deep inside the
-// final, previously-unawaited renderMissionsPage -- a stand-in for a
-// transient SQLITE_BUSY-class failure hitting that one query
+// mocks serversDb.getAccess so the one call inside the final,
+// previously-unawaited renderMissionsPage throws like a transient
+// SQLITE_BUSY failure
+// see docs/Why.md#why-does-the-trashrestore-render-not-awaited-test-mock-serversdbgetaccess-instead-of-closing-the-database
 function throwOnNextGetAccess(t) {
   t.mock.method(serversDb, "getAccess", () => {
     throw new Error("simulated SQLITE_BUSY");

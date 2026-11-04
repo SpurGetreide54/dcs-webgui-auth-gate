@@ -1755,3 +1755,19 @@ covering well over 1000 typical log lines without ever reading the
 full file. `/admin/logs` keeps `readRecentEntries` as-is — a byte
 budget would blur its "exact last N lines" guarantee for a page that
 was never the cost problem in the first place.
+
+## Why does the trash/restore render-not-awaited test mock serversDb.getAccess instead of closing the database?
+
+The first draft closed the test's own sqlite connection right before
+firing the trash/restore request, mirroring a `SQLITE_BUSY`-class
+failure.<br>That hits the wrong code: `requireServerAccess` runs its
+own synchronous db read first, through `hasPermission`, so a closed
+connection throws there and never reaches the final, previously-
+unawaited `renderMissionsPage` this test is actually about.
+`hasPermission` also calls `servers.js`'s local `getAccess` function
+directly, not through the exported `serversDb.getAccess` reference,
+so mocking that reference leaves `requireServerAccess`'s own check
+untouched and only intercepts the one call that does go through it:
+`loadMissionAccess`'s, deep inside the unawaited render. Throwing
+there on the mock's first call reaches exactly the line this fix
+changed.
