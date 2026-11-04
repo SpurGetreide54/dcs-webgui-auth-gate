@@ -100,13 +100,18 @@ for every field it can be pre-seeded with, and
    you skip it.
 
 3. Copy `launcher.js` to the top level. It is not part of either
-   slot. The rollback unit's own logic lives in a sibling
-   `scripts/systemd/dcs-webgui-auth-gate-rollback.sh`, also not part
-   of either slot, which its `ExecStart=` just invokes, so copy that
-   there too before installing the unit files:
+   slot. The rollback unit's own logic lives outside `AUTH_GATE_STATE_DIR`
+   entirely, in a root-owned directory the service account can't touch —
+   see [Why.md](Why.md#why-does-the-rollback-script-install-outside-install_dir) —
+   which its `ExecStart=` just invokes, so copy it there too before
+   installing the unit files, rewriting `ExecStart=` to match:
    ```
+   sudo mkdir -p /usr/local/lib/dcs-webgui-auth-gate
+   sudo cp releases/a/scripts/systemd/dcs-webgui-auth-gate-rollback.sh /usr/local/lib/dcs-webgui-auth-gate/
    sudo mkdir -p scripts/systemd
-   sudo cp releases/a/scripts/systemd/dcs-webgui-auth-gate-rollback.sh scripts/systemd/
+   sudo cp releases/a/scripts/systemd/dcs-webgui-auth-gate.service releases/a/scripts/systemd/dcs-webgui-auth-gate-rollback.service scripts/systemd/
+   sudo sed -i 's#^ExecStart=.*#ExecStart=/bin/sh /usr/local/lib/dcs-webgui-auth-gate/dcs-webgui-auth-gate-rollback.sh#' \
+     scripts/systemd/dcs-webgui-auth-gate-rollback.service
    sudo cp scripts/systemd/dcs-webgui-auth-gate.service scripts/systemd/dcs-webgui-auth-gate-rollback.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now dcs-webgui-auth-gate
